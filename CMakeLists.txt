@@ -34,7 +34,9 @@ if (UNIX AND NOT APPLE)
 
 endif()
 
-add_executable(${PROJECT_NAME} srcs/main.cpp)
+file(GLOB ENGINE_SRC "engine/srcs/*.cpp")
+
+add_executable(${PROJECT_NAME} srcs/main.cpp ${ENGINE_SRC}) 
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -42,7 +44,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 add_dependencies(${PROJECT_NAME} glfw)
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/glfw/include ${PROJECT_SOURCE_DIR}/glfw/deps)
+target_include_directories(${PROJECT_NAME} PRIVATE 
+    ${PROJECT_SOURCE_DIR}/glfw/include ${PROJECT_SOURCE_DIR}/glfw/deps 
+    ${PROJECT_SOURCE_DIR}/engine/includes
+    ${PROJECT_SOURCE_DIR}/includes)
 
 if (UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME} ${X11_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} ${OPENGL_LIBRARIES})
