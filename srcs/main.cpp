@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/04/21 19:30:12 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/04/23 21:37:03 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -15,22 +15,21 @@
 #include <stdio.h>
 
 #include "Engine.hpp"
-#include "vertex.h"
+#include "vertex.hpp"
 
-static const Vertex vertices[3] =
-{
-    { { -0.6f, -0.4f }, { 1.f, 0.f, 0.f } },
-    { {  0.6f, -0.4f }, { 0.f, 1.f, 0.f } },
-    { {   0.f,  0.6f }, { 0.f, 0.f, 1.f } }
-};
- 
+#define GLAD_GL_IMPLEMENTATION
+#include "glad/gl.h"
+
 static void error_callback(int error, const char* description)
 {
+    (void)error;
     fprintf(stderr, "Error: %s\n", description);
 }
  
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+    (void)scancode;
+    (void)mods;
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
@@ -38,7 +37,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 int main(void)
 {
 
-    Engine *engine = Engine::initEngine(800, 600, "Hello World");
+    Engine *engine = Engine::initEngine(800, 600, "Hello World", false);
     if (!engine)
     {
         return (EXIT_FAILURE);

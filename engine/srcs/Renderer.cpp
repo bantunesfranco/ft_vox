@@ -1,10 +1,18 @@
-#include "Renderer.hpp"
+
 #include <iostream>
 #include <fstream>
-#include "vertex.h"
+#include "Engine.hpp"
+#include "vertex.hpp"
 
+#include "glad/gl.h"
 
-Engine::Renderer::Renderer(Engine* engine)
+static void framebuffer_callback(GLFWwindow *window, int width, int height)
+{
+	(void)window;
+	glViewport(0, 0, width, height);
+}
+
+Renderer::Renderer(Engine* engine)
 {
 	this->_vao = 0;
 	this->_vbo = 0;
@@ -14,9 +22,6 @@ Engine::Renderer::Renderer(Engine* engine)
 	glfwSetFramebufferSizeCallback(engine->window, framebuffer_callback);
 	glfwSetWindowUserPointer(engine->window, engine);
 	glfwSwapInterval(1);
-
-	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
-		throw Engine::EngineException(VOX_GLADFAIL);
 
 	GLint fshader = 0;
 	GLint vshader = 0;
@@ -29,7 +34,7 @@ Engine::Renderer::Renderer(Engine* engine)
 	code = loadShaderCode(VSHADER_PATH);
 	fshader = compileShader(FSHADER_PATH, GL_FRAGMENT_SHADER);
 	if (!fshader)
-		throw Engine::EngineException(VOX_FRAGFAIL);this->
+		throw Engine::EngineException(VOX_FRAGFAIL);
 
 	this->_shaderprog = glCreateProgram();
 	if (!this->_shaderprog)
@@ -57,67 +62,61 @@ Engine::Renderer::Renderer(Engine* engine)
 	initBuffers();
 }
 
-Engine::Renderer::~Renderer()
+Renderer::~Renderer()
 {
 	glDeleteProgram(this->_shaderprog);
-	glDeleteBuffers(1, &this->_vbo);
-	glDeleteVertexArrays(1, &this->_vao);
+	glDeleteBuffers(1, &(this->_vbo));
+	glDeleteVertexArrays(1, &(this->_vao));
 }
 
-static void framebuffer_callback(GLFWwindow *window, int width, int height)
-{
-	(void)window;
-	glViewport(0, 0, width, height);
-}
-
-void	Engine::Renderer::initBuffers()
+void	Renderer::initBuffers()
 {
 	glActiveTexture(GL_TEXTURE0);
-	glGenVertexArrays(1, &_vao);
-	glGenBuffers(1, &_vbo);
-	glBindVertexArray(_vao);
-	glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+	glGenVertexArrays(1, &this->_vao);
+	glGenBuffers(1, &this->_vbo);
+	glBindVertexArray(this->_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, this->_vbo);
 
 	// Vertex XYZ coordinates
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex_t), NULL);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), NULL);
 	glEnableVertexAttribArray(0);
 
 	// UV Coordinates
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex_t), (void *)(sizeof(float) * 3));
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(sizeof(float) * 3));
 	glEnableVertexAttribArray(1);
 
 	// Texture index
-	glVertexAttribIPointer(2, 1, GL_BYTE, sizeof(vertex_t), (void *)(sizeof(float) * 5));
+	glVertexAttribIPointer(2, 1, GL_BYTE, sizeof(Vertex), (void *)(sizeof(float) * 5));
 	glEnableVertexAttribArray(2);
 
 	glEnable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture0"), 0);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture1"), 1);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture2"), 2);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture3"), 3);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture4"), 4);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture5"), 5);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture6"), 6);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture7"), 7);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture8"), 8);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture9"), 9);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture10"), 10);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture11"), 11);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture12"), 12);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture13"), 13);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture14"), 14);
-	glUniform1i(glGetUniformLocation(this->_shaderprog, "Texture15"), 15);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture0"), 0);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture1"), 1);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture2"), 2);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture3"), 3);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture4"), 4);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture5"), 5);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture6"), 6);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture7"), 7);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture8"), 8);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture9"), 9);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture10"), 10);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture11"), 11);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture12"), 12);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture13"), 13);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture14"), 14);
+	glUniform1i(glGetUniformLocation(_shaderprog, "Texture15"), 15);
 }
 
-GLuint Engine::Renderer::compileShader(const char* code, int32_t type)
+uint32_t Renderer::compileShader(const char* code, int32_t type)
 {
 	int32_t success;
 	char infolog[512] = {0};
 
-	GLuint shader = glCreateShader(type);
+	uint32_t shader = glCreateShader(type);
 	if (!code || !shader)
 		return (0);
 
@@ -134,13 +133,13 @@ GLuint Engine::Renderer::compileShader(const char* code, int32_t type)
 	return (shader);
 }
 
-const char* Engine::Renderer::loadShaderCode(const char* path)
+const char* Renderer::loadShaderCode(const char* path)
 {
 	std::ifstream file(path);
 	if (!file.is_open())
 		return (nullptr);
 
-	const char* code;
+	char* code = nullptr;
 	file.get(code, file.gcount());
 	file.close();
 

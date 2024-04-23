@@ -1,4 +1,4 @@
-#include "../includes/Engine.hpp"
+#include "Engine.hpp"
 
 static const char*	vox_errors[VOX_ERRMAX] = {
 	"No Errors",
@@ -30,5 +30,9 @@ const char* Engine::vox_strerror(vox_errno_t val)
 Engine::EngineException::EngineException(vox_errno_t err)
 {
 	vox_errno = err;
-	return vox_strerror(err);
+}
+
+const char* Engine::EngineException::what() const noexcept
+{
+	return (vox_strerror(vox_errno));
 }

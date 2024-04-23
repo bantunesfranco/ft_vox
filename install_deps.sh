@@ -1,5 +1,17 @@
 #!/bin/bash
 
+TAG_NAME="3.4"
+
+# Check if glfw repository exists	
+if [ ! -f "glfw" ]; then
+    echo "Cloning glfw repository..."
+    git clone https://github.com/glfw/glfw.git glfw
+    cd glfw
+    git checkout tags/$TAG_NAME > /dev/null 2>&1 
+    cd ..
+fi
+
+
 # List of packages
 packages=(
     "libx11-dev"
