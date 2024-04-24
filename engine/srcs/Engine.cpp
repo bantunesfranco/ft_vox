@@ -42,7 +42,7 @@ void	Engine::setSetting(int32_t setting, bool value)
 	this->_settings[setting] = value;
 }
 
-void Engine::initWindow(int32_t width, int32_t height, const char* title, bool resize)
+void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool resize)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -62,7 +62,6 @@ void Engine::initWindow(int32_t width, int32_t height, const char* title, bool r
 		this->terminateEngine();
 		throw EngineException(VOX_WINFAIL);
 	}
-
 }
 
 Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, bool resize)
@@ -76,7 +75,7 @@ Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, boo
 	try
 	{
 		_instance = new Engine();
-		_instance->initWindow(width, height, title, resize);
+		_instance->_initWindow(width, height, title, resize);
 		_instance->renderer =  new Renderer(_instance);
 	}
 	catch (const std::exception &e)

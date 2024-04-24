@@ -7,6 +7,7 @@
 
 #include "defines.hpp"
 #include <cstring>
+#include <string>
 
 class Engine;
 
@@ -17,9 +18,9 @@ class Renderer
 		uint32_t	_vbo;
 		uint32_t	_shaderprog;
 
-		const char*	loadShaderCode(const char* path);
-		uint32_t		compileShader(const char* code, int32_t type);
-		void		initBuffers();
+		void				loadShaderCode(const char* path, char* code);
+		uint32_t			compileShader(const char* code, int32_t type);
+		void				initBuffers();
 
 	public:
 		Renderer(Engine* engine);

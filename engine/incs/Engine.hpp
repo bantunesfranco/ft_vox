@@ -32,11 +32,11 @@ class Engine
 		int32_t				_height;
 		int32_t				_settings[VOX_SETTINGS_MAX];
 
-		void				initWindow(int32_t width, int32_t height, const char* title, bool resize);
+		void				_initWindow(int32_t width, int32_t height, const char* title, bool resize);
 
 	public:
 		~Engine() = default;
-	
+
 		class EngineException : public std::exception
 		{
 			public:

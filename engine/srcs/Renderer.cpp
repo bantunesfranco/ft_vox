@@ -1,10 +1,74 @@
 
 #include <iostream>
 #include <fstream>
+#include <string>
 #include "Engine.hpp"
 #include "vertex.hpp"
 
+#define GLAD_GL_IMPLEMENTATION
 #include "glad/gl.h"
+
+static const char *vshader_src = "#version 330 core\n"
+"in vec3 ourColor;\n"
+"in vec2 TexCoord;\n"
+"out vec4 FragColor;\n"
+"uniform sampler2D ourTexture;\n"
+"uniform bool useTexture;\n"
+"void main()\n"
+"{\n"
+"    if (useTexture) {\n"
+"        FragColor = texture(ourTexture, TexCoord);\n"
+"    } else {\n"
+"        FragColor = vec4(ourColor, 1.0);\n"
+"    }\n"
+"}\n";
+
+static const char* fshader_src = "#version 330 core\n"
+"in vec2 TexCoord;\n"
+"flat in int TexIndex;\n"
+"in vec3 vCol;\n"
+"out vec4 FragColor;\n"
+"uniform bool useTexture;\n"
+"uniform sampler2D Texture0;\n"
+"uniform sampler2D Texture1;\n"
+"uniform sampler2D Texture2;\n"
+"uniform sampler2D Texture3;\n"
+"uniform sampler2D Texture4;\n"
+"uniform sampler2D Texture5;\n"
+"uniform sampler2D Texture6;\n"
+"uniform sampler2D Texture7;\n"
+"uniform sampler2D Texture8;\n"
+"uniform sampler2D Texture9;\n"
+"uniform sampler2D Texture10;\n"
+"uniform sampler2D Texture11;\n"
+"uniform sampler2D Texture12;\n"
+"uniform sampler2D Texture13;\n"
+"uniform sampler2D Texture14;\n"
+"uniform sampler2D Texture15;\n"
+"void main()\n"
+"{\n"
+"    vec4 outColor = vec4(1.0, 0.0, 0.0, 1.0);\n"
+"    switch (int(TexIndex)) {\n"
+"        case 0: outColor = texture(Texture0, TexCoord); break;\n"
+"        case 1: outColor = texture(Texture1, TexCoord); break;\n"
+"        case 2: outColor = texture(Texture2, TexCoord); break;\n"
+"        case 3: outColor = texture(Texture3, TexCoord); break;\n"
+"        case 4: outColor = texture(Texture4, TexCoord); break;\n"
+"        case 5: outColor = texture(Texture5, TexCoord); break;\n"
+"        case 6: outColor = texture(Texture6, TexCoord); break;\n"
+"        case 7: outColor = texture(Texture7, TexCoord); break;\n"
+"        case 8: outColor = texture(Texture8, TexCoord); break;\n"
+"        case 9: outColor = texture(Texture9, TexCoord); break;\n"
+"        case 10: outColor = texture(Texture10, TexCoord); break;\n"
+"        case 11: outColor = texture(Texture11, TexCoord); break;\n"
+"        case 12: outColor = texture(Texture12, TexCoord); break;\n"
+"        case 13: outColor = texture(Texture13, TexCoord); break;\n"
+"        case 14: outColor = texture(Texture14, TexCoord); break;\n"
+"        case 15: outColor = texture(Texture15, TexCoord); break;\n"
+"        default: outColor = vec4(1.0, 0.0, 0.0, 1.0); break;\n"
+"    }\n"
+"    FragColor = outColor;\n"
+"}\n";
 
 static void framebuffer_callback(GLFWwindow *window, int width, int height)
 {
@@ -23,16 +87,21 @@ Renderer::Renderer(Engine* engine)
 	glfwSetWindowUserPointer(engine->window, engine);
 	glfwSwapInterval(1);
 
+	gladLoadGL(glfwGetProcAddress);
+
 	GLint fshader = 0;
 	GLint vshader = 0;
 	
-	const char* code = loadShaderCode(FSHADER_PATH);
-	vshader = compileShader(code, GL_VERTEX_SHADER);
+	// char*	code = NULL;
+
+	// loadShaderCode(FSHADER_PATH, code);
+	vshader = compileShader(vshader_src, GL_VERTEX_SHADER);
+	std::cout << "no error" << std::endl;
 	if (!vshader)
 		throw Engine::EngineException(VOX_VERTFAIL);
 	
-	code = loadShaderCode(VSHADER_PATH);
-	fshader = compileShader(FSHADER_PATH, GL_FRAGMENT_SHADER);
+	// loadShaderCode(VSHADER_PATH, code);
+	fshader = compileShader(fshader_src, GL_FRAGMENT_SHADER);
 	if (!fshader)
 		throw Engine::EngineException(VOX_FRAGFAIL);
 
@@ -116,7 +185,8 @@ uint32_t Renderer::compileShader(const char* code, int32_t type)
 	int32_t success;
 	char infolog[512] = {0};
 
-	uint32_t shader = glCreateShader(type);
+	GLuint shader = glCreateShader(type);
+	std::cout << "lmao" << std::endl;
 	if (!code || !shader)
 		return (0);
 
@@ -126,22 +196,27 @@ uint32_t Renderer::compileShader(const char* code, int32_t type)
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 	if (!success)
 	{
-		glGetShaderInfoLog(shader, sizeof(infolog), NULL, infolog);
+		glGetShaderInfoLog(shader, sizeof(infolog), &len, infolog);
 		std::cerr << static_cast<char*>(infolog) << std::endl;
 		return (0);
 	}
 	return (shader);
 }
 
-const char* Renderer::loadShaderCode(const char* path)
+void Renderer::loadShaderCode(const char* path, char* code)
 {
 	std::ifstream file(path);
 	if (!file.is_open())
-		return (nullptr);
+		return;
 
-	char* code = nullptr;
-	file.get(code, file.gcount());
+	std::string data = "";
+	std::string buff;
+	while (!file.eof())
+	{
+		std::getline(file, buff);
+		data += buff + "\n";
+	}
 	file.close();
 
-	return (code);
+	*(&code) = const_cast<char *>(data.c_str());
 }

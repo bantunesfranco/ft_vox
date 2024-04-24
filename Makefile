@@ -10,7 +10,7 @@ NAME = ft_vox
 
 CC = g++
 CFLAGS = -Wall -Wextra -Werror -Wpedantic
-CFLAGS += -g -fsanitize=address
+# CFLAGS += -g -fsanitize=address
 
 DIR_S = srcs
 DIR_I = incs
@@ -25,7 +25,6 @@ ENGINE = engine
 SRCS += $(shell find $(ENGINE)/$(DIR_S) -name '*.cpp')
 HEADERS += $(shell find $(ENGINE)/$(DIR_I) -name '*.hpp')
 INCS += -I $(ENGINE)/$(DIR_I)
-OBJS += $(patsubst $(ENGINE)/%.s,$(DIR_O)/%.o,$(SRCS)) 
 
 GLFW = glfw
 INCS += -I $(GLFW)/include -I $(GLFW)/deps

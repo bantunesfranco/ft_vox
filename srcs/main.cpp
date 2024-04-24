@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/04/23 21:37:03 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/04/24 09:28:09 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,11 +14,11 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include <glad/gl.h>
 #include "Engine.hpp"
 #include "vertex.hpp"
 
-#define GLAD_GL_IMPLEMENTATION
-#include "glad/gl.h"
+
 
 static void error_callback(int error, const char* description)
 {
@@ -37,7 +37,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 int main(void)
 {
 
-    Engine *engine = Engine::initEngine(800, 600, "Hello World", false);
+    Engine *engine = Engine::initEngine(1440, 900, "Hello World", false);
     if (!engine)
     {
         return (EXIT_FAILURE);
