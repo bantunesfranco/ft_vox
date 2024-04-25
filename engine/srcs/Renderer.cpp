@@ -70,6 +70,27 @@ static const char* fshader_src = "#version 330 core\n"
 "    FragColor = outColor;\n"
 "}\n";
 
+// static const char* vshader_src =
+// "#version 330\n"
+// "uniform mat4 MVP;\n"
+// "in vec3 vCol;\n"
+// "in vec2 vPos;\n"
+// "out vec3 color;\n"
+// "void main()\n"
+// "{\n"
+// "    gl_Position = MVP * vec4(vPos, 0.0, 1.0);\n"
+// "    color = vCol;\n"
+// "}\n";
+ 
+// static const char* fshader_src =
+// "#version 330\n"
+// "in vec3 color;\n"
+// "out vec4 fragment;\n"
+// "void main()\n"
+// "{\n"
+// "    fragment = vec4(color, 1.0);\n"
+// "}\n";
+
 static void framebuffer_callback(GLFWwindow *window, int width, int height)
 {
 	(void)window;
@@ -82,12 +103,11 @@ Renderer::Renderer(Engine* engine)
 	this->_vbo = 0;
 	this->_shaderprog = 0;
 	
-	glfwMakeContextCurrent(engine->window);
 	glfwSetFramebufferSizeCallback(engine->window, framebuffer_callback);
 	glfwSetWindowUserPointer(engine->window, engine);
+	gladLoadGL(glfwGetProcAddress);
 	glfwSwapInterval(1);
 
-	gladLoadGL(glfwGetProcAddress);
 
 	GLint fshader = 0;
 	GLint vshader = 0;
@@ -96,7 +116,6 @@ Renderer::Renderer(Engine* engine)
 
 	// loadShaderCode(FSHADER_PATH, code);
 	vshader = compileShader(vshader_src, GL_VERTEX_SHADER);
-	std::cout << "no error" << std::endl;
 	if (!vshader)
 		throw Engine::EngineException(VOX_VERTFAIL);
 	
@@ -142,42 +161,42 @@ void	Renderer::initBuffers()
 {
 	glActiveTexture(GL_TEXTURE0);
 	glGenVertexArrays(1, &this->_vao);
-	glGenBuffers(1, &this->_vbo);
 	glBindVertexArray(this->_vao);
+	glGenBuffers(1, &this->_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, this->_vbo);
 
-	// Vertex XYZ coordinates
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), NULL);
-	glEnableVertexAttribArray(0);
+	// // Vertex XYZ coordinates
+	// glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), NULL);
+	// glEnableVertexAttribArray(0);
 
-	// UV Coordinates
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(sizeof(float) * 3));
-	glEnableVertexAttribArray(1);
+	// // UV Coordinates
+	// glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(sizeof(float) * 3));
+	// glEnableVertexAttribArray(1);
 
-	// Texture index
-	glVertexAttribIPointer(2, 1, GL_BYTE, sizeof(Vertex), (void *)(sizeof(float) * 5));
-	glEnableVertexAttribArray(2);
+	// // Texture index
+	// glVertexAttribIPointer(2, 1, GL_BYTE, sizeof(Vertex), (void *)(sizeof(float) * 5));
+	// glEnableVertexAttribArray(2);
 
 	glEnable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture0"), 0);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture1"), 1);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture2"), 2);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture3"), 3);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture4"), 4);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture5"), 5);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture6"), 6);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture7"), 7);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture8"), 8);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture9"), 9);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture10"), 10);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture11"), 11);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture12"), 12);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture13"), 13);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture14"), 14);
-	glUniform1i(glGetUniformLocation(_shaderprog, "Texture15"), 15);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture0"), 0);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture1"), 1);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture2"), 2);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture3"), 3);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture4"), 4);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture5"), 5);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture6"), 6);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture7"), 7);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture8"), 8);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture9"), 9);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture10"), 10);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture11"), 11);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture12"), 12);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture13"), 13);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture14"), 14);
+	// glUniform1i(glGetUniformLocation(_shaderprog, "Texture15"), 15);
 }
 
 uint32_t Renderer::compileShader(const char* code, int32_t type)
@@ -186,7 +205,6 @@ uint32_t Renderer::compileShader(const char* code, int32_t type)
 	char infolog[512] = {0};
 
 	GLuint shader = glCreateShader(type);
-	std::cout << "lmao" << std::endl;
 	if (!code || !shader)
 		return (0);
 
@@ -219,4 +237,46 @@ void Renderer::loadShaderCode(const char* path, char* code)
 	file.close();
 
 	*(&code) = const_cast<char *>(data.c_str());
+}
+
+void Renderer::render() {
+	// Define the vertices of the square
+	float vertices[] = {
+		-0.5f, -0.5f, 0.0f, // bottom left
+		0.5f, -0.5f, 0.0f,  // bottom right
+		0.5f, 0.5f, 0.0f,   // top right
+		-0.5f, 0.5f, 0.0f   // top left
+	};
+
+	// Define the indices of the square
+	unsigned int indices[] = {
+		0, 1, 2, // first triangle
+		2, 3, 0  // second triangle
+	};
+
+	// Bind the vertex array object
+	glBindVertexArray(this->_vao);
+
+	// Bind the vertex buffer object
+	glBindBuffer(GL_ARRAY_BUFFER, this->_vbo);
+
+	// Set the vertex data
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+	// Bind the element buffer object
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->_ebo);
+
+	// Set the element data
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+	// Set the vertex attribute pointers
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+
+	// Draw the square
+	// glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	glad_glDrawBuffer()
+
+	// Unbind the vertex array object
+	glBindVertexArray(0);
 }

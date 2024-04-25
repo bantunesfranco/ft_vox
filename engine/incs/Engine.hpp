@@ -50,7 +50,7 @@ class Engine
 	
 		static const char*	vox_strerror(vox_errno_t val);
 		static Engine*		initEngine(int32_t width, int32_t height, const char* title, bool resize);
-		// static Engine*		getInstance() { return _instance; };
+		static Engine*		getInstance() { return _instance; };
 
 	
 

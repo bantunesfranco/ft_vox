@@ -62,6 +62,7 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 		this->terminateEngine();
 		throw EngineException(VOX_WINFAIL);
 	}
+	glfwMakeContextCurrent(this->window);
 }
 
 Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, bool resize)

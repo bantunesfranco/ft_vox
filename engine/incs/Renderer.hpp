@@ -16,6 +16,7 @@ class Renderer
 	private:
 		uint32_t	_vao;
 		uint32_t	_vbo;
+		uint32_t	_ebo;
 		uint32_t	_shaderprog;
 
 		void				loadShaderCode(const char* path, char* code);
@@ -30,6 +31,8 @@ class Renderer
 	
 		void		render();
 		uint32_t	getShaderProg() { return _shaderprog; }
+		uint32_t	getVao() { return _vao; }
+		uint32_t	getVbo() { return _vbo; }
 
 };
 

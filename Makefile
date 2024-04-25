@@ -10,7 +10,7 @@ NAME = ft_vox
 
 CC = g++
 CFLAGS = -Wall -Wextra -Werror -Wpedantic
-# CFLAGS += -g -fsanitize=address
+CFLAGS += -g -fsanitize=address
 
 DIR_S = srcs
 DIR_I = incs
