@@ -1,10 +1,17 @@
 #include "Engine.hpp"
 #include <iostream>
+#include <glad/gl.h>
 
 Engine*		Engine::_instance = nullptr;
 vox_errno_t	Engine::vox_errno = VOX_SUCCESS;
 
-Engine::Engine()
+static void framebuffer_callback(GLFWwindow *window, int width, int height)
+{
+	(void)window;
+	glViewport(0, 0, width, height);
+}
+
+Engine::Engine() : window(nullptr), renderer(nullptr)
 {
 	bool init = glfwInit();
 
@@ -12,9 +19,6 @@ Engine::Engine()
 	{
 		throw EngineException(VOX_GLFWFAIL);
 	}
-
-	this->window = nullptr;
-	this->renderer = nullptr;
 	
 	for (int i = 0; i < VOX_SETTINGS_MAX; i++)
 		this->_settings[i] = false;
@@ -62,7 +66,12 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 		this->terminateEngine();
 		throw EngineException(VOX_WINFAIL);
 	}
+
 	glfwMakeContextCurrent(this->window);
+	glfwSetFramebufferSizeCallback(this->window, framebuffer_callback);
+	glfwSetWindowUserPointer(this->window, this);
+	gladLoadGL((GLADloadfunc)glfwGetProcAddress);
+	glfwSwapInterval(1);
 }
 
 Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, bool resize)
@@ -77,7 +86,8 @@ Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, boo
 	{
 		_instance = new Engine();
 		_instance->_initWindow(width, height, title, resize);
-		_instance->renderer =  new Renderer(_instance);
+		_instance->renderer =  new Renderer();
+		_instance->renderer->initBuffers();
 	}
 	catch (const std::exception &e)
 	{

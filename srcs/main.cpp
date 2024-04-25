@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/04/24 16:08:37 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/04/25 22:03:28 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -17,8 +17,7 @@
 #include <glad/gl.h>
 #include "Engine.hpp"
 #include "vertex.hpp"
-
-
+#include <iostream>
 
 static void error_callback(int error, const char* description)
 {
@@ -32,6 +31,8 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     (void)mods;
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
+    if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
+        std::cout << "Space key pressed" << std::endl;
 }
  
 int main(void)
@@ -42,13 +43,14 @@ int main(void)
     {
         return (EXIT_FAILURE);
     }
-
     glfwSetErrorCallback(error_callback);
     glfwSetKeyCallback(engine->window, key_callback);
  
     while (!glfwWindowShouldClose(engine->window))
     {
         engine->renderer->render();
+        glfwSwapBuffers(engine->window);
+        glfwPollEvents();
     }
     
     engine->terminateEngine();
