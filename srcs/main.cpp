@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/04/25 22:03:28 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/04/26 14:28:57 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -29,10 +29,19 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 {
     (void)scancode;
     (void)mods;
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
-    if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
+    (void)window;
+    if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
+        Engine::getInstance()->closeWindow();
+    if (key == VOX_KEY_SPACE && (action == VOX_PRESS || action == VOX_REPEAT))
         std::cout << "Space key pressed" << std::endl;
+    if (key == VOX_KEY_W && (action == VOX_PRESS || action == VOX_REPEAT))
+        std::cout << "W key pressed" << std::endl;
+    if (key == VOX_KEY_A && (action == VOX_PRESS || action == VOX_REPEAT))
+        std::cout << "A key pressed" << std::endl;
+    if (key == VOX_KEY_S && (action == VOX_PRESS || action == VOX_REPEAT))
+        std::cout << "S key pressed" << std::endl;
+    if (key == VOX_KEY_D && (action == VOX_PRESS || action == VOX_REPEAT))
+        std::cout << "D key pressed" << std::endl;
 }
  
 int main(void)
@@ -43,16 +52,10 @@ int main(void)
     {
         return (EXIT_FAILURE);
     }
-    glfwSetErrorCallback(error_callback);
-    glfwSetKeyCallback(engine->window, key_callback);
- 
-    while (!glfwWindowShouldClose(engine->window))
-    {
-        engine->renderer->render();
-        glfwSwapBuffers(engine->window);
-        glfwPollEvents();
-    }
-    
+
+    engine->setErrorCallback(error_callback);
+    engine->setKeyCallback(key_callback);
+    engine->run();
     engine->terminateEngine();
     delete engine;
 

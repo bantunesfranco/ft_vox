@@ -58,8 +58,10 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 	#ifdef __APPLE__
 		glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	#endif
-
 	glfwWindowHint(GLFW_RESIZABLE, resize);
+
+	this->_width = width;
+	this->_height = height;
 	this->window = glfwCreateWindow(width, height, title, this->_settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
 	if (!this->window)
 	{
@@ -68,8 +70,8 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 	}
 
 	glfwMakeContextCurrent(this->window);
+	glfwSetWindowUserPointer(this->window, (void*)this);
 	glfwSetFramebufferSizeCallback(this->window, framebuffer_callback);
-	glfwSetWindowUserPointer(this->window, this);
 	gladLoadGL((GLADloadfunc)glfwGetProcAddress);
 	glfwSwapInterval(1);
 }
@@ -93,7 +95,67 @@ Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, boo
 	{
 		std::cerr << e.what() << std::endl;
 		_instance->terminateEngine();
+		if (_instance)
+		{
+			delete _instance;
+			_instance = nullptr;
+		}
 		return nullptr;
 	}
 	return _instance;
+}
+
+void	Engine::run()
+{
+	while (!glfwWindowShouldClose(this->window))
+	{
+		this->renderer->render();
+		glfwSwapBuffers(this->window);
+		glfwPollEvents();
+	}
+}
+
+void	Engine::closeWindow()
+{
+	glfwSetWindowShouldClose(this->window, GLFW_TRUE);
+}
+
+void	Engine::setKeyCallback(GLFWkeyfun callback)
+{
+	glfwSetKeyCallback(this->window, callback);
+}
+
+void	Engine::setMouseButtonCallback(GLFWmousebuttonfun callback)
+{
+	glfwSetMouseButtonCallback(this->window, callback);
+}
+
+void	Engine::setCursorPosCallback(GLFWcursorposfun callback)
+{
+	glfwSetCursorPosCallback(this->window, callback);
+}
+
+void	Engine::setScrollCallback(GLFWscrollfun callback)
+{
+	glfwSetScrollCallback(this->window, callback);
+}
+
+void	Engine::setResizeCallback(GLFWwindowsizefun callback)
+{
+	glfwSetWindowSizeCallback(this->window, callback);
+}
+
+void	Engine::setFramebufferSizeCallback(GLFWframebuffersizefun callback)
+{
+	glfwSetFramebufferSizeCallback(this->window, callback);
+}
+
+void	Engine::setWindowCloseCallback(GLFWwindowclosefun callback)
+{
+	glfwSetWindowCloseCallback(this->window, callback);
+}
+
+void	Engine::setErrorCallback(GLFWerrorfun callback)
+{
+	glfwSetErrorCallback(callback);
 }

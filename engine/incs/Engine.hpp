@@ -52,10 +52,22 @@ class Engine
 		static Engine*		initEngine(int32_t width, int32_t height, const char* title, bool resize);
 		static Engine*		getInstance() { return _instance; };
 
-	
-
 		void				terminateEngine();
 		void 				setSetting(int32_t setting, bool value);
+
+
+		void				setKeyCallback(GLFWkeyfun callback);
+		void				setMouseButtonCallback(GLFWmousebuttonfun callback);
+		void				setCursorPosCallback(GLFWcursorposfun callback);
+		void				setScrollCallback(GLFWscrollfun callback);
+		void				setResizeCallback(GLFWwindowsizefun callback);
+		void				setFramebufferSizeCallback(GLFWframebuffersizefun callback);
+		void				setWindowCloseCallback(GLFWwindowclosefun callback);
+		void				setErrorCallback(GLFWerrorfun callback);
+
+		void 				run();
+		void				closeWindow();
+
 };
 
 
