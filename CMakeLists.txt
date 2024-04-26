@@ -46,8 +46,8 @@ add_dependencies(${PROJECT_NAME} glfw)
 
 target_include_directories(${PROJECT_NAME} PRIVATE 
     ${PROJECT_SOURCE_DIR}/glfw/include ${PROJECT_SOURCE_DIR}/glfw/deps 
-    ${PROJECT_SOURCE_DIR}/engine/includes
-    ${PROJECT_SOURCE_DIR}/includes)
+    ${PROJECT_SOURCE_DIR}/engine/incs
+    ${PROJECT_SOURCE_DIR}/incs)
 
 if (UNIX AND NOT APPLE)
     target_link_libraries(${PROJECT_NAME} ${X11_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} ${OPENGL_LIBRARIES})

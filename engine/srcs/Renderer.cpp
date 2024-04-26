@@ -5,33 +5,34 @@
 #include "Engine.hpp"
 #include "vertex.hpp"
 #include <vector>
+#include <cmath>
 
 #define GLAD_GL_IMPLEMENTATION
 #include "glad/gl.h"
 
 static const char* vshader_src =
-"#version 330 core\n"
-"layout(location = 0) in vec3 position;\n"
-"layout(location = 1) in vec3 color;\n"
-"out vec3 FragPos;\n"
-"out vec3 Color;\n"
-"uniform mat4 model;\n"
-"uniform mat4 view;\n"
-"uniform mat4 projection;\n"
-"void main() {\n"
-"    FragPos = vec3(model * vec4(position, 1.0));\n"
-"    Color = color;\n"
-"    gl_Position = projection * view * vec4(FragPos, 1.0);\n"
-"}\n";
+"#version 330 core\n\
+layout(location = 0) in vec3 position;\n\
+layout(location = 1) in vec3 color;\n\
+out vec3 FragPos;\n\
+out vec3 Color;\n\
+uniform mat4 tranform;\n\
+uniform mat4 view;\n\
+uniform mat4 projection;\n\
+void main() {\n\
+    FragPos = vec3(tranform * vec4(position, 1.0));\n\
+    Color = color;\n\
+    gl_Position = projection * view * vec4(FragPos, 1.0);\n\
+}\n";
  
 static const char* fshader_src =
-"#version 330 core\n"
-"in vec3 FragPos;\n"
-"in vec3 Color;\n"
-"out vec4 FragColor;\n"
-"void main() {\n"
-"    FragColor = vec4(Color, 1.0);\n"
-"}\n";
+"#version 330 core\n\
+in vec3 FragPos;\n\
+in vec3 color;\n\
+out vec4 FragColor;\n\
+void main() {\n\
+    FragColor = vec4(color, 1.0);\n\
+}\n";
 
 static const std::vector<Vertex> vertices =
 {
@@ -50,7 +51,7 @@ void	Renderer::initBuffers()
 	glGenBuffers(1, &this->_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, this->_vbo);
 
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, pos)); // Position
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, col)); // Color
@@ -59,14 +60,14 @@ void	Renderer::initBuffers()
 	GLint fshader = 0;
 	GLint vshader = 0;
 	
-	// char*	code = NULL;
-	// loadShaderCode(FSHADER_PATH, code);
-	vshader = compileShader(vshader_src, GL_VERTEX_SHADER);
+	char*	code = NULL;
+	loadShaderCode(FSHADER_PATH, code);
+	vshader = compileShader(code, GL_VERTEX_SHADER);
 	if (!vshader)
 		throw Engine::EngineException(VOX_VERTFAIL);
 	
-	// loadShaderCode(VSHADER_PATH, code);
-	fshader = compileShader(fshader_src, GL_FRAGMENT_SHADER);
+	loadShaderCode(VSHADER_PATH, code);
+	fshader = compileShader(code, GL_FRAGMENT_SHADER);
 	if (!fshader)
 		throw Engine::EngineException(VOX_FRAGFAIL);
 
@@ -170,5 +171,5 @@ void Renderer::initProjectionMatrix(int screenWidth, int screenHeight) {
     float nearPlane = 0.1f; // Near clipping plane
     float farPlane = 100.0f; // Far clipping plane
 
-	mat4x4_perspective(this->_projection, fov * (float)M_PI / 180.0f, aspectRatio, nearPlane, farPlane);
+	mat4x4_perspective(this->_projection, (fov * 3.141592f / 180.0f), aspectRatio, nearPlane, farPlane);
 }
