@@ -72,7 +72,7 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 	glfwMakeContextCurrent(window);
 	gladLoadGL(glfwGetProcAddress);
 	glfwSwapInterval(1);
-	// glfwSetWindowUserPointer(window, (void*)this->window);
+	glfwSetWindowUserPointer(window, (void*)this);
 	glfwSetFramebufferSizeCallback(window, framebuffer_callback);
 }
 
@@ -130,6 +130,7 @@ void	Engine::setMouseButtonCallback(GLFWmousebuttonfun callback)
 
 void	Engine::setCursorPosCallback(GLFWcursorposfun callback)
 {
+	
 	glfwSetCursorPosCallback(window, callback);
 }
 

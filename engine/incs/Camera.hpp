@@ -2,6 +2,7 @@
 #define CAMERA_HPP
 
 #include "linmath.h"
+#include "GLFW/glfw3.h"
 
 class Camera
 {
@@ -11,12 +12,14 @@ class Camera
 		Camera(const Camera& camera) = delete;
 		Camera& operator=(const Camera&);
 
-		vec3 pos;
-		vec3 front;
-		vec3 up;
+		vec3	pos;
+		vec3	dir;
+		vec3	up;
+		double	mousePos[2];
 
-		void setCameraPosition(vec3 newPos);
-		void setCameraDirection(vec3 newDir);
+
+		void setCameraPosition(const vec3& newPos);
+		void setCameraDirection(const vec3& newDir);
 };
 
 #endif
