@@ -4,107 +4,101 @@
 #include <string>
 #include "Engine.hpp"
 #include "vertex.hpp"
-#include <vector>
+#include <array>
 #include <cmath>
 
 #define GLAD_GL_IMPLEMENTATION
 #include "glad/gl.h"
 
 static const char* vshader_src =
-"#version 330 core\n\
-layout(location = 0) in vec3 position;\n\
-layout(location = 1) in vec3 color;\n\
-out vec3 FragPos;\n\
-out vec3 Color;\n\
-uniform mat4 tranform;\n\
-uniform mat4 view;\n\
-uniform mat4 projection;\n\
-void main() {\n\
-    FragPos = vec3(tranform * vec4(position, 1.0));\n\
-    Color = color;\n\
-    gl_Position = projection * view * vec4(FragPos, 1.0);\n\
-}\n";
+"#version 330\n"
+"uniform mat4 MVP;\n"
+"in vec3 vCol;\n"
+"in vec2 vPos;\n"
+"out vec3 color;\n"
+"void main()\n"
+"{\n"
+"    gl_Position = MVP * vec4(vPos, 0.0, 1.0);\n"
+"    color = vCol;\n"
+"}\n";
  
 static const char* fshader_src =
-"#version 330 core\n\
-in vec3 FragPos;\n\
-in vec3 color;\n\
-out vec4 FragColor;\n\
-void main() {\n\
-    FragColor = vec4(color, 1.0);\n\
-}\n";
+"#version 330\n"
+"in vec3 color;\n"
+"out vec4 fragment;\n"
+"void main()\n"
+"{\n"
+"    fragment = vec4(color, 1.0);\n"
+"}\n";
 
-static const std::vector<Vertex> vertices =
+static const Vertex vertices[4] =
 {
-    { { -0.6f, -0.4f, 0.0f }, { 1.f, 0.f, 0.f } },
-    { {  0.6f, -0.4f, 0.0f }, { 0.f, 1.f, 0.f } },
-    { {   0.f,  0.6f, 0.0f }, { 0.f, 0.f, 1.f } }
+    { { -0.6f, -0.4f}, { 1.f, 0.f, 0.f } },
+    { {  0.6f, -0.4f}, { 0.f, 1.f, 0.f } },
+    { {   -0.4f,  0.6f}, { 0.f, 0.f, 1.f } },
+    { {   0.1f,  2.f}, { 1.f, 1.f, 1.f } },
 };
-
-Renderer::Renderer() : _vao(0), _vbo(0), _shaderprog(0) {};
 
 void	Renderer::initBuffers()
 {
-	glGenVertexArrays(1, &this->_vao);
-	glBindVertexArray(this->_vao);
+	glGenBuffers(1, &_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-	glGenBuffers(1, &this->_vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, this->_vbo);
-
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, pos)); // Position
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, col)); // Color
-	glEnableVertexAttribArray(1);
-
-	GLint fshader = 0;
-	GLint vshader = 0;
-	
-	char*	code = NULL;
-	loadShaderCode(FSHADER_PATH, code);
-	vshader = compileShader(code, GL_VERTEX_SHADER);
+	// char*	code = NULL;
+	// loadShaderCode(VSHADER_PATH, code);
+	GLint vshader = compileShader(vshader_src, GL_VERTEX_SHADER);
 	if (!vshader)
 		throw Engine::EngineException(VOX_VERTFAIL);
 	
-	loadShaderCode(VSHADER_PATH, code);
-	fshader = compileShader(code, GL_FRAGMENT_SHADER);
+	// loadShaderCode(FSHADER_PATH, code);
+	GLint fshader = compileShader(fshader_src, GL_FRAGMENT_SHADER);
 	if (!fshader)
 		throw Engine::EngineException(VOX_FRAGFAIL);
 
-	this->_shaderprog = glCreateProgram();
-	if (!this->_shaderprog)
+	_shaderprog = glCreateProgram();
+	if (!_shaderprog)
 		throw Engine::EngineException(VOX_SHDRFAIL);
 
-	glAttachShader(this->_shaderprog, vshader);
-	glAttachShader(this->_shaderprog, fshader);
-	glLinkProgram(this->_shaderprog);
+	glAttachShader(_shaderprog, vshader);
+	glAttachShader(_shaderprog, fshader);
+	glLinkProgram(_shaderprog);
 
 	glDeleteShader(vshader);
 	glDeleteShader(fshader);
 
 	GLint success;
-	glGetProgramiv(this->_shaderprog, GL_LINK_STATUS, &success);
+	glGetProgramiv(_shaderprog, GL_LINK_STATUS, &success);
 	if (!success)
 	{
 		char infolog[512] = {0};
-		glGetProgramInfoLog(this->_shaderprog, sizeof(infolog), NULL, infolog);
+		glGetProgramInfoLog(_shaderprog, sizeof(infolog), NULL, infolog);
 		std::cerr << static_cast<char*>(infolog) << std::endl;
 		throw Engine::EngineException(VOX_SHDRFAIL);
 	}
 
-	glUseProgram(this->_shaderprog);
-	glBindVertexArray(0);
-
 	GLenum error = glGetError();
 	if (error != GL_NO_ERROR)
 		std::cerr << "OpenGL error: " << error << std::endl;
+
+    const GLint vpos_location = glGetAttribLocation(_shaderprog, "vPos");
+    const GLint vcol_location = glGetAttribLocation(_shaderprog, "vCol");
+ 
+    glGenVertexArrays(1, &_vao);
+    glBindVertexArray(_vao);
+    glEnableVertexAttribArray(vpos_location);
+    glVertexAttribPointer(vpos_location, 2, GL_FLOAT, GL_FALSE,
+                          sizeof(Vertex), (void*) offsetof(Vertex, pos));
+    glEnableVertexAttribArray(vcol_location);
+    glVertexAttribPointer(vcol_location, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(Vertex), (void*) offsetof(Vertex, col));
 }
 
 Renderer::~Renderer()
 {
-	glDeleteProgram(this->_shaderprog);
-	glDeleteBuffers(1, &(this->_vbo));
-	glDeleteVertexArrays(1, &(this->_vao));
+	glDeleteProgram(_shaderprog);
+	glDeleteBuffers(1, &(_vbo));
+	glDeleteVertexArrays(1, &(_vao));
 }
 
 uint32_t Renderer::compileShader(const char* code, int32_t type)
@@ -148,28 +142,28 @@ void Renderer::loadShaderCode(const char* path, char* code)
 }
 
 void Renderer::render() {
-	glUseProgram(this->_shaderprog);
+	mat4x4 mvp;
+	GLFWwindow *window = Engine::getInstance()->window;
+	const GLint mvp_location = glGetUniformLocation(_shaderprog, "MVP");
 
-	GLint projectionLoc = glGetUniformLocation(_shaderprog, "projection");
-	glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, (const GLfloat*)this->_projection);
-
-	glBindVertexArray(this->_vao);
-	glDrawArrays(GL_TRIANGLES, 0, vertices.size());
-	glBindVertexArray(0);
-
-	glUseProgram(0);
+	initProjectionMatrix(window, &mvp);
+	glUseProgram(_shaderprog);
+	glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
+	glBindVertexArray(_vao);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
-void Renderer::setProjectionMatrix(const vec4& projection) {
-    GLint projectionLoc = glGetUniformLocation(this->_shaderprog, "projection");
-    glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, projection);
-}
+void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
+	int width, height;
+	glfwGetFramebufferSize(window, &width, &height);
+	const float ratio = width / (float) height;
 
-void Renderer::initProjectionMatrix(int screenWidth, int screenHeight) {
-    float aspectRatio = static_cast<float>(screenWidth) / static_cast<float>(screenHeight);
-    float fov = 45.0f; // Field of view
-    float nearPlane = 0.1f; // Near clipping plane
-    float farPlane = 100.0f; // Far clipping plane
+	glViewport(0, 0, width, height);
+	glClear(GL_COLOR_BUFFER_BIT);
 
-	mat4x4_perspective(this->_projection, (fov * 3.141592f / 180.0f), aspectRatio, nearPlane, farPlane);
+	mat4x4 m, p;
+	mat4x4_identity(m);
+	mat4x4_rotate_Z(m, m, (float) glfwGetTime());
+	mat4x4_ortho(p, -ratio, ratio, -1.f, 1.f, 1.f, -1.f);
+	mat4x4_mul(*mvp, p, m);
 }

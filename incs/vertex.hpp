@@ -5,7 +5,7 @@
 
 typedef struct Vertex
 {
-    vec3 pos;
+    vec2 pos;
     vec3 col;
 } Vertex;
 

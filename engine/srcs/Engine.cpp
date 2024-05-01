@@ -21,21 +21,21 @@ Engine::Engine() : window(nullptr), renderer(nullptr)
 	}
 	
 	for (int i = 0; i < VOX_SETTINGS_MAX; i++)
-		this->_settings[i] = false;
-	this->_settings[VOX_DECORATED] = true;
+		_settings[i] = false;
+	_settings[VOX_DECORATED] = true;
 }
 
 void	Engine::terminateEngine()
 {
-	if (this->window)
+	if (window)
 	{
-		glfwDestroyWindow(this->window);
-		this->window = nullptr;
+		glfwDestroyWindow(window);
+		window = nullptr;
 	}
-	if (this->renderer)
+	if (renderer)
 	{
-		delete this->renderer;
-		this->renderer = nullptr;
+		delete renderer;
+		renderer = nullptr;
 	}
 	glfwTerminate();
 }
@@ -43,16 +43,16 @@ void	Engine::terminateEngine()
 void	Engine::setSetting(int32_t setting, bool value)
 {
 	VOX_ASSERT(setting >= 0 && setting < VOX_SETTINGS_MAX, "Invalid setting");
-	this->_settings[setting] = value;
+	_settings[setting] = value;
 }
 
 void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool resize)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_MAXIMIZED, this->_settings[VOX_MAXIMIZED]);
-	glfwWindowHint(GLFW_DECORATED, this->_settings[VOX_DECORATED]);
-	glfwWindowHint(GLFW_VISIBLE, !this->_settings[VOX_HEADLESS]);
+	glfwWindowHint(GLFW_MAXIMIZED, _settings[VOX_MAXIMIZED]);
+	glfwWindowHint(GLFW_DECORATED, _settings[VOX_DECORATED]);
+	glfwWindowHint(GLFW_VISIBLE, !_settings[VOX_HEADLESS]);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 	#ifdef __APPLE__
@@ -60,27 +60,26 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 	#endif
 	glfwWindowHint(GLFW_RESIZABLE, resize);
 
-	this->_width = width;
-	this->_height = height;
-	this->window = glfwCreateWindow(width, height, title, this->_settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
-	if (!this->window)
+	_width = width;
+	_height = height;
+	window = glfwCreateWindow(width, height, title, _settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
+	if (!window)
 	{
-		this->terminateEngine();
+		terminateEngine();
 		throw EngineException(VOX_WINFAIL);
 	}
 
-	glfwMakeContextCurrent(this->window);
-	glfwSetWindowUserPointer(this->window, (void*)this);
-	glfwSetFramebufferSizeCallback(this->window, framebuffer_callback);
-	gladLoadGL((GLADloadfunc)glfwGetProcAddress);
+	glfwMakeContextCurrent(window);
+	gladLoadGL(glfwGetProcAddress);
 	glfwSwapInterval(1);
+	// glfwSetWindowUserPointer(window, (void*)this->window);
+	glfwSetFramebufferSizeCallback(window, framebuffer_callback);
 }
 
 Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, bool resize)
 {
 	VOX_NONNULL(title);
 	VOX_ASSERT(width > 0, "Width must be greater than 0");
-
 	VOX_ASSERT(height > 0, "Height must be greater than 0");
 	VOX_ASSERT(!_instance, "Engine already initialized");
 
@@ -100,59 +99,58 @@ Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, boo
 			delete _instance;
 			_instance = nullptr;
 		}
-		return nullptr;
 	}
 	return _instance;
 }
 
 void	Engine::run()
 {
-	while (!glfwWindowShouldClose(this->window))
+	while (!glfwWindowShouldClose(window))
 	{
-		this->renderer->render();
-		glfwSwapBuffers(this->window);
+		renderer->render();
+		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}
 }
 
 void	Engine::closeWindow()
 {
-	glfwSetWindowShouldClose(this->window, GLFW_TRUE);
+	glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
 void	Engine::setKeyCallback(GLFWkeyfun callback)
 {
-	glfwSetKeyCallback(this->window, callback);
+	glfwSetKeyCallback(window, callback);
 }
 
 void	Engine::setMouseButtonCallback(GLFWmousebuttonfun callback)
 {
-	glfwSetMouseButtonCallback(this->window, callback);
+	glfwSetMouseButtonCallback(window, callback);
 }
 
 void	Engine::setCursorPosCallback(GLFWcursorposfun callback)
 {
-	glfwSetCursorPosCallback(this->window, callback);
+	glfwSetCursorPosCallback(window, callback);
 }
 
 void	Engine::setScrollCallback(GLFWscrollfun callback)
 {
-	glfwSetScrollCallback(this->window, callback);
+	glfwSetScrollCallback(window, callback);
 }
 
 void	Engine::setResizeCallback(GLFWwindowsizefun callback)
 {
-	glfwSetWindowSizeCallback(this->window, callback);
+	glfwSetWindowSizeCallback(window, callback);
 }
 
 void	Engine::setFramebufferSizeCallback(GLFWframebuffersizefun callback)
 {
-	glfwSetFramebufferSizeCallback(this->window, callback);
+	glfwSetFramebufferSizeCallback(window, callback);
 }
 
 void	Engine::setWindowCloseCallback(GLFWwindowclosefun callback)
 {
-	glfwSetWindowCloseCallback(this->window, callback);
+	glfwSetWindowCloseCallback(window, callback);
 }
 
 void	Engine::setErrorCallback(GLFWerrorfun callback)
