@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/05/01 07:00:32 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/05/01 09:27:13 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -31,19 +31,30 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 {
     (void)scancode;
     (void)mods;
-    (void)window;
+
+    Engine* engine = static_cast<Engine*>(glfwGetWindowUserPointer(window));
+    Camera* camera = engine->camera;
+
     if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
         Engine::getInstance()->closeWindow();
     if (key == VOX_KEY_SPACE && (action == VOX_PRESS || action == VOX_REPEAT))
         std::cout << "Space key pressed" << std::endl;
     if (key == VOX_KEY_W && (action == VOX_PRESS || action == VOX_REPEAT))
-        std::cout << "W key pressed" << std::endl;
+        vec3_add(camera->pos, camera->pos, camera->dir);
     if (key == VOX_KEY_A && (action == VOX_PRESS || action == VOX_REPEAT))
-        std::cout << "A key pressed" << std::endl;
+    {
+        vec3 perp;
+        vec3_mul_cross(perp, camera->dir, camera->up);
+        vec3_add(camera->pos, camera->pos, perp);
+    }
     if (key == VOX_KEY_S && (action == VOX_PRESS || action == VOX_REPEAT))
-        std::cout << "S key pressed" << std::endl;
+        vec3_sub(camera->pos, camera->pos, camera->dir);
     if (key == VOX_KEY_D && (action == VOX_PRESS || action == VOX_REPEAT))
-        std::cout << "D key pressed" << std::endl;
+    {
+        vec3 perp;
+        vec3_mul_cross(perp, camera->dir, camera->up);
+        vec3_add(camera->pos, camera->pos, perp);
+    }
     if (key == VOX_KEY_RIGHT && (action == VOX_PRESS || action == VOX_REPEAT))
         rotation += 0.05;
     if (key == VOX_KEY_LEFT && (action == VOX_PRESS || action == VOX_REPEAT))
@@ -61,7 +72,12 @@ int main(void)
 
     engine->setErrorCallback(error_callback);
     engine->setKeyCallback(key_callback);
-    engine->run();
+    while (!glfwWindowShouldClose(engine->window))
+	{
+		engine->renderer->render();
+		glfwSwapBuffers(engine->window);
+		glfwPollEvents();
+	}
     engine->terminateEngine();
     delete engine;
 

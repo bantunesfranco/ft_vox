@@ -168,8 +168,6 @@ void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
 	mat4x4_identity(m);
 	mat4x4_rotate_Z(m, m, rotation);
 
-	std::cout << rotation << std::endl;
-
 	const GLint model_location = glGetUniformLocation(_shaderprog, "model");
 	glUniformMatrix4fv(model_location, 1, GL_FALSE, (const GLfloat*) &m);
 

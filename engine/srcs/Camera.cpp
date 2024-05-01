@@ -1,7 +1,7 @@
 #include "Camera.hpp"
 #include "Engine.hpp"
 
-Camera::Camera() : 	pos({0.f, 0.f, 3.f}), dir ({0.f, 0.f, -1.f}), up({0.f, 1.f, 0.f}) {
+Camera::Camera() : 	pos{0.f, 0.f, 3.f}, dir {0.f, 0.f, -1.f}, up{0.f, 1.f, 0.f} {
 	GLFWwindow *window = Engine::getInstance()->window;
 	glfwGetCursorPos(window, &(mousePos[0]), &(mousePos[1]));
 }
