@@ -28,10 +28,10 @@ class Engine
 		Engine& operator=(const Engine&);
 
 		static Engine*		_instance;
+		static int32_t		settings[VOX_SETTINGS_MAX];
 
 		int32_t				_width;
 		int32_t				_height;
-		int32_t				_settings[VOX_SETTINGS_MAX];
 
 		void				_initWindow(int32_t width, int32_t height, const char* title, bool resize);
 
@@ -53,9 +53,9 @@ class Engine
 		static const char*	vox_strerror(vox_errno_t val);
 		static Engine*		initEngine(int32_t width, int32_t height, const char* title, bool resize);
 		static Engine*		getInstance() { return _instance; };
+		static void 		setSetting(int32_t setting, bool value);
 
 		void				terminateEngine();
-		void 				setSetting(int32_t setting, bool value);
 
 
 		void				setKeyCallback(GLFWkeyfun callback);

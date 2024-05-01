@@ -4,6 +4,7 @@
 
 Engine*		Engine::_instance = nullptr;
 vox_errno_t	Engine::vox_errno = VOX_SUCCESS;
+int32_t		Engine::settings[VOX_SETTINGS_MAX] = {0, 0, 0, 1, 0};
 
 static void framebuffer_callback(GLFWwindow *window, int width, int height)
 {
@@ -19,10 +20,6 @@ Engine::Engine() : window(nullptr), renderer(nullptr)
 	{
 		throw EngineException(VOX_GLFWFAIL);
 	}
-	
-	for (int i = 0; i < VOX_SETTINGS_MAX; i++)
-		_settings[i] = false;
-	_settings[VOX_DECORATED] = true;
 }
 
 void	Engine::terminateEngine()
@@ -43,16 +40,16 @@ void	Engine::terminateEngine()
 void	Engine::setSetting(int32_t setting, bool value)
 {
 	VOX_ASSERT(setting >= 0 && setting < VOX_SETTINGS_MAX, "Invalid setting");
-	_settings[setting] = value;
+	settings[setting] = value;
 }
 
 void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool resize)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-	glfwWindowHint(GLFW_MAXIMIZED, _settings[VOX_MAXIMIZED]);
-	glfwWindowHint(GLFW_DECORATED, _settings[VOX_DECORATED]);
-	glfwWindowHint(GLFW_VISIBLE, !_settings[VOX_HEADLESS]);
+	glfwWindowHint(GLFW_MAXIMIZED, settings[VOX_MAXIMIZED]);
+	glfwWindowHint(GLFW_DECORATED, settings[VOX_DECORATED]);
+	glfwWindowHint(GLFW_VISIBLE, !settings[VOX_HEADLESS]);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 	#ifdef __APPLE__
@@ -62,7 +59,7 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 
 	_width = width;
 	_height = height;
-	window = glfwCreateWindow(width, height, title, _settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
+	window = glfwCreateWindow(width, height, title, settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
 	if (!window)
 	{
 		terminateEngine();
@@ -89,6 +86,7 @@ Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, boo
 		_instance->_initWindow(width, height, title, resize);
 		_instance->renderer =  new Renderer();
 		_instance->renderer->initBuffers();
+		_instance->camera = new Camera();
 	}
 	catch (const std::exception &e)
 	{

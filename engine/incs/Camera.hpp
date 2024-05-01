@@ -15,6 +15,8 @@ class Camera
 		vec3	pos;
 		vec3	dir;
 		vec3	up;
+		float	pitch;
+		float	yaw;
 		double	mousePos[2];
 
 

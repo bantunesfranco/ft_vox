@@ -13,13 +13,12 @@
 static const char* vshader_src =
 "#version 330\n"
 "uniform mat4 MVP;\n"
-"uniform mat4 model;\n"
 "in vec3 vCol;\n"
 "in vec2 vPos;\n"
 "out vec3 color;\n"
 "void main()\n"
 "{\n"
-"    gl_Position = MVP * model * vec4(vPos, 0.0, 1.0);\n"
+"    gl_Position = MVP * vec4(vPos, 0.0, 1.0);\n"
 "    color = vCol;\n"
 "}\n";
  
@@ -164,13 +163,16 @@ void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
 	glViewport(0, 0, width, height);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	mat4x4 m, p;
+	mat4x4 m, p, v, mv;
+	vec3 tmp;
 	mat4x4_identity(m);
 	mat4x4_rotate_Z(m, m, rotation);
 
-	const GLint model_location = glGetUniformLocation(_shaderprog, "model");
-	glUniformMatrix4fv(model_location, 1, GL_FALSE, (const GLfloat*) &m);
+	Camera *camera = Engine::getInstance()->camera;
+	vec3_add(tmp, camera->pos, camera->dir);
+	mat4x4_look_at(v, camera->pos, tmp, camera->up);
 
-	mat4x4_ortho(p, -ratio, ratio, -1.f, 1.f, 1.f, -1.f);
-	mat4x4_mul(*mvp, p, m);
+	mat4x4_perspective(p, 90.0f , ratio, 0.1f, 100.0f);
+	mat4x4_mul(mv, v, m);
+	mat4x4_mul(*mvp, p, mv);
 }
