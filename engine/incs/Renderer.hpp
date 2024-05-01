@@ -9,9 +9,6 @@
 #include <cstring>
 #include <string>
 
-
-class Engine;
-
 class Renderer
 {
 	private:
@@ -22,8 +19,6 @@ class Renderer
 		void		loadShaderCode(const char* path, char* code);
 		uint32_t	compileShader(const char* code, int32_t type);
 		void		initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp);
-
-		
 
 	public:
 		Renderer() = default;

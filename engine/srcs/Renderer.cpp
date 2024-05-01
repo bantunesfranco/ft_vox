@@ -4,7 +4,7 @@
 #include <string>
 #include "Engine.hpp"
 #include "vertex.hpp"
-#include <array>
+#include <vector>
 #include <cmath>
 
 #define GLAD_GL_IMPLEMENTATION
@@ -13,12 +13,13 @@
 static const char* vshader_src =
 "#version 330\n"
 "uniform mat4 MVP;\n"
+"uniform mat4 model;\n"
 "in vec3 vCol;\n"
 "in vec2 vPos;\n"
 "out vec3 color;\n"
 "void main()\n"
 "{\n"
-"    gl_Position = MVP * vec4(vPos, 0.0, 1.0);\n"
+"    gl_Position = MVP * model * vec4(vPos, 0.0, 1.0);\n"
 "    color = vCol;\n"
 "}\n";
  
@@ -31,19 +32,21 @@ static const char* fshader_src =
 "    fragment = vec4(color, 1.0);\n"
 "}\n";
 
-static const Vertex vertices[4] =
+extern float rotation;
+
+static const std::vector<Vertex> vertices =
 {
-    { { -0.6f, -0.4f}, { 1.f, 0.f, 0.f } },
-    { {  0.6f, -0.4f}, { 0.f, 1.f, 0.f } },
-    { {   -0.4f,  0.6f}, { 0.f, 0.f, 1.f } },
-    { {   0.1f,  2.f}, { 1.f, 1.f, 1.f } },
+    { { .5f, -.5f }, { 0.f, 0.f, 1.f } },
+    { { .5f, .5f }, { 1.f, 0.f, 1.f } },
+    { { -.5f, -.5f }, { 1.f, 0.f, 1.f } },
+    { { -.5f, .5f }, { 0.f, 0.f, 1.f } },
 };
 
 void	Renderer::initBuffers()
 {
 	glGenBuffers(1, &_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
 
 	// char*	code = NULL;
 	// loadShaderCode(VSHADER_PATH, code);
@@ -150,7 +153,7 @@ void Renderer::render() {
 	glUseProgram(_shaderprog);
 	glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
 	glBindVertexArray(_vao);
-	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, vertices.size());
 }
 
 void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
@@ -163,7 +166,13 @@ void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
 
 	mat4x4 m, p;
 	mat4x4_identity(m);
-	mat4x4_rotate_Z(m, m, (float) glfwGetTime());
+	mat4x4_rotate_Z(m, m, rotation);
+
+	std::cout << rotation << std::endl;
+
+	const GLint model_location = glGetUniformLocation(_shaderprog, "model");
+	glUniformMatrix4fv(model_location, 1, GL_FALSE, (const GLfloat*) &m);
+
 	mat4x4_ortho(p, -ratio, ratio, -1.f, 1.f, 1.f, -1.f);
 	mat4x4_mul(*mvp, p, m);
 }

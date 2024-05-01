@@ -14,6 +14,7 @@
 #include <exception>
 
 #include "Renderer.hpp"
+#include "Camera.hpp"
 #include "defines.hpp"
 
 #define VOX_ASSERT(val, str) assert(val && str);
@@ -47,6 +48,7 @@ class Engine
 		static vox_errno_t	vox_errno;
 		GLFWwindow*			window;
 		Renderer*			renderer;
+		Camera*				camera;
 	
 		static const char*	vox_strerror(vox_errno_t val);
 		static Engine*		initEngine(int32_t width, int32_t height, const char* title, bool resize);

@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/04/30 19:36:36 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/05/01 07:00:32 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,6 +18,8 @@
 #include "Engine.hpp"
 #include "vertex.hpp"
 #include <iostream>
+
+float rotation = 0.f;
 
 static void error_callback(int error, const char* description)
 {
@@ -42,6 +44,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         std::cout << "S key pressed" << std::endl;
     if (key == VOX_KEY_D && (action == VOX_PRESS || action == VOX_REPEAT))
         std::cout << "D key pressed" << std::endl;
+    if (key == VOX_KEY_RIGHT && (action == VOX_PRESS || action == VOX_REPEAT))
+        rotation += 0.05;
+    if (key == VOX_KEY_LEFT && (action == VOX_PRESS || action == VOX_REPEAT))
+        rotation -= 0.05;
 }
  
 int main(void)
