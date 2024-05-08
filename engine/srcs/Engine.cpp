@@ -12,7 +12,7 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 	glViewport(0, 0, width, height);
 }
 
-Engine::Engine() : window(nullptr), renderer(nullptr)
+Engine::Engine() :  _lastFrameTime(glfwGetTime()), window(nullptr), renderer(nullptr), camera(nullptr)
 {
 	bool init = glfwInit();
 
@@ -66,6 +66,8 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 		throw EngineException(VOX_WINFAIL);
 	}
 
+    // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
 	glfwMakeContextCurrent(window);
 	gladLoadGL(glfwGetProcAddress);
 	glfwSwapInterval(1);
@@ -101,15 +103,29 @@ Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, boo
 	return _instance;
 }
 
-void	Engine::run()
+void	Engine::setFrameTime()
 {
-	while (!glfwWindowShouldClose(window))
-	{
-		renderer->render();
-		glfwSwapBuffers(window);
-		glfwPollEvents();
-	}
+	_lastFrameTime = glfwGetTime();
 }
+
+double Engine::getDeltaTime() {
+	double currentFrameTime = glfwGetTime();
+	double deltaTime = currentFrameTime - _lastFrameTime;
+	_lastFrameTime = currentFrameTime;
+	return deltaTime;
+}
+
+bool Engine::isKeyDown(key_t key){ return glfwGetKey(this->window, key); }
+
+// void	Engine::run()
+// {
+// 	while (!glfwWindowShouldClose(window))
+// 	{
+// 		renderer->render();
+// 		glfwSwapBuffers(window);
+// 		glfwPollEvents();
+// 	}
+// }
 
 void	Engine::closeWindow()
 {

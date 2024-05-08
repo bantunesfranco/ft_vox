@@ -32,6 +32,7 @@ class Engine
 
 		int32_t				_width;
 		int32_t				_height;
+		double				_lastFrameTime;
 
 		void				_initWindow(int32_t width, int32_t height, const char* title, bool resize);
 
@@ -67,8 +68,11 @@ class Engine
 		void				setWindowCloseCallback(GLFWwindowclosefun callback);
 		void				setErrorCallback(GLFWerrorfun callback);
 
-		void 				run();
+		// void 				run();
 		void				closeWindow();
+		double				getDeltaTime();
+		void				setFrameTime();
+		bool				isKeyDown(key_t key);
 
 };
 

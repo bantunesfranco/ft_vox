@@ -40,7 +40,7 @@ ifeq ($(OS),Windows_NT)
 endif
 
 ifeq ($(shell uname -s),Linux)
-	LIBS = -lwayland-client -lxkbcommon -lX11 -lXrandr -lXinerama -lXi -lXxf86vm -lXcursor
+	LIBS = -lX11 -lXrandr -lXinerama -lXi -lXxf86vm -lXcursor
 else
 	LIBS = ""
 endif
@@ -56,7 +56,7 @@ $(DIR_O)/%.o: $(DIR_S)/%.c $(HEADERS)
 	@$(CC) $(CFLAGS) $(INCS) -c $< -o $@
 
 $(GLFW_LIB):
-	@cmake $(GLFW) -B $(GLFW)/build
+	@cmake -DGLFW_BUILD_WAYLAND=OFF -DGLFW_BUILD_X11=ON $(GLFW) -B $(GLFW)/build
 	@make -C $(GLFW)/build -j4
 
 all: $(NAME)
