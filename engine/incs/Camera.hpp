@@ -4,6 +4,8 @@
 #include "linmath.h"
 #include "GLFW/glfw3.h"
 
+#define DEG2RAD(deg) ((deg) * M_PI / 180.0)
+
 class Camera
 {
 	public:
@@ -18,7 +20,6 @@ class Camera
 		float	pitch;
 		float	yaw;
 		double	mousePos[2];
-
 
 		void setCameraPosition(const vec3& newPos);
 		void setCameraDirection(const vec3& newDir);

@@ -20,6 +20,8 @@
 #define VOX_ASSERT(val, str) assert(val && str);
 #define VOX_NONNULL(val) assert(val && "Value cannot be null");
 
+#define BLOCK_SIZE 1.0f
+
 class Engine
 {
 	private:

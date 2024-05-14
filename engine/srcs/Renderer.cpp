@@ -14,11 +14,11 @@ static const char* vshader_src =
 "#version 330\n"
 "uniform mat4 MVP;\n"
 "in vec3 vCol;\n"
-"in vec2 vPos;\n"
+"in vec3 vPos;\n"
 "out vec3 color;\n"
 "void main()\n"
 "{\n"
-"    gl_Position = MVP * vec4(vPos, 0.0, 1.0);\n"
+"    gl_Position = MVP * vec4(vPos, 1.0);\n"
 "    color = vCol;\n"
 "}\n";
  
@@ -31,18 +31,97 @@ static const char* fshader_src =
 "    fragment = vec4(color, 1.0);\n"
 "}\n";
 
-extern float rotation;
+static std::vector<Vertex> vertices;
 
-static const std::vector<Vertex> vertices =
-{
-    { { .5f, -.5f }, { 0.f, 0.f, 1.f } },
-    { { .5f, .5f }, { 1.f, 0.f, 1.f } },
-    { { -.5f, -.5f }, { 1.f, 0.f, 1.f } },
-    { { -.5f, .5f }, { 0.f, 0.f, 1.f } },
-};
+// Function to generate vertices for a block at a given position
+void generateBlockVertices(std::vector<Vertex>& vertices, const vec3& position, const vec3& color) {
+	
+    // Define the positions of the vertices relative to the block's center
+    const vec3 positions[16] = {
+		// x     y     z
+        {-0.5, -0.5,  0.5}, // 1  left          First Strip
+        {-0.5,  0.5,  0.5}, // 3
+        {-0.5, -0.5, -0.5}, // 0
+        {-0.5,  0.5, -0.5}, // 2
+        { 0.5, -0.5, -0.5}, // 4  back
+        { 0.5,  0.5, -0.5}, // 6
+        { 0.5, -0.5,  0.5}, // 5  right
+        { 0.5,  0.5,  0.5}, // 7
+        { 0.5,  0.5, -0.5}, // 6  top           Second Strip
+        {-0.5,  0.5, -0.5}, // 2
+        { 0.5,  0.5,  0.5}, // 7
+        {-0.5,  0.5,  0.5}, // 3
+        { 0.5, -0.5,  0.5}, // 5  front
+        {-0.5, -0.5,  0.5}, // 1
+        { 0.5, -0.5, -0.5}, // 4  bottom
+        {-0.5, -0.5, -0.5}  // 0
+    };
+
+    // Define the indices of the vertices that make up each face of the block
+	const int faceIndices[16] = {
+		1, 3, 0, 2, // left
+		4, 6, 5, 7, // right
+		6, 2, 7, 3, // top
+		5, 1, 4, 0, // bottom
+	};
+
+	// Generate vertices for each face of the block
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+
+            // Calculate the index of the current vertex
+            int index = faceIndices[i * 4 + j];
+
+            // Calculate the position of the vertex in world space
+            vec3 pos = {
+                position[0] + positions[index][0],
+                position[1] + positions[index][1],
+                position[2] + positions[index][2]
+            };
+
+			Vertex vertex;
+			vec3_dup(vertex.pos, pos);
+			vec3_dup(vertex.col, color);
+
+            // Set the position and color of the vertex
+            vertices.push_back(vertex);
+        }
+    }
+}
+
+void generatePyramid(std::vector<Vertex>& vertices) {
+    // Clear the vertices vector
+    vertices.clear();
+
+    // // Generate vertices for a 3x3x3 pyramid of blocks
+	
+    // for (int y = 0; y < 3; ++y) {
+    //     for (int x = -y; x <= y; ++x) {
+    //         for (int z = -y; z <= y; ++z) {
+    //             // Calculate the position of the block
+				int x = 0, y = 0, z = 0;
+				vec3 pos = {
+					x * BLOCK_SIZE,
+					y * BLOCK_SIZE,
+					z * BLOCK_SIZE
+				};
+				
+				// Define color
+				const vec3 blockColor = {1.0f, 0.33f*z, 0.33f*z}; // Red color
+
+                // Generate vertices for the block at the current position
+                generateBlockVertices(vertices, pos, blockColor);
+    //         }
+    //     }
+    // }
+}
+
 
 void	Renderer::initBuffers()
 {
+	// Generate vertices for a block at the origin
+	generatePyramid(vertices);
+
 	glGenBuffers(1, &_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, _vbo);
 	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
@@ -148,17 +227,30 @@ void Renderer::render() {
 	GLFWwindow *window = Engine::getInstance()->window;
 	const GLint mvp_location = glGetUniformLocation(_shaderprog, "MVP");
 
+	// glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+
 	initProjectionMatrix(window, &mvp);
+
 	glUseProgram(_shaderprog);
 	glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
 	glBindVertexArray(_vao);
+
+	    // Enable depth testing
+    glEnable(GL_DEPTH_TEST);
+
+    // Clear color and depth buffers
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, vertices.size());
+	glDrawArrays(GL_TRIANGLE_STRIP, 8, vertices.size());
+
 }
 
 void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
 	int width, height;
 	glfwGetFramebufferSize(window, &width, &height);
-	const float ratio = width / (float) height;
+	const float ratio = static_cast<float>(width) / static_cast<float>(height);
 
 	glViewport(0, 0, width, height);
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -166,13 +258,12 @@ void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
 	mat4x4 m, p, v, mv;
 	vec3 tmp;
 	mat4x4_identity(m);
-	mat4x4_rotate_Z(m, m, rotation);
 
 	Camera *camera = Engine::getInstance()->camera;
 	vec3_add(tmp, camera->pos, camera->dir);
 	mat4x4_look_at(v, camera->pos, tmp, camera->up);
 
-	mat4x4_perspective(p, 90.0f , ratio, 0.1f, 100.0f);
+	mat4x4_perspective(p, DEG2RAD(90.0f), ratio, 0.1f, 100.0f);
 	mat4x4_mul(mv, v, m);
 	mat4x4_mul(*mvp, p, mv);
 }

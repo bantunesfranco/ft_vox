@@ -66,7 +66,7 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 		throw EngineException(VOX_WINFAIL);
 	}
 
-    // glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	glfwMakeContextCurrent(window);
 	gladLoadGL(glfwGetProcAddress);
@@ -121,7 +121,7 @@ bool Engine::isKeyDown(key_t key){ return glfwGetKey(this->window, key); }
 // {
 // 	while (!glfwWindowShouldClose(window))
 // 	{
-// 		renderer->render();
+		// renderer->render();
 // 		glfwSwapBuffers(window);
 // 		glfwPollEvents();
 // 	}
