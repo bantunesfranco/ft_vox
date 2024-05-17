@@ -1,0 +1,29 @@
+const vec3 VERTEX_POSITIONS[16] = {
+		// x     y     z
+		{-0.5, -0.5,  0.5}, // 0  left          First Strip
+		{-0.5,  0.5,  0.5}, // 1
+		{-0.5, -0.5, -0.5}, // 2
+		{-0.5,  0.5, -0.5}, // 3
+		{ 0.5, -0.5, -0.5}, // 4  back
+		{ 0.5,  0.5, -0.5}, // 5
+		{ 0.5, -0.5,  0.5}, // 6  right
+		{ 0.5,  0.5,  0.5}, // 7
+		{ 0.5,  0.5, -0.5}, // 5  top           Second Strip
+		{-0.5,  0.5, -0.5}, // 3
+		{ 0.5,  0.5,  0.5}, // 7
+		{-0.5,  0.5,  0.5}, // 1
+		{ 0.5, -0.5,  0.5}, // 6  front
+		{-0.5, -0.5,  0.5}, // 0
+		{ 0.5, -0.5, -0.5}, // 4  bottom
+		{-0.5, -0.5, -0.5}  // 2
+	};
+
+// Define the indices of the vertices that make up each face of the block
+const int FACE_INDICES[24] = {
+	0, 1, 2, 3, // Front face
+	7, 6, 5, 4, // Back face
+	2, 4, 0, 6, // Bottom face
+	3, 5, 1, 7, // Top face
+	7, 1, 6, 0, // Right face
+	3, 2, 5, 4  // Left face
+};

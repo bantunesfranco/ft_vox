@@ -117,15 +117,12 @@ double Engine::getDeltaTime() {
 
 bool Engine::isKeyDown(key_t key){ return glfwGetKey(this->window, key); }
 
-// void	Engine::run()
-// {
-// 	while (!glfwWindowShouldClose(window))
-// 	{
-		// renderer->render();
-// 		glfwSwapBuffers(window);
-// 		glfwPollEvents();
-// 	}
-// }
+void	Engine::run()
+{
+	setFrameTime();
+	glfwSwapBuffers(window);
+	glfwPollEvents();
+}
 
 void	Engine::closeWindow()
 {

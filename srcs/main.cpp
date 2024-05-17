@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/05/09 13:18:03 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/05/17 18:56:54 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,8 +16,10 @@
 
 #include <glad/gl.h>
 #include "Engine.hpp"
+#include "Chunk.hpp"
 #include "vertex.hpp"
 #include <iostream>
+#include <vector>
 
 static void error_callback(int error, const char* description)
 {
@@ -125,17 +127,28 @@ int main(void)
 	{
 		return (EXIT_FAILURE);
 	}
-
+	
 	engine->setErrorCallback(error_callback);
 	engine->setKeyCallback(key_callback);
-	engine->setCursorPosCallback(mouse_callback);
+	(void)mouse_callback;
+	// engine->setCursorPosCallback(mouse_callback);
+
+	Renderer *renderer = engine->renderer;
+	ChunkManager chunkManager(4242);
+
 	while (!glfwWindowShouldClose(engine->window))
 	{
+		chunkManager.updateChunks(engine->camera->pos);
 
-		engine->setFrameTime();
-		engine->renderer->render();
-		glfwSwapBuffers(engine->window);
-		glfwPollEvents();
+		for (auto it = chunkManager.chunks.begin(); it != chunkManager.chunks.end(); ++it)
+		{
+			Chunk& chunk = chunkManager.loadChunk(it->first);
+			std::vector<Vertex> vertices = generateMesh(chunk);
+			std::cout << "Vertices size: " << vertices.size() << std::endl;
+			renderer->render(vertices);
+		}
+
+		engine->run();
 	}
 	engine->terminateEngine();
 	delete engine;

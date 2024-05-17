@@ -70,7 +70,7 @@ class Engine
 		void				setWindowCloseCallback(GLFWwindowclosefun callback);
 		void				setErrorCallback(GLFWerrorfun callback);
 
-		// void 				run();
+		void 				run();
 		void				closeWindow();
 		double				getDeltaTime();
 		void				setFrameTime();

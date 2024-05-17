@@ -6,8 +6,10 @@
 #define VSHADER_PATH "engine/shaders/vertex.glsl"
 
 #include "defines.hpp"
+#include "vertex.hpp"
 #include <cstring>
 #include <string>
+#include <vector>
 
 class Renderer
 {
@@ -26,7 +28,7 @@ class Renderer
 		Renderer(const Renderer&) = delete;
 		Renderer& operator=(const Renderer&);
 	
-		void		render();
+		void		render(const std::vector<Vertex>& vertices);
 		void		initBuffers();
 		uint32_t	getShaderProg() { return _shaderprog; }
 		uint32_t	getVao() { return _vao; }
