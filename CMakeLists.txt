@@ -1,60 +1,24 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16)
 
-project(ft_vox)
+# Project name and version
+project(ft_vox VERSION 1.0.0 LANGUAGES CXX)
 
+# Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-include(ExternalProject)
+# Add source files
+file(GLOB_RECURSE SOURCES "srcs/*.cpp")
 
-ExternalProject_Add(glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.4
-    SOURCE_DIR ${PROJECT_SOURCE_DIR}/glfw
-    BINARY_DIR ${PROJECT_SOURCE_DIR}/glfw
-    CMAKE_ARGS -DGLFW_BUILD_DOCS=OFF
-               -DGLFW_BUILD_TESTS=OFF
-               -DGLFW_BUILD_EXAMPLES=OFF
-               -DCMAKE_INSTALL_PREFIX=${PROJECT_SOURCE_DIR}/glfw
-)
+# Define the executable target
+add_executable(ft_vox ${SOURCES})
 
-if (UNIX AND NOT APPLE)
-    find_package(X11 REQUIRED)
-    find_package(EGL REQUIRED)
-    find_package(Threads REQUIRED)
-    find_package(OpenGL REQUIRED)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(WAYLAND REQUIRED wayland-client)
-    pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)
-    pkg_check_modules(XORG REQUIRED xorg-server)
+# Add the engine directory as a subdirectory
+add_subdirectory(engine)
 
-    if (NOT X11_FOUND OR NOT EGL_FOUND OR NOT Threads_FOUND OR NOT OpenGL_FOUND OR NOT PkgConfig_FOUND OR NOT WAYLAND_FOUND OR NOT XKBCOMMON_FOUND OR NOT XORG_FOUND)
-        execute_process(COMMAND bash ${PROJECT_SOURCE_DIR}/install_deps.sh)
-    endif()
+# Link the engine library
+target_link_libraries(ft_vox PRIVATE engine)
 
-endif()
-
-file(GLOB ENGINE_SRC "engine/srcs/*.cpp")
-
-add_executable(${PROJECT_NAME} srcs/main.cpp ${ENGINE_SRC}) 
-
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
-
-add_dependencies(${PROJECT_NAME} glfw)
-
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${PROJECT_SOURCE_DIR}/glfw/include ${PROJECT_SOURCE_DIR}/glfw/deps 
-    ${PROJECT_SOURCE_DIR}/engine/incs
-    ${PROJECT_SOURCE_DIR}/incs)
-
-if (UNIX AND NOT APPLE)
-    target_link_libraries(${PROJECT_NAME} ${X11_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS} ${OPENGL_LIBRARIES})
-endif()
-
-if (UNIX)
-    target_link_libraries(${PROJECT_NAME} ${PROJECT_SOURCE_DIR}/glfw/lib/libglfw3.a)
-else()
-    target_link_libraries(${PROJECT_NAME} ${PROJECT_SOURCE_DIR}/glfw/lib/glfw3.lib)
-endif()
+# Add include directories for game headers and engine headers
+target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/incs)
+target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/engine/incs)

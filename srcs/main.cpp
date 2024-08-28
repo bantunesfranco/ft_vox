@@ -130,7 +130,7 @@ int main(void)
 	
 	engine->setErrorCallback(error_callback);
 	engine->setKeyCallback(key_callback);
-	(void)mouse_callback;
+	// (void)mouse_callback;
 	// engine->setCursorPosCallback(mouse_callback);
 
 	Renderer *renderer = engine->renderer;

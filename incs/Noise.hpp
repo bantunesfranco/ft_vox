@@ -2,6 +2,7 @@
 #define NOISE_HPP
 
 #include <cstdint>
+#include <utility>
 
 typedef enum block_type {
 	AIR,

@@ -1,6 +1,5 @@
 build
-glfw
 ft_vox
 .vscode
 Debug
-glfw
+vendor
