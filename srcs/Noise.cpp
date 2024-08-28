@@ -2,6 +2,7 @@
 #include <cmath>
 #include "Noise.hpp"
 
+
 PerlinNoise::PerlinNoise() {
 	for (int i = 0; i < _PERM_SIZE; ++i) {
 		_perm[i] = i;

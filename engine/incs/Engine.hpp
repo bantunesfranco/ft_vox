@@ -74,7 +74,7 @@ class Engine
 		void				closeWindow();
 		double				getDeltaTime();
 		void				setFrameTime();
-		bool				isKeyDown(key_t key);
+		bool				isKeyDown(keys_t key);
 
 };
 
