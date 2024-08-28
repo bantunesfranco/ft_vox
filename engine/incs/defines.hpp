@@ -239,6 +239,6 @@ typedef enum keys
 	VOX_KEY_RIGHT_ALT		= 346,
 	VOX_KEY_RIGHT_SUPER		= 347,
 	VOX_KEY_MENU			= 348,
-}	key_t;
+}	keys_t;
 
 #endif

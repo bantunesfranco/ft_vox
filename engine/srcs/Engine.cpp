@@ -115,7 +115,7 @@ double Engine::getDeltaTime() {
 	return deltaTime;
 }
 
-bool Engine::isKeyDown(key_t key){ return glfwGetKey(this->window, key); }
+bool Engine::isKeyDown(keys_t key){ return glfwGetKey(this->window, key); }
 
 void	Engine::run()
 {

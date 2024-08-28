@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/05/17 18:56:54 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/08/28 23:36:57 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -144,7 +144,7 @@ int main(void)
 		{
 			Chunk& chunk = chunkManager.loadChunk(it->first);
 			std::vector<Vertex> vertices = generateMesh(chunk);
-			std::cout << "Vertices size: " << vertices.size() << std::endl;
+			// std::cout << "Vertices size: " << vertices.size() << std::endl;
 			renderer->render(vertices);
 		}
 
