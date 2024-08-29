@@ -2,7 +2,6 @@
 #include <iostream>
 #include <glad/gl.h>
 
-
 vox_errno_t	Engine::vox_errno = VOX_SUCCESS;
 
 static void framebuffer_callback(GLFWwindow *window, int width, int height)
@@ -10,7 +9,6 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 	(void)window;
 	glViewport(0, 0, width, height);
 }
-
 
 Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings) : window(nullptr), renderer(nullptr), camera(nullptr), settings{0, 0, 0, 1, 0, 0}
 {
@@ -24,8 +22,8 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 	for (auto const& [key, val] : settings)
 		setSetting(key, val);
 
-	// if (settings[VOX_FULLSCREEN])
-	// 	setSetting(VOX_MAXIMIZED, false);
+	if (settings[VOX_MAXIMIZED])
+		setSetting(VOX_FULLSCREEN, false);
 
 	VOX_NONNULL(title);
 	VOX_ASSERT(width > 0, "Width must be greater than 0");
@@ -45,6 +43,11 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 		std::exit(Engine::vox_errno);
 	}
 	
+}
+
+Engine::~Engine()
+{
+	terminate();
 }
 
 void	Engine::terminate()

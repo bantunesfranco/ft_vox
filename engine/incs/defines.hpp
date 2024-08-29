@@ -5,7 +5,7 @@ typedef enum settings
 {
 	VOX_STRETCH_IMAGE = 0,	// Image resize on window resize. Default: false
 	VOX_FULLSCREEN,			// Start on fullscreen. Default: false
-	VOX_MAXIMIZED,			// Start window maximized, overwrites fullscreen set true. Default: false
+	VOX_MAXIMIZED,			// Start window maximized, overwrites fullscreen if set true. Default: false
 	VOX_DECORATED,			// Display window bar. Default: true
 	VOX_HEADLESS,			// Run in headless mode, no window is created. Default: false
 	VOX_RESIZE,				// Allow window resizing. Default: false

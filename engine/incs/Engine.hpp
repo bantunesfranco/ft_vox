@@ -37,7 +37,7 @@ class Engine
 
 	public:
 		Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings);
-		virtual ~Engine() = default;
+		virtual ~Engine();
 
 		class EngineException : public std::exception
 		{
