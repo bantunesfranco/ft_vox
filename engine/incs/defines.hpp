@@ -8,6 +8,7 @@ typedef enum settings
 	VOX_MAXIMIZED,			// Start window maximized, overwrites fullscreen set true. Default: false
 	VOX_DECORATED,			// Display window bar. Default: true
 	VOX_HEADLESS,			// Run in headless mode, no window is created. Default: false
+	VOX_RESIZE,				// Allow window resizing. Default: false
 	VOX_SETTINGS_MAX,
 }	settings_t;
 

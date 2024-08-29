@@ -129,20 +129,18 @@ void Renderer::loadShaderCode(const char* path, char* code)
 	*(&code) = const_cast<char *>(data.c_str());
 }
 
-void Renderer::render(const std::vector<Vertex>& vertices) {
-
+void Renderer::render(GLFWwindow *window, Camera *camera, const std::vector<Vertex>& vertices) {
 	glGenBuffers(1, &_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, _vbo);
 	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
 
 	mat4x4 mvp;
-	GLFWwindow *window = Engine::getInstance()->window;
 	const GLint mvp_location = glGetUniformLocation(_shaderprog, "MVP");
 
 	// glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LESS);
 
-	initProjectionMatrix(window, &mvp);
+	initProjectionMatrix(window, camera, &mvp);
 
 	glUseProgram(_shaderprog);
 	glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
@@ -159,7 +157,7 @@ void Renderer::render(const std::vector<Vertex>& vertices) {
 	glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 }
 
-void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
+void Renderer::initProjectionMatrix(GLFWwindow *window, Camera *camera, mat4x4 *mvp) {
 	int width, height;
 	glfwGetFramebufferSize(window, &width, &height);
 	const float ratio = static_cast<float>(width) / static_cast<float>(height);
@@ -171,7 +169,6 @@ void Renderer::initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp) {
 	vec3 tmp;
 	mat4x4_identity(m);
 
-	Camera *camera = Engine::getInstance()->camera;
 	vec3_add(tmp, camera->pos, camera->dir);
 	mat4x4_look_at(v, camera->pos, tmp, camera->up);
 

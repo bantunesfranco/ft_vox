@@ -18,7 +18,7 @@
 class Camera
 {
 	public:
-		Camera();
+		Camera(GLFWwindow *window);
 		~Camera() = default;
 		Camera(const Camera& camera) = delete;
 		Camera& operator=(const Camera&);

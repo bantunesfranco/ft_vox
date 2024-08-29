@@ -7,6 +7,7 @@
 
 #include "defines.hpp"
 #include "vertex.hpp"
+#include "Camera.hpp"
 #include <cstring>
 #include <string>
 #include <vector>
@@ -20,7 +21,7 @@ class Renderer
 
 		void		loadShaderCode(const char* path, char* code);
 		uint32_t	compileShader(const char* code, int32_t type);
-		void		initProjectionMatrix(GLFWwindow *window, mat4x4 *mvp);
+		void		initProjectionMatrix(GLFWwindow *window, Camera *camera, mat4x4 *mvp);
 
 	public:
 		Renderer() = default;
@@ -28,7 +29,7 @@ class Renderer
 		Renderer(const Renderer&) = delete;
 		Renderer& operator=(const Renderer&);
 	
-		void		render(const std::vector<Vertex>& vertices);
+		void		render(GLFWwindow *window, Camera *camera, const std::vector<Vertex>& vertices);
 		void		initBuffers();
 		uint32_t	getShaderProg() { return _shaderprog; }
 		uint32_t	getVao() { return _vao; }

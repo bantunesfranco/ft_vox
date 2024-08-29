@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cassert>
 #include <exception>
+#include <map>
 
 #include "Renderer.hpp"
 #include "Camera.hpp"
@@ -25,21 +26,18 @@
 class Engine
 {
 	private:
-		Engine();
 		Engine(const Engine&) = delete;
 		Engine& operator=(const Engine&);
-
-		static Engine*		_instance;
-		static int32_t		settings[VOX_SETTINGS_MAX];
 
 		int32_t				_width;
 		int32_t				_height;
 		double				_lastFrameTime;
 
-		void				_initWindow(int32_t width, int32_t height, const char* title, bool resize);
+		void				initWindow(int32_t width, int32_t height, const char* title);
 
 	public:
-		~Engine() = default;
+		Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings);
+		virtual ~Engine() = default;
 
 		class EngineException : public std::exception
 		{
@@ -52,14 +50,13 @@ class Engine
 		GLFWwindow*			window;
 		Renderer*			renderer;
 		Camera*				camera;
+		int32_t				settings[VOX_SETTINGS_MAX];
 	
 		static const char*	vox_strerror(vox_errno_t val);
-		static Engine*		initEngine(int32_t width, int32_t height, const char* title, bool resize);
-		static Engine*		getInstance() { return _instance; };
-		static void 		setSetting(int32_t setting, bool value);
+		void				setSetting(int32_t setting, bool value);
 
-		void				terminateEngine();
-
+		bool				windowIsOpen(GLFWwindow* window);
+		void				terminate();
 
 		void				setKeyCallback(GLFWkeyfun callback);
 		void				setMouseButtonCallback(GLFWmousebuttonfun callback);
