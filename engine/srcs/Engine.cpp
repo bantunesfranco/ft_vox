@@ -2,9 +2,8 @@
 #include <iostream>
 #include <glad/gl.h>
 
-Engine*		Engine::_instance = nullptr;
+
 vox_errno_t	Engine::vox_errno = VOX_SUCCESS;
-int32_t		Engine::settings[VOX_SETTINGS_MAX] = {0, 0, 0, 1, 0};
 
 static void framebuffer_callback(GLFWwindow *window, int width, int height)
 {
@@ -12,7 +11,8 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 	glViewport(0, 0, width, height);
 }
 
-Engine::Engine() :  _lastFrameTime(glfwGetTime()), window(nullptr), renderer(nullptr), camera(nullptr)
+
+Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings) : window(nullptr), renderer(nullptr), camera(nullptr), settings{0, 0, 0, 1, 0, 0}
 {
 	bool init = glfwInit();
 
@@ -20,9 +20,34 @@ Engine::Engine() :  _lastFrameTime(glfwGetTime()), window(nullptr), renderer(nul
 	{
 		throw EngineException(VOX_GLFWFAIL);
 	}
+
+	for (auto const& [key, val] : settings)
+		setSetting(key, val);
+
+	// if (settings[VOX_FULLSCREEN])
+	// 	setSetting(VOX_MAXIMIZED, false);
+
+	VOX_NONNULL(title);
+	VOX_ASSERT(width > 0, "Width must be greater than 0");
+	VOX_ASSERT(height > 0, "Height must be greater than 0");
+
+	try
+	{
+		initWindow(width, height, title);
+		camera = new Camera(window);
+		renderer =  new Renderer();
+		renderer->initBuffers();
+	}
+	catch (const std::exception &e)
+	{
+		std::cerr << e.what() << std::endl;
+		terminate();
+		std::exit(Engine::vox_errno);
+	}
+	
 }
 
-void	Engine::terminateEngine()
+void	Engine::terminate()
 {
 	if (window)
 	{
@@ -43,7 +68,7 @@ void	Engine::setSetting(int32_t setting, bool value)
 	settings[setting] = value;
 }
 
-void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool resize)
+void Engine::initWindow(int32_t width, int32_t height, const char* title)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -55,16 +80,13 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 	#ifdef __APPLE__
 		glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	#endif
-	glfwWindowHint(GLFW_RESIZABLE, resize);
+	glfwWindowHint(GLFW_RESIZABLE, settings[VOX_RESIZE]);
 
 	_width = width;
 	_height = height;
 	window = glfwCreateWindow(width, height, title, settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
 	if (!window)
-	{
-		terminateEngine();
 		throw EngineException(VOX_WINFAIL);
-	}
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -73,34 +95,6 @@ void Engine::_initWindow(int32_t width, int32_t height, const char* title, bool 
 	glfwSwapInterval(1);
 	glfwSetWindowUserPointer(window, (void*)this);
 	glfwSetFramebufferSizeCallback(window, framebuffer_callback);
-}
-
-Engine *Engine::initEngine(int32_t width, int32_t height, const char* title, bool resize)
-{
-	VOX_NONNULL(title);
-	VOX_ASSERT(width > 0, "Width must be greater than 0");
-	VOX_ASSERT(height > 0, "Height must be greater than 0");
-	VOX_ASSERT(!_instance, "Engine already initialized");
-
-	try
-	{
-		_instance = new Engine();
-		_instance->_initWindow(width, height, title, resize);
-		_instance->renderer =  new Renderer();
-		_instance->renderer->initBuffers();
-		_instance->camera = new Camera();
-	}
-	catch (const std::exception &e)
-	{
-		std::cerr << e.what() << std::endl;
-		_instance->terminateEngine();
-		if (_instance)
-		{
-			delete _instance;
-			_instance = nullptr;
-		}
-	}
-	return _instance;
 }
 
 void	Engine::setFrameTime()
@@ -117,11 +111,9 @@ double Engine::getDeltaTime() {
 
 bool Engine::isKeyDown(keys_t key){ return glfwGetKey(this->window, key); }
 
-void	Engine::run()
+bool	Engine::windowIsOpen(GLFWwindow* window)
 {
-	setFrameTime();
-	glfwSwapBuffers(window);
-	glfwPollEvents();
+	return !glfwWindowShouldClose(window);
 }
 
 void	Engine::closeWindow()
