@@ -2,6 +2,7 @@
 #define APP_HPP
 
 #include "Engine.hpp"
+#include "World.hpp"
 
 class App : public Engine
 {
@@ -15,6 +16,8 @@ class App : public Engine
 		void	terminate();
 
 		bool	_showWireframe;
+
+		void	generateTerrain(Chunk& chunk);
 	
 	private:
 		void	setCallbackFunctions(void);

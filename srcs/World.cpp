@@ -1,23 +1,5 @@
 #include "World.hpp"
 
-inline Voxel packVoxelData(uint8_t isActive, uint8_t r, uint8_t g, uint8_t b, uint8_t blockType) {
-    Voxel data = 0;
-    data |= (isActive & 0x1) << 31;        // Store isActive in the highest bit
-    data |= (blockType & 0x7) << 24;       // Store blockType in the next 3 bits
-    data |= (r & 0xFF) << 16;              // Store red in the next 8 bits
-    data |= (g & 0xFF) << 8;               // Store green in the next 8 bits
-    data |= (b & 0xFF);                    // Store blue in the lowest 8 bits
-    return data;
-}
-
-inline void unpackVoxelData(Voxel data, uint8_t& isActive, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& blockType) {
-    isActive = (data >> 31) & 0x1;
-    blockType = (data >> 24) & 0x7;
-    r = (data >> 16) & 0xFF;
-    g = (data >> 8) & 0xFF;
-    b = data & 0xFF;
-}
-
 Chunk::Chunk() : voxels(Chunk::SIZE) {}
 
 Voxel Chunk::getVoxel(int x, int y, int z) const
@@ -83,7 +65,7 @@ void World::updateChunks(const glm::vec3& cameraPosition) {
 
     // Determine which chunks need to be unloaded
     for (auto& [coord, chunk] : chunks) {
-        if (glm::distance(coord, playerChunk) > CHUNK_RADIUS) {
+        if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > CHUNK_RADIUS) {
             chunksToUnload.push_back(coord);
         }
     }
@@ -112,6 +94,26 @@ void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::
     }
 }
 
+void World::generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z) {
+    glm::vec3 blockPos(x, y, z);
+    uint8_t isActive, r, g, b, blockType;
+    unpackVoxelData(chunk.getVoxel(x, y, z), isActive, r, g, b, blockType);
+    glm::vec3 color(r / 255.0f, g / 255.0f, b / 255.0f);
+
+    if (isFaceVisible(chunk, x, y, z, Direction::Front))
+        createFace(vertices, indices, blockPos, glm::vec3(0, 0, 1), color);
+    if (isFaceVisible(chunk, x, y, z, Direction::Back))
+        createFace(vertices, indices, blockPos, glm::vec3(0, 0, -1), color);
+    if (isFaceVisible(chunk, x, y, z, Direction::Left))
+        createFace(vertices, indices, blockPos, glm::vec3(-1, 0, 0), color);
+    if (isFaceVisible(chunk, x, y, z, Direction::Right))
+        createFace(vertices, indices, blockPos, glm::vec3(1, 0, 0), color);
+    if (isFaceVisible(chunk, x, y, z, Direction::Top))
+        createFace(vertices, indices, blockPos, glm::vec3(0, 1, 0), color);
+    if (isFaceVisible(chunk, x, y, z, Direction::Bottom))
+        createFace(vertices, indices, blockPos, glm::vec3(0, -1, 0), color);
+}
+
 void World::generateTerrain(Chunk& chunk) {
     const float frequency = 0.05f;
     const float amplitude = 20.0f;
@@ -133,7 +135,7 @@ void World::generateTerrain(Chunk& chunk) {
     }
 }
 
-bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction) {
+bool World::isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction) {
     switch (direction) {
         case Direction::Front:  return !chunk.isBlockActive(x, y, z + 1);
         case Direction::Back:   return !chunk.isBlockActive(x, y, z - 1);
@@ -145,7 +147,7 @@ bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction)
     return false;
 }
 
-static void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const glm::vec3& normal, const glm::vec3& color) {
+void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const glm::vec3& normal, const glm::vec3& color) {
     static const glm::vec3 faceVertices[4] = {
         {0.0f, 0.0f, 0.0f},
         {1.0f, 0.0f, 0.0f},
@@ -155,7 +157,7 @@ static void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& ind
 
     uint32_t startIndex = vertices.size();
     for (int i = 0; i < 4; ++i) {
-        vertices.push_back({ blockPos + faceVertices[i], color });
+        vertices.push_back({ blockPos + faceVertices[i], color, {0.f,0.f}});
     }
 
     indices.push_back(startIndex);
@@ -164,26 +166,7 @@ static void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& ind
     indices.push_back(startIndex);
     indices.push_back(startIndex + 2);
     indices.push_back(startIndex + 3);
+
+    (void)normal;
 }
-
-static void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z) {
-    glm::vec3 blockPos(x, y, z);
-    uint8_t isActive, r, g, b, blockType;
-    unpackVoxelData(chunk.getVoxel(x, y, z), isActive, r, g, b, blockType);
-    glm::vec3 color(r / 255.0f, g / 255.0f, b / 255.0f);
-
-    if (isFaceVisible(chunk, x, y, z, Direction::Front))
-        createFace(vertices, indices, blockPos, glm::vec3(0, 0, 1), color);
-    if (isFaceVisible(chunk, x, y, z, Direction::Back))
-        createFace(vertices, indices, blockPos, glm::vec3(0, 0, -1), color);
-    if (isFaceVisible(chunk, x, y, z, Direction::Left))
-        createFace(vertices, indices, blockPos, glm::vec3(-1, 0, 0), color);
-    if (isFaceVisible(chunk, x, y, z, Direction::Right))
-        createFace(vertices, indices, blockPos, glm::vec3(1, 0, 0), color);
-    if (isFaceVisible(chunk, x, y, z, Direction::Top))
-        createFace(vertices, indices, blockPos, glm::vec3(0, 1, 0), color);
-    if (isFaceVisible(chunk, x, y, z, Direction::Bottom))
-        createFace(vertices, indices, blockPos, glm::vec3(0, -1, 0), color);
-}
-
 

@@ -2,7 +2,7 @@
 #define CAMERA_HPP
 
 #include "glm/glm.hpp"
-#include "GLFW/glfw3.h"
+#include "Renderer.hpp"
 
 #if defined(_WIN32) || defined(_WIN64)
     #ifndef M_PI

@@ -6,6 +6,37 @@
 #include <glm/glm.hpp>
 #include <unordered_map>
 #include "defines.hpp"
+#include <functional>
+
+namespace std {
+	template <>
+	struct hash<glm::ivec2>{
+		std::size_t operator()(const glm::ivec2& coord) const {
+			return hash<int>()(coord.x) ^ (hash<int>()(coord.y) << 1);
+		}
+	};
+}
+
+inline Voxel packVoxelData(uint8_t isActive, uint8_t r, uint8_t g, uint8_t b, uint8_t blockType) {
+    Voxel data = 0;
+    data |= (isActive & 0x1) << 31;        // Store isActive in the highest bit
+    data |= (blockType & 0x7) << 24;       // Store blockType in the next 3 bits
+    data |= (r & 0xFF) << 16;              // Store red in the next 8 bits
+    data |= (g & 0xFF) << 8;               // Store green in the next 8 bits
+    data |= (b & 0xFF);                    // Store blue in the lowest 8 bits
+    return data;
+}
+
+inline void unpackVoxelData(Voxel data, uint8_t& isActive, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& blockType) {
+    isActive = (data >> 31) & 0x1;
+    blockType = (data >> 24) & 0x7;
+    r = (data >> 16) & 0xFF;
+    g = (data >> 8) & 0xFF;
+    b = data & 0xFF;
+}
+typedef enum class Direction {
+    Front, Back, Left, Right, Top, Bottom
+} Direction;
 
 typedef struct Face {
 	Vertex vertices[4]; // Four vertices for a face
@@ -28,7 +59,7 @@ class Chunk {
 		static constexpr uint8_t WIDTH = 16;
 		static constexpr uint16_t HEIGHT = 256;
 		static constexpr uint8_t DEPTH = 16;
-		static constexpr uint8_t SIZE = WIDTH * HEIGHT * DEPTH;
+		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
 	private:
 		std::vector<Voxel> voxels; 
@@ -48,6 +79,9 @@ class World {
 
 		void updateChunks(const glm::vec3& playerPos);
 		void generateWorldMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
+		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z);
+		bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction);
+		void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const glm::vec3& normal, const glm::vec3& color);
 
 	private:
 		std::unordered_map<glm::ivec2, Chunk> chunks;
@@ -57,9 +91,7 @@ class World {
 		void generateTerrain(Chunk& chunk);
 };
 
-enum class Direction {
-    Front, Back, Left, Right, Top, Bottom
-};
+
 
 
 #endif

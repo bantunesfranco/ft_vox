@@ -1,6 +1,5 @@
 #include "Engine.hpp"
 #include <iostream>
-// #include <glad/gl.h>
 
 vox_errno_t	Engine::vox_errno = VOX_SUCCESS;
 

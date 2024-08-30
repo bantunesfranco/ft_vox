@@ -1,11 +1,10 @@
 
+#include "Renderer.hpp"
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
-#include <glad/gl.h>
 #include <iostream>
 #include "Camera.hpp"
-#include "linmath.h"
 
 void setupImGui(GLFWwindow* window)
 {

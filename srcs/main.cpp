@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/08/30 14:16:05 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/08/30 19:00:45 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,7 +14,6 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#include <glad/gl.h>
 #include "App.hpp"
 #include <iostream>
 #include <vector>

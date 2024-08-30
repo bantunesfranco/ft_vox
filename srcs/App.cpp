@@ -1,5 +1,4 @@
 #include "App.hpp"
-#include "World.hpp"
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
@@ -21,9 +20,9 @@ void App::setCallbackFunctions(void)
 
 void App::run()
 {
-
-
 	uint32_t texture = loadTexture("textures/amethyst_block.png");
+    (void)texture;
+    World world;
 
 	while (windowIsOpen(window))
 	{

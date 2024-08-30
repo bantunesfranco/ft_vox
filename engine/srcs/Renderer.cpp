@@ -1,15 +1,17 @@
 
+#include "Engine.hpp"
+#include "Renderer.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include "Engine.hpp"
 #include <vector>
 #include <cmath>
-#include "Renderer.hpp"
 
-#define GLAD_GL_IMPLEMENTATION
-#include "glad/gl.h"
+#define GLAD_GL_IMPLEMENTATION 
+#define GLFW_INCLUDE_NONE
+#define STB_IMAGE_IMPLEMENTATION
+
 
 Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-1), _textureID(0) {
     const char* code = loadShaderCode(VSHADER_PATH);

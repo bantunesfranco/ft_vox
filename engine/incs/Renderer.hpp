@@ -5,18 +5,20 @@
 #define FSHADER_PATH "engine/shaders/fragment.glsl"
 #define VSHADER_PATH "engine/shaders/vertex.glsl"
 
+#include "glad/gl.h"
+#include "GLFW/glfw3.h"
+#include "stb_image.h"
+
 #include "defines.hpp"
-#include "Camera.hpp"
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include <glad/gl.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-
+class Camera;
 class Renderer
 {
 	private:

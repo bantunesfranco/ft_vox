@@ -1,13 +1,5 @@
 #ifndef ENGINE_HPP
 #define ENGINE_HPP
-
-#define GLFW_INCLUDE_NONE
-#include "GLFW/glfw3.h"
-
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
-#include "glad/gl.h"
  
 #include <stdlib.h>
 #include <stddef.h>

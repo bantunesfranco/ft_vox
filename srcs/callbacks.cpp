@@ -2,11 +2,12 @@
 #include "Camera.hpp"
 #include "App.hpp"
 #include <iostream>
+#include <glm/gtc/matrix_transform.hpp>  // For glm::radians
 
 void error_callback(int error, const char* description)
 {
-	(void)error;
-	fprintf(stderr, "Error: %s\n", description);
+    (void)error;
+    fprintf(stderr, "Error: %s\n", description);
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
@@ -29,19 +30,18 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     camera->yaw   += xoffset;
     camera->pitch += yoffset;
 
-	if (camera->pitch > 89.0f)
-		camera->pitch = 89.0f;
-	if (camera->pitch < -89.0f)
-		camera->pitch = -89.0f;
+    if (camera->pitch > 89.0f)
+        camera->pitch = 89.0f;
+    if (camera->pitch < -89.0f)
+        camera->pitch = -89.0f;
 
-	glm::vec3 dir;
-    float pitch = DEG2RAD(camera->pitch);
-    float yaw = DEG2RAD(camera->yaw);
-    dir[0] = cosf(yaw) * cosf(pitch);
-    dir[1] = sinf(pitch);
-    dir[2] = sinf(yaw) * cosf(pitch);
-	(void)dir;
-    // vec3_norm(camera->dir, dir);
+    glm::vec3 dir;
+    float pitch = glm::radians(camera->pitch);
+    float yaw = glm::radians(camera->yaw);
+    dir.x = cosf(yaw) * cosf(pitch);
+    dir.y = sinf(pitch);
+    dir.z = sinf(yaw) * cosf(pitch);
+    camera->dir = glm::normalize(dir);
 }
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
@@ -53,7 +53,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     App* app = static_cast<App*>(glfwGetWindowUserPointer(window));
     Camera* camera = app->camera;
 
-    glm::vec3 step = camera->dir * app->getDeltaTime() * 32.0f;
+    glm::vec3 step = glm::normalize(camera->dir);  // Ensure direction vector is normalized
     glm::vec3 perp;
 
     if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
@@ -107,7 +107,3 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     dir.z = sinf(yaw) * cosf(pitch);
     camera->dir = glm::normalize(dir);
 }
-
-
-
-
