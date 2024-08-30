@@ -1,6 +1,17 @@
 #ifndef DEFINES_HPP
 #define DEFINES_HPP
 
+#include <glm/glm.hpp>
+
+// Define a voxel as a 32-bit integer
+typedef uint32_t Voxel;
+
+typedef struct Vertex {
+    glm::vec3 position;  // Vertex position
+    glm::vec3 color;     // Vertex color
+    glm::vec2 texCoords; // Texture coordinates
+} Vertex;
+
 typedef enum settings
 {
 	VOX_STRETCH_IMAGE = 0,	// Image resize on window resize. Default: false

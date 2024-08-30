@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/08/29 21:41:21 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/08/30 14:16:05 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,8 +16,6 @@
 
 #include <glad/gl.h>
 #include "App.hpp"
-#include "Chunk.hpp"
-#include "vertex.hpp"
 #include <iostream>
 #include <vector>
 #include <memory>

@@ -3,8 +3,11 @@
 
 #define GLFW_INCLUDE_NONE
 #include "GLFW/glfw3.h"
- 
-#include "linmath.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+#include "glad/gl.h"
  
 #include <stdlib.h>
 #include <stddef.h>
@@ -72,6 +75,7 @@ class Engine
 		double				getDeltaTime();
 		void				setFrameTime();
 		bool				isKeyDown(keys_t key);
+		GLuint				loadTexture(const char* path);
 
 };
 

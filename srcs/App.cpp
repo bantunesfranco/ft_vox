@@ -1,4 +1,5 @@
 #include "App.hpp"
+#include "World.hpp"
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
@@ -8,6 +9,7 @@ App::App(int32_t width, int32_t height, const char *title, std::map<settings_t, 
 	_showWireframe = false;
 	setCallbackFunctions();
 	setupImGui(window);
+
 }
 
 void App::setCallbackFunctions(void)
@@ -19,16 +21,14 @@ void App::setCallbackFunctions(void)
 
 void App::run()
 {
-	// std::vector<Vertex> vertices = {
-	// 	{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-	// 	{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-	// 	{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-	// 	{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
-	// };
+
+
+	uint32_t texture = loadTexture("textures/amethyst_block.png");
+
 	while (windowIsOpen(window))
 	{
 		glfwPollEvents();
-		// renderer->render(window, camera, vertices);
+		
 		renderImGui(camera, _showWireframe);
 		glfwSwapBuffers(window);
 		setFrameTime();
@@ -45,4 +45,25 @@ void App::terminate()
         ImGui::DestroyContext();
     }
     Engine::terminate();
+}
+
+void App::generateTerrain(Chunk& chunk) {
+    const float frequency = 0.05f;
+    const float amplitude = 20.0f;
+
+    for (int x = 0; x < Chunk::WIDTH; ++x) {
+        for (int z = 0; z < Chunk::DEPTH; ++z) {
+            // Basic sine wave terrain with added randomness
+            float height = amplitude * (std::sin(frequency * x) + std::sin(frequency * z)) +
+                           (rand() % 10 - 5) +  // Random value to add noise
+                           (Chunk::HEIGHT / 4);
+
+            int intHeight = static_cast<int>(height);
+
+            for (int y = 0; y < intHeight; ++y) {
+                uint32_t voxelData = packVoxelData(1, 100, 255, 100, 1);  // Example voxel data (active, color, block type)
+                chunk.setVoxel(x, y, z, voxelData);
+            }
+        }
+    }
 }

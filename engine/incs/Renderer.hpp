@@ -6,34 +6,42 @@
 #define VSHADER_PATH "engine/shaders/vertex.glsl"
 
 #include "defines.hpp"
-#include "vertex.hpp"
 #include "Camera.hpp"
 #include <cstring>
 #include <string>
 #include <vector>
 
+#include <glad/gl.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+
 class Renderer
 {
 	private:
-		uint32_t	_vao;
-		uint32_t	_vbo;
-		uint32_t	_shaderprog;
+		GLuint _shaderprog;
+		GLuint _vao;
+		GLuint _vbo;
+		GLuint _ibo;
+		GLint _mvpLocation;
+		GLuint _textureID;
 
-		void		loadShaderCode(const char* path, char* code);
+		const char	*loadShaderCode(const char* path);
 		uint32_t	compileShader(const char* code, int32_t type);
-		void		initProjectionMatrix(GLFWwindow *window, Camera *camera, mat4x4 *mvp);
 
 	public:
-		Renderer() = default;
+		Renderer();
 		~Renderer();
 		Renderer(const Renderer&) = delete;
-		Renderer& operator=(const Renderer&);
+		Renderer& operator=(const Renderer&) = default;
 	
-		void		render(GLFWwindow *window, Camera *camera, const std::vector<Vertex>& vertices);
-		void		initBuffers();
-		uint32_t	getShaderProg() { return _shaderprog; }
-		uint32_t	getVao() { return _vao; }
-		uint32_t	getVbo() { return _vbo; }
+		void	render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4 *mvp);
+		void	initProjectionMatrix(GLFWwindow *window, Camera *camera, glm::mat4 *mvp);
+		GLuint	getShaderProgram() const { return _shaderprog; }
+		GLint	getMVPUniformLocation() const { return _mvpLocation; }
+		GLuint	getVertexArrayObject() const { return _vao; }
+		GLuint	loadTexture(const char* path);
 
 };
 

@@ -61,8 +61,7 @@ target_link_libraries(ft_vox PRIVATE engine ImGui glfw OpenGL::GL)
 
 # Add include directories for the game and engine headers
 target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/incs)
-target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/engine/incs)
-
-# Ensure GLFW is included and linked properly
+target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/incs)  # Include engine headers
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw-src/include)
-target_link_libraries(ft_vox PRIVATE glfw)
+target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw-src/deps)
+

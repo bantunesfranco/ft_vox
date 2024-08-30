@@ -1,7 +1,7 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 
-#include "linmath.h"
+#include "glm/glm.hpp"
 #include "GLFW/glfw3.h"
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -23,15 +23,15 @@ class Camera
 		Camera(const Camera& camera) = delete;
 		Camera& operator=(const Camera&);
 
-		vec3	pos;
-		vec3	dir;
-		vec3	up;
-		float	pitch;
-		float	yaw;
-		double	mousePos[2];
+		glm::vec3	pos;
+		glm::vec3	dir;
+		glm::vec3	up;
+		float		pitch;
+		float		yaw;
+		double		mousePos[2];
 
-		void setCameraPosition(const vec3& newPos);
-		void setCameraDirection(const vec3& newDir);
+		void setCameraPosition(const glm::vec3& newPos);
+		void setCameraDirection(const glm::vec3& newDir);
 };
 
 #endif

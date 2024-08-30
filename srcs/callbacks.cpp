@@ -34,7 +34,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 	if (camera->pitch < -89.0f)
 		camera->pitch = -89.0f;
 
-    vec3 dir;
+	glm::vec3 dir;
     float pitch = DEG2RAD(camera->pitch);
     float yaw = DEG2RAD(camera->yaw);
     dir[0] = cosf(yaw) * cosf(pitch);
@@ -46,65 +46,66 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-	(void)scancode;
-	(void)mods;
+    (void)scancode;
+    (void)mods;
 
-	App* app = static_cast<App*>(glfwGetWindowUserPointer(window));
-	Camera* camera = app->camera;
+    // Get the App instance and Camera
+    App* app = static_cast<App*>(glfwGetWindowUserPointer(window));
+    Camera* camera = app->camera;
 
-	vec3 step, perp;
-	vec3_scale(step, camera->dir, app->getDeltaTime()*32.0f);
+    glm::vec3 step = camera->dir * app->getDeltaTime() * 32.0f;
+    glm::vec3 perp;
 
-	if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
-	{
-		app->closeWindow();
-		return;
-	}
-	if (key == VOX_KEY_X && action == VOX_PRESS)
-	{
-		app->_showWireframe = !app->_showWireframe;
-		std::cout << "Toggle wireframe" << std::endl;
-	}
-	if (app->isKeyDown(VOX_KEY_SPACE))
-		std::cout << "Space key pressed" << std::endl;
-	if (app->isKeyDown(VOX_KEY_W))
-		vec3_add(camera->pos, camera->pos, step);
-	if (app->isKeyDown(VOX_KEY_A))
-	{
-		vec3_mul_cross(perp, step, camera->up);
-		vec3_sub(camera->pos, camera->pos, perp);
-	}
-	if (app->isKeyDown(VOX_KEY_S))
-		vec3_sub(camera->pos, camera->pos, step);
-	if (app->isKeyDown(VOX_KEY_D))
-	{
-		vec3_mul_cross(perp, step, camera->up);
-		vec3_add(camera->pos, camera->pos, perp);
-	}
-	if (app->isKeyDown(VOX_KEY_UP))
-	{
-		camera->pitch += 1.0f;
-		if (camera->pitch > 89.0f)
-			camera->pitch = 89.0f;
-	}
-	if (app->isKeyDown(VOX_KEY_DOWN))
-	{
-		camera->pitch -= 1.0f;
-		if (camera->pitch < -89.0f)
-			camera->pitch = -89.0f;
-	}
-	if (app->isKeyDown(VOX_KEY_LEFT))
-		camera->yaw -= 1.0f;
-	if (app->isKeyDown(VOX_KEY_RIGHT))
-		camera->yaw += 1.0f;
-	
-	vec3 dir;
-	float pitch = DEG2RAD(camera->pitch);
-    float yaw = DEG2RAD(camera->yaw);
-    dir[0] = cosf(yaw) * cosf(pitch);
-    dir[1] = sinf(pitch);
-    dir[2] = sinf(yaw) * cosf(pitch);
-    vec3_norm(camera->dir, dir);
+    if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
+    {
+        app->closeWindow();
+        return;
+    }
+    if (key == VOX_KEY_X && action == VOX_PRESS)
+    {
+        app->_showWireframe = !app->_showWireframe;
+        std::cout << "Toggle wireframe" << std::endl;
+    }
+    if (app->isKeyDown(VOX_KEY_SPACE))
+        std::cout << "Space key pressed" << std::endl;
+    if (app->isKeyDown(VOX_KEY_W))
+        camera->pos += step;
+    if (app->isKeyDown(VOX_KEY_A))
+    {
+        perp = glm::normalize(glm::cross(step, camera->up));
+        camera->pos -= perp;
+    }
+    if (app->isKeyDown(VOX_KEY_S))
+        camera->pos -= step;
+    if (app->isKeyDown(VOX_KEY_D))
+    {
+        perp = glm::normalize(glm::cross(step, camera->up));
+        camera->pos += perp;
+    }
+    if (app->isKeyDown(VOX_KEY_UP))
+    {
+        camera->pitch += 1.0f;
+        if (camera->pitch > 89.0f)
+            camera->pitch = 89.0f;
+    }
+    if (app->isKeyDown(VOX_KEY_DOWN))
+    {
+        camera->pitch -= 1.0f;
+        if (camera->pitch < -89.0f)
+            camera->pitch = -89.0f;
+    }
+    if (app->isKeyDown(VOX_KEY_LEFT))
+        camera->yaw -= 1.0f;
+    if (app->isKeyDown(VOX_KEY_RIGHT))
+        camera->yaw += 1.0f;
+    
+    glm::vec3 dir;
+    float pitch = glm::radians(camera->pitch);
+    float yaw = glm::radians(camera->yaw);
+    dir.x = cosf(yaw) * cosf(pitch);
+    dir.y = sinf(pitch);
+    dir.z = sinf(yaw) * cosf(pitch);
+    camera->dir = glm::normalize(dir);
 }
 
 
