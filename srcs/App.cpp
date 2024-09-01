@@ -20,17 +20,26 @@ void App::setCallbackFunctions(void)
 
 void App::run()
 {
-	uint32_t texture = loadTexture("textures/amethyst_block.png");
-    (void)texture;
     World world;
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    glm::mat4 mvp;
 
 	while (windowIsOpen(window))
 	{
 		glfwPollEvents();
 		
+        world.updateChunks(camera->pos);
+        world.generateWorldMesh(vertices, indices);
+        renderer->initProjectionMatrix(window, camera, &mvp);
+        renderer->render(vertices, indices, &mvp);
+
 		renderImGui(camera, _showWireframe);
 		glfwSwapBuffers(window);
 		setFrameTime();
+
+        vertices.clear();
+        indices.clear();
 	}
 }
 

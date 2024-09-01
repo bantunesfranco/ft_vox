@@ -48,12 +48,10 @@ file(GLOB_RECURSE HEADERS "incs/*.hpp")
 add_library(engine STATIC ${SOURCES} ${HEADERS})
 
 # Remove unwanted files from the GLFW dependency
-# Ensure this is truly necessary
-# file(REMOVE ${glfw_SOURCE_DIR}/deps/stb_image_write.h)
+file(REMOVE ${glfw_SOURCE_DIR}/deps/stb_image_write.h)
 
 # Link the dependencies
 target_link_libraries(engine PUBLIC glfw)
-target_link_libraries(engine PUBLIC stb_image)
 
 # Add include directories for GLM, GLFW, stb_image, and the engine headers
 target_include_directories(engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/incs)

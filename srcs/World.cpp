@@ -1,4 +1,5 @@
 #include "World.hpp"
+#include <iostream>
 
 Chunk::Chunk() : voxels(Chunk::SIZE) {}
 
@@ -36,17 +37,20 @@ World::World() : playerChunk(glm::ivec2(0,0)) {}
 
 void World::generateWorldMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
 	for (auto& [coord, chunk] : chunks) {
+        // std::cout << "Generating chunk mesh for chunk at " << coord.x << ", " << coord.y << std::endl;
 		generateChunkMesh(chunk, vertices, indices);
 	}
 }
 
 void World::updateChunks(const glm::vec3& cameraPosition) {
     glm::ivec2 newPlayerChunk = glm::ivec2(cameraPosition.x / Chunk::WIDTH, cameraPosition.z / Chunk::DEPTH);
+    static bool first_gen = true;
 
-    if (newPlayerChunk == playerChunk) {
+    if (!first_gen && newPlayerChunk == playerChunk) {
         return; // No need to update if the player chunk hasn't changed
     }
 
+    first_gen = false;
     playerChunk = newPlayerChunk;
 
     // Calculate the chunks to load

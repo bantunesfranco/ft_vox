@@ -57,10 +57,10 @@ find_package(OpenGL REQUIRED)
 
 # Link the ImGui and engine libraries to your executable
 target_link_libraries(ft_vox PRIVATE engine ImGui)
-target_link_libraries(ft_vox PRIVATE stb_image)
 
 # Add include directories for the game and engine headers
 target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/incs)
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/incs)
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/include)
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/deps)
+target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/stb_image)

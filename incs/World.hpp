@@ -56,9 +56,10 @@ class Chunk {
 		bool		isBlockActive(int x, int y, int z) const;
 
 		// Define the dimensions of a chunk
-		static constexpr uint8_t WIDTH = 16;
-		static constexpr uint16_t HEIGHT = 256;
-		static constexpr uint8_t DEPTH = 16;
+		static constexpr uint8_t WIDTH = 5;
+		// static constexpr uint16_t HEIGHT = 256;
+		static constexpr uint16_t HEIGHT = 5;
+		static constexpr uint8_t DEPTH = 5;
 		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
 	private:
@@ -74,7 +75,7 @@ class World {
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
 
-		constexpr static int CHUNK_RADIUS = 3;
+		constexpr static int CHUNK_RADIUS = 0;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		void updateChunks(const glm::vec3& playerPos);
@@ -90,8 +91,5 @@ class World {
 		void generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
 		void generateTerrain(Chunk& chunk);
 };
-
-
-
 
 #endif

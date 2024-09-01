@@ -2,12 +2,11 @@
 #ifndef Renderer_HPP
 #define Renderer_HPP
 
-#define FSHADER_PATH "engine/shaders/fragment.glsl"
-#define VSHADER_PATH "engine/shaders/vertex.glsl"
+#define FSHADER_PATH "./engine/shaders/fragment.glsl"
+#define VSHADER_PATH "./engine/shaders/vertex.glsl"
 
 #include "glad/gl.h"
 #include "GLFW/glfw3.h"
-#include "stb_image.h"
 
 #include "defines.hpp"
 #include <cstring>
@@ -29,8 +28,8 @@ class Renderer
 		GLint _mvpLocation;
 		GLuint _textureID;
 
-		const char	*loadShaderCode(const char* path);
-		uint32_t	compileShader(const char* code, int32_t type);
+		std::string* loadShaderCode(const char* path);
+		uint32_t	compileShader(const std::string* code, int32_t type);
 
 	public:
 		Renderer();
