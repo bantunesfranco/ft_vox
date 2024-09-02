@@ -12,6 +12,7 @@ static const char*	vox_errors[VOX_ERRMAX] = {
 	"Failed to compile the vertex shader.",
 	"Failed to compile the fragment shader.",
 	"Failed to compile the shaders.",
+	"Failed to load the texture",
 	"Failed to allocate memory",
 	"Failed to initialize GLAD",
 	"Failed to initialize GLFW",

@@ -4,12 +4,14 @@
 #include <glm/glm.hpp>
 
 // Define a voxel as a 32-bit integer
-typedef uint32_t Voxel;
+typedef uint32_t		Voxel;
+typedef int				GLint;
+typedef unsigned int	GLuint;
 
 typedef struct Vertex {
-    glm::vec3 position;  // Vertex position
-    glm::vec3 color;     // Vertex color
-    glm::vec2 texCoords; // Texture coordinates
+    glm::vec3	position;  // Vertex position
+    glm::vec2	texCoords; // Texture coordinates
+	GLuint		textureID; // Texture ID
 } Vertex;
 
 typedef enum settings
@@ -36,6 +38,7 @@ typedef enum vox_errno_e
 	VOX_VERTFAIL,		// Failed to compile the vertex shader.
 	VOX_FRAGFAIL,		// Failed to compile the fragment shader.
 	VOX_SHDRFAIL,		// Failed to compile the shaders.
+	VOX_TEXTFAIL,		// Failed to load the texture.
 	VOX_MEMFAIL,		// Dynamic memory allocation has failed.
 	VOX_GLADFAIL,		// OpenGL loader has failed.
 	VOX_GLFWFAIL,		// GLFW failed to initialize.

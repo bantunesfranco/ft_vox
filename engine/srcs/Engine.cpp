@@ -1,6 +1,9 @@
 #include "Engine.hpp"
 #include <iostream>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 vox_errno_t	Engine::vox_errno = VOX_SUCCESS;
 
 static void framebuffer_callback(GLFWwindow *window, int width, int height)
@@ -40,7 +43,6 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 		terminate();
 		std::exit(Engine::vox_errno);
 	}
-	
 }
 
 Engine::~Engine()
@@ -94,47 +96,58 @@ void Engine::initWindow(int32_t width, int32_t height, const char* title)
 	if (!window)
 		throw EngineException(VOX_WINFAIL);
 
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	glfwMakeContextCurrent(window);
 	gladLoadGL(glfwGetProcAddress);
 	glfwSwapInterval(1);
 	glfwSetWindowUserPointer(window, (void*)this);
 	glfwSetFramebufferSizeCallback(window, framebuffer_callback);
+
+	if (glGetError() != GL_NO_ERROR)
+		throw EngineException(VOX_WINFAIL);
 }
 
-// GLuint Engine::loadTexture(const char* path) {
-//     GLuint textureID;
-//     glGenTextures(1, &textureID);
-//     glBindTexture(GL_TEXTURE_2D, textureID);
+GLuint Engine::loadTexture(const char* path) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
 
-//     // Load the image
-//     int width, height, nrChannels;
-//     unsigned char *data = stbi_load(path, &width, &height, &nrChannels, 0);
-//     if (data) {
-//         uint32_t format;
-//         if (nrChannels == 1)
-//             format = GL_RED;
-//         else if (nrChannels == 3)
-//             format = GL_RGB;
-//         else if (nrChannels == 4)
-//             format = GL_RGBA;
+	if (glGetError() != GL_NO_ERROR)
+		throw EngineException(VOX_TEXTFAIL);
 
-//         glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-//         glGenerateMipmap(GL_TEXTURE_2D);
+    // Load texture image here (using stb_image or another method)
+    int width, height, channels;
+    unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
 
-//         // Set texture parameters
-//         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-//         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-//         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-//         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-//     } else {
-//         std::cerr << "Failed to load texture: " << path << std::endl;
-//     }
-//     stbi_image_free(data);
-//     return textureID;
-// }
+    if (data) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(data);
+    } else {
+        throw EngineException(VOX_TEXTFAIL);
+    }
 
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	if (glGetError() != GL_NO_ERROR)
+		throw EngineException(VOX_TEXTFAIL);
+
+    return textureID;
+}
+
+void	Engine::toggleWireframe(bool showWireframe)
+{
+	if (showWireframe) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);  // Switch to wireframe mode
+    } else {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);  // Switch to solid fill mode
+    }
+}
 
 void	Engine::setFrameTime()
 {

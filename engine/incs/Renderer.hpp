@@ -26,7 +26,6 @@ class Renderer
 		GLuint _vbo;
 		GLuint _ibo;
 		GLint _mvpLocation;
-		GLuint _textureID;
 
 		std::string* loadShaderCode(const char* path);
 		uint32_t	compileShader(const std::string* code, int32_t type);
@@ -36,14 +35,14 @@ class Renderer
 		~Renderer();
 		Renderer(const Renderer&) = delete;
 		Renderer& operator=(const Renderer&) = default;
+
+		GLuint textureID;
 	
 		void	render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4 *mvp);
 		void	initProjectionMatrix(GLFWwindow *window, Camera *camera, glm::mat4 *mvp);
 		GLuint	getShaderProgram() const { return _shaderprog; }
 		GLint	getMVPUniformLocation() const { return _mvpLocation; }
 		GLuint	getVertexArrayObject() const { return _vao; }
-		GLuint	loadTexture(const char* path);
-
 };
 
 #endif

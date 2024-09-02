@@ -2,13 +2,14 @@
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
+#include <iostream>
 
 App::App(int32_t width, int32_t height, const char *title, std::map<settings_t, bool> settings) : Engine(width, height, title, settings) {
 
 	_showWireframe = false;
 	setCallbackFunctions();
 	setupImGui(window);
-
+    loadTextures();
 }
 
 void App::setCallbackFunctions(void)
@@ -20,7 +21,7 @@ void App::setCallbackFunctions(void)
 
 void App::run()
 {
-    World world;
+    World world(textures);
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     glm::mat4 mvp;
@@ -55,23 +56,22 @@ void App::terminate()
     Engine::terminate();
 }
 
-void App::generateTerrain(Chunk& chunk) {
-    const float frequency = 0.05f;
-    const float amplitude = 20.0f;
-
-    for (int x = 0; x < Chunk::WIDTH; ++x) {
-        for (int z = 0; z < Chunk::DEPTH; ++z) {
-            // Basic sine wave terrain with added randomness
-            float height = amplitude * (std::sin(frequency * x) + std::sin(frequency * z)) +
-                           (rand() % 10 - 5) +  // Random value to add noise
-                           (Chunk::HEIGHT / 4);
-
-            int intHeight = static_cast<int>(height);
-
-            for (int y = 0; y < intHeight; ++y) {
-                uint32_t voxelData = packVoxelData(1, 100, 255, 100, 1);  // Example voxel data (active, color, block type)
-                chunk.setVoxel(x, y, z, voxelData);
-            }
-        }
+void App::loadTextures(void) {
+    try
+    {
+        // textures[BlockType::Grass] = loadTexture("./textures/grass.png");
+        // textures[BlockType::Dirt] = loadTexture("./textures/dirt.png");
+        // textures[BlockType::Stone] = loadTexture("./textures/stone.png");
+        // textures[BlockType::Sand] = loadTexture("./textures/sand.png");
+        // textures[BlockType::Water] = loadTexture("./textures/water.png");
+        textures[BlockType::Grass] = loadTexture("./textures/grass.png");
+        textures[BlockType::Stone] = loadTexture("./textures/amethyst.png");
     }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << std::endl;
+        terminate();
+        std::exit(Engine::vox_errno);
+    }
+
 }

@@ -16,11 +16,11 @@ class App : public Engine
 		void	terminate();
 
 		bool	_showWireframe;
-
-		void	generateTerrain(Chunk& chunk);
+		std::unordered_map<BlockType, GLint> textures;
 	
 	private:
 		void	setCallbackFunctions(void);
+		void	loadTextures(void);
 };
 
 void error_callback(int error, const char* description);

@@ -64,6 +64,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     if (key == VOX_KEY_X && action == VOX_PRESS)
     {
         app->_showWireframe = !app->_showWireframe;
+        app->toggleWireframe(app->_showWireframe);
         std::cout << "Toggle wireframe" << std::endl;
     }
     if (app->isKeyDown(VOX_KEY_SPACE))
