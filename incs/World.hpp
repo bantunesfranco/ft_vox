@@ -61,7 +61,7 @@ class Chunk {
 
 		// Define the dimensions of a chunk
 		static constexpr uint8_t WIDTH = 16;
-		static constexpr uint16_t HEIGHT = 16;
+		static constexpr uint16_t HEIGHT = 32;
 		static constexpr uint8_t DEPTH = 16;
 		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
@@ -82,7 +82,7 @@ class World {
 
 		void updateChunks(const glm::vec3& playerPos);
 		void generateWorldMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
-		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z);
+		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord);
 		bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction);
 		void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID);
 	private:
@@ -90,8 +90,8 @@ class World {
 		std::unordered_map<BlockType, GLint> textures;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
 
-		void generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
-		void generateTerrain(Chunk& chunk);
+		void generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord);
+		void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 };
 
 #endif

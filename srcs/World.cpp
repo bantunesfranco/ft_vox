@@ -38,8 +38,7 @@ World::World(std::unordered_map<BlockType, GLint> textures) : playerChunk(glm::i
 
 void World::generateWorldMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
 	for (auto& [coord, chunk] : chunks) {
-        // std::cout << "Generating chunk mesh for chunk at " << coord.x << ", " << coord.y << std::endl;
-		generateChunkMesh(chunk, vertices, indices);
+		generateChunkMesh(chunk, vertices, indices, coord);
 	}
 
 }
@@ -71,7 +70,7 @@ void World::updateChunks(const glm::vec3& cameraPosition) {
 
     // Determine which chunks need to be unloaded
     for (auto& [coord, chunk] : chunks) {
-        if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > CHUNK_RADIUS) {
+        if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > CHUNK_RADIUS + 0.90f) {
             chunksToUnload.push_back(coord);
         }
     }
@@ -79,7 +78,7 @@ void World::updateChunks(const glm::vec3& cameraPosition) {
     // Load new chunks
     for (const glm::ivec2& coord : chunksToLoad) {
         Chunk& chunk = chunks[coord];
-        generateTerrain(chunk); // Generate terrain data
+        generateTerrain(chunk, coord); // Generate terrain data
     }
 
     // Unload old chunks
@@ -88,20 +87,20 @@ void World::updateChunks(const glm::vec3& cameraPosition) {
     }
 }
 
-void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) {
     for (int x = 0; x < Chunk::WIDTH; ++x) {
         for (int y = 0; y < Chunk::HEIGHT; ++y) {
             for (int z = 0; z < Chunk::DEPTH; ++z) {
-                if (chunk.isBlockActive(x, y, z)) {
-                    generateBlockFaces(vertices, indices, chunk, x, y, z);
-                }
+                if (chunk.isBlockActive(x, y, z))
+                    generateBlockFaces(vertices, indices, chunk, x, y, z, coord);
             }
         }
     }
 }
 
-void World::generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z) {
-    glm::vec3 blockPos(x, y, z);
+void World::generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord) {
+    // glm::vec3 blockPos(x + coord.x, y, z + coord.y);
+    glm::vec3 blockPos(x + coord.x * Chunk::WIDTH, y, z + coord.y * Chunk::DEPTH);
     uint8_t isActive, r, g, b, blockType;
     unpackVoxelData(chunk.getVoxel(x, y, z), isActive, r, g, b, blockType);
 
@@ -119,20 +118,20 @@ void World::generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32
         createFace(vertices, indices, blockPos, Direction::Bottom, textures[static_cast<BlockType>(blockType)]);
 }
 
-void World::generateTerrain(Chunk& chunk) {
+void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord) {
     const float frequency = 0.05f;
     const float amplitude = 20.0f;
 
     for (int x = 0; x < Chunk::WIDTH; ++x) {
         for (int z = 0; z < Chunk::DEPTH; ++z) {
             // Basic sine wave terrain with added randomness
-            float height = amplitude * (std::sin(frequency * x) + std::sin(frequency * z)) +
+            float height = amplitude * (std::sin(frequency * x + coord.x) + std::sin(frequency * z + coord.y)) +
                            (rand() % 10 - 5) +  // Random value to add noise
                            (Chunk::HEIGHT / 4);
 
             int intHeight = static_cast<int>(height);
 
-            for (int y = 0; y < intHeight; ++y) {
+            for (int y = -Chunk::HEIGHT/4; y < intHeight; ++y) {
                 BlockType blocktype = rand()%2 ? BlockType::Grass : BlockType::Stone;
                 uint32_t voxelData = packVoxelData(1, 100, 255, 100, static_cast<uint8_t>(blocktype));  // Example voxel data (active, color, block type)
                 chunk.setVoxel(x, y, z, voxelData);
