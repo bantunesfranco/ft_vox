@@ -36,12 +36,21 @@ bool Chunk::isBlockActive(int x, int y, int z) const
 
 World::World(std::unordered_map<BlockType, GLint> textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
 
-void World::generateWorldMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
-	for (auto& [coord, chunk] : chunks) {
-		generateChunkMesh(chunk, vertices, indices, coord);
-	}
+void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& viewMatrix, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+    Frustum frustum;
+    frustum.updateFrustum(projMatrix, viewMatrix);
 
+    for (auto& [coord, chunk] : chunks) {
+        // Calculate the chunk's bounding box
+        glm::vec3 minPos(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
+        glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
+
+        if (frustum.isBoxInFrustum(minPos, maxPos)) {
+            generateChunkMesh(chunk, vertices, indices, coord);
+        }
+    }
 }
+
 
 void World::updateChunks(const glm::vec3& cameraPosition) {
     glm::ivec2 newPlayerChunk = glm::ivec2(cameraPosition.x / Chunk::WIDTH, cameraPosition.z / Chunk::DEPTH);

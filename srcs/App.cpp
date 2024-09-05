@@ -29,13 +29,15 @@ void App::run()
 	while (windowIsOpen(window))
 	{
 		glfwPollEvents();
-		
-        world.updateChunks(camera->pos);
-        world.generateWorldMesh(vertices, indices);
+
+        fpsCounter->update();
+
         renderer->initProjectionMatrix(window, camera, &mvp);
+        world.updateChunks(camera->pos);
+        world.generateWorldMesh(camera->proj, camera->view, vertices, indices);
         renderer->render(vertices, indices, &mvp);
 
-		renderImGui(camera, _showWireframe);
+		renderImGui(fpsCounter, camera, _showWireframe);
 		glfwSwapBuffers(window);
 		setFrameTime();
 

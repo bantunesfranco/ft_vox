@@ -81,7 +81,7 @@ class World {
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		void updateChunks(const glm::vec3& playerPos);
-		void generateWorldMesh(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
+		void generateWorldMesh(const glm::mat4& proj, const glm::mat4& view, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
 		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord);
 		bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction);
 		void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID);
@@ -93,5 +93,50 @@ class World {
 		void generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord);
 		void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 };
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+class Frustum {
+public:
+    glm::vec4 planes[6];
+
+    void updateFrustum(const glm::mat4& proj, const glm::mat4& view) {
+        glm::mat4 clip = proj * view;
+
+        // Extract planes from the combined view-projection matrix
+        planes[0] = glm::vec4(clip[0][3] - clip[0][0], clip[1][3] - clip[1][0], clip[2][3] - clip[2][0], clip[3][3] - clip[3][0]); // Right
+        planes[1] = glm::vec4(clip[0][3] + clip[0][0], clip[1][3] + clip[1][0], clip[2][3] + clip[2][0], clip[3][3] + clip[3][0]); // Left
+        planes[2] = glm::vec4(clip[0][3] + clip[0][1], clip[1][3] + clip[1][1], clip[2][3] + clip[2][1], clip[3][3] + clip[3][1]); // Bottom
+        planes[3] = glm::vec4(clip[0][3] - clip[0][1], clip[1][3] - clip[1][1], clip[2][3] - clip[2][1], clip[3][3] - clip[3][1]); // Top
+        planes[4] = glm::vec4(clip[0][3] - clip[0][2], clip[1][3] - clip[1][2], clip[2][3] - clip[2][2], clip[3][3] - clip[3][2]); // Far
+        planes[5] = glm::vec4(clip[0][3] + clip[0][2], clip[1][3] + clip[1][2], clip[2][3] + clip[2][2], clip[3][3] + clip[3][2]); // Near
+
+        // Normalize the planes
+        for (int i = 0; i < 6; i++) {
+            float length = glm::length(glm::vec3(planes[i]));
+            planes[i] /= length;
+        }
+    }
+
+    bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
+        for (int i = 0; i < 6; i++) {
+            glm::vec3 normal = glm::vec3(planes[i]);
+            float distance = planes[i].w;
+
+            glm::vec3 positive = glm::vec3(
+                normal.x > 0 ? max.x : min.x,
+                normal.y > 0 ? max.y : min.y,
+                normal.z > 0 ? max.z : min.z
+            );
+
+            if (glm::dot(normal, positive) + distance < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
 
 #endif

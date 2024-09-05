@@ -190,11 +190,10 @@ void Renderer::initProjectionMatrix(GLFWwindow* window, Camera* camera, glm::mat
     glViewport(0, 0, width, height);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glm::mat4 m = glm::mat4(1.0f);
     glm::vec3 target = camera->pos + camera->dir;
-    glm::mat4 v = glm::lookAt(camera->pos, target, camera->up);
-    glm::mat4 p = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 100.0f);
+    camera->view = glm::lookAt(camera->pos, target, camera->up);
+    camera->proj = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 100.0f);
 
-    *mvp = p * v * m;
+    *mvp = camera->proj * camera->view * glm::mat4(1.0f);
 }
 

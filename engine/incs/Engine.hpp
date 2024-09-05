@@ -18,6 +18,25 @@
 
 #define BLOCK_SIZE 1.0f
 
+#include <chrono>
+
+class FPSCounter {
+	public:
+		FPSCounter();
+		~FPSCounter() = default;
+		FPSCounter(const FPSCounter&) = default;
+		FPSCounter& operator=(const FPSCounter&) = default;
+
+		void update();
+		int getFPS() const;
+
+	private:
+		float lastTime;
+		int frameCount;
+		int fps;
+};
+
+
 class Engine
 {
 	private:
@@ -45,6 +64,7 @@ class Engine
 		GLFWwindow*			window;
 		Renderer*			renderer;
 		Camera*				camera;
+		FPSCounter*			fpsCounter;
 		int32_t				settings[VOX_SETTINGS_MAX];
 	
 		static const char*	vox_strerror(vox_errno_t val);
@@ -69,8 +89,6 @@ class Engine
 		bool				isKeyDown(keys_t key);
 		GLuint				loadTexture(const char* path);
 		void				toggleWireframe(bool showWireframe);
-
-
 };
 
 

@@ -30,6 +30,8 @@ class Camera
 		float		yaw;
 		double		mousePos[2];
 		float		fov;
+		glm::mat4	view;
+		glm::mat4	proj;
 
 		void setCameraPosition(const glm::vec3& newPos);
 		void setCameraDirection(const glm::vec3& newDir);

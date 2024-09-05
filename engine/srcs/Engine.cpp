@@ -36,6 +36,7 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 		initWindow(width, height, title);
 		camera = new Camera(window);
 		renderer =  new Renderer();
+		fpsCounter = new FPSCounter();
 	}
 	catch (const std::exception &e)
 	{
@@ -66,6 +67,11 @@ void	Engine::terminate()
 	{
 		delete renderer;
 		renderer = nullptr;
+	}
+	if (fpsCounter)
+	{
+		delete fpsCounter;
+		fpsCounter = nullptr;
 	}
 	glfwTerminate();
 }
@@ -161,32 +167,6 @@ double Engine::getDeltaTime() {
 	return deltaTime;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 bool Engine::isKeyDown(keys_t key){ return glfwGetKey(this->window, key); }
 
 bool	Engine::windowIsOpen(GLFWwindow* window)
@@ -238,4 +218,28 @@ void	Engine::setWindowCloseCallback(GLFWwindowclosefun callback)
 void	Engine::setErrorCallback(GLFWerrorfun callback)
 {
 	glfwSetErrorCallback(callback);
+}
+
+FPSCounter::FPSCounter() : frameCount(0), fps(0)
+{
+	lastTime = glfwGetTime();
+}
+
+void FPSCounter::update()
+{
+	frameCount++;
+	float currentTime = glfwGetTime();
+	float deltaTime = currentTime - lastTime;
+
+	if (deltaTime >= 1.0f)
+	{
+		fps = frameCount;
+		frameCount = 0;
+		lastTime = currentTime;
+	}
+}
+
+int FPSCounter::getFPS() const
+{
+	return fps;
 }

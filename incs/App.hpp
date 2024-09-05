@@ -28,6 +28,6 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 void setupImGui(GLFWwindow* window);
-void renderImGui(Camera *camera, bool showWireframe);
+void renderImGui(FPSCounter* fpsCounter, Camera *camera, bool showWireframe);
 
 #endif
