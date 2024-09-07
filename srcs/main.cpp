@@ -6,7 +6,7 @@
 /*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
 /*                                                   +#+                      */
 /*   Created: 2024/04/21 14:36:49 by bfranco       #+#    #+#                 */
-/*   Updated: 2024/09/05 14:28:45 by bfranco       ########   odam.nl         */
+/*   Updated: 2024/09/07 17:31:29 by bfranco       ########   odam.nl         */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -31,5 +31,5 @@ int main(void)
 	app->run();
 	app->terminate();
 
-	exit(EXIT_SUCCESS);
+	return (EXIT_SUCCESS);
 }

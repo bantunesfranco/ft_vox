@@ -12,7 +12,7 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 	glViewport(0, 0, width, height);
 }
 
-Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings) : window(nullptr), renderer(nullptr), camera(nullptr), settings{0, 0, 0, 1, 0, 0}
+Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings) : window(nullptr), renderer(nullptr), camera(nullptr), fpsCounter(nullptr), settings{0, 0, 0, 1, 0, 0}
 {
 	bool init = glfwInit();
 
@@ -48,11 +48,6 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 
 Engine::~Engine()
 {
-	if (camera)
-	{
-		delete camera;
-		camera = nullptr;
-	}
 	terminate();
 }
 
@@ -62,6 +57,11 @@ void	Engine::terminate()
 	{
 		glfwDestroyWindow(window);
 		window = nullptr;
+	}
+	if (camera)
+	{
+		delete camera;
+		camera = nullptr;
 	}
 	if (renderer)
 	{
