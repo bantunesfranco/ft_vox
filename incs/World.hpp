@@ -51,7 +51,7 @@ typedef struct Face {
 class Chunk {
 	public:
 		Chunk();
-		~Chunk() = default;
+		~Chunk();
 		Chunk(const Chunk&) = default;
 		Chunk& operator=(const Chunk&) = default;
 
@@ -65,8 +65,13 @@ class Chunk {
 		static constexpr uint8_t DEPTH = 16;
 		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
+        std::vector<Vertex> cachedVertices;
+        std::vector<uint32_t> cachedIndices;
+        bool isMeshDirty;
+
 	private:
-		std::vector<Voxel> voxels; 
+		std::vector<Voxel> voxels;
+
 };
 
 // Define the world as a collection of chunks
@@ -113,29 +118,41 @@ public:
         planes[5] = glm::vec4(clip[0][3] + clip[0][2], clip[1][3] + clip[1][2], clip[2][3] + clip[2][2], clip[3][3] + clip[3][2]); // Near
 
         // Normalize the planes
-        for (int i = 0; i < 6; i++) {
-            float length = glm::length(glm::vec3(planes[i]));
-            planes[i] /= length;
-        }
+        for (int i = 0; i < 6; i++)
+            glm::normalize(planes[i]);
     }
 
-    bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
-        for (int i = 0; i < 6; i++) {
-            glm::vec3 normal = glm::vec3(planes[i]);
-            float distance = planes[i].w;
+bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
+    for (int i = 0; i < 6; i++) {
+        glm::vec3 normal = glm::vec3(planes[i]);
+        float distance = planes[i].w;
 
-            glm::vec3 positive = glm::vec3(
-                normal.x > 0 ? max.x : min.x,
-                normal.y > 0 ? max.y : min.y,
-                normal.z > 0 ? max.z : min.z
-            );
+        // Test the positive and negative vertices (closest and farthest from the plane)
+        glm::vec3 positive = glm::vec3(
+            normal.x > 0 ? max.x : min.x,
+            normal.y > 0 ? max.y : min.y,
+            normal.z > 0 ? max.z : min.z
+        );
 
-            if (glm::dot(normal, positive) + distance < 0) {
-                return false;
-            }
+        glm::vec3 negative = glm::vec3(
+            normal.x > 0 ? min.x : max.x,
+            normal.y > 0 ? min.y : max.y,
+            normal.z > 0 ? min.z : max.z
+        );
+
+        // If the negative vertex is outside the plane, the whole box is outside
+        if (glm::dot(normal, negative) + distance < 0) {
+            return false;  // Box is fully outside
         }
-        return true;
+
+        // If the positive vertex is inside, the box is fully inside
+        if (glm::dot(normal, positive) + distance >= 0) {
+            return true;  // Box is fully inside
+        }
     }
+    return true;  // Box is inside or intersects the frustum
+}
+
 };
 
 

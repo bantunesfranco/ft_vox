@@ -2,7 +2,14 @@
 #include "glad/gl.h"
 #include <iostream>
 
-Chunk::Chunk() : voxels(Chunk::SIZE) {}
+Chunk::Chunk() : isMeshDirty(false), voxels(Chunk::SIZE) {}
+
+Chunk::~Chunk()
+{
+    voxels.clear();
+    cachedIndices.clear();
+    cachedVertices.clear();
+}
 
 Voxel Chunk::getVoxel(int x, int y, int z) const
 {
@@ -16,6 +23,7 @@ void Chunk::setVoxel(int x, int y, int z, Voxel voxel)
 	if (x < 0 || x >= Chunk::WIDTH || y < 0 || y >= Chunk::HEIGHT || z < 0 || z >= Chunk::DEPTH)
 		return;
 	voxels[x + y * Chunk::WIDTH + z * Chunk::WIDTH * Chunk::HEIGHT] = voxel;
+    isMeshDirty = true;
 }
 
 bool Chunk::isBlockActive(int x, int y, int z) const
@@ -25,15 +33,6 @@ bool Chunk::isBlockActive(int x, int y, int z) const
     return isActive != 0;
 }
 
-// Chunk& World::getChunk(int x, int z) {
-// 	glm::ivec2 chunkCoord(x, z);
-// 	if (chunks.find(chunkCoord) == chunks.end()) {
-// 		chunks[chunkCoord] = Chunk();
-// 		generateTerrain(chunks[chunkCoord]);
-// 	}
-// 	return chunks[chunkCoord];
-// }
-
 World::World(std::unordered_map<BlockType, GLint> textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
 
 void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& viewMatrix, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
@@ -41,12 +40,19 @@ void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& view
     frustum.updateFrustum(projMatrix, viewMatrix);
 
     for (auto& [coord, chunk] : chunks) {
-        // Calculate the chunk's bounding box
         glm::vec3 minPos(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
         glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
 
         if (frustum.isBoxInFrustum(minPos, maxPos)) {
-            generateChunkMesh(chunk, vertices, indices, coord);
+            if (chunk.isMeshDirty){
+                generateChunkMesh(chunk, chunk.cachedVertices, chunk.cachedIndices, coord);
+                chunk.isMeshDirty = false;
+            }
+
+            uint32_t vertexOffset = static_cast<uint32_t>(vertices.size());
+            vertices.insert(vertices.end(), chunk.cachedVertices.begin(), chunk.cachedVertices.end());
+            for (uint32_t index : chunk.cachedIndices)
+                indices.push_back(index + vertexOffset);
         }
     }
 }
@@ -71,29 +77,30 @@ void World::updateChunks(const glm::vec3& cameraPosition) {
     for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; ++dx) {
         for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; ++dz) {
             glm::ivec2 chunkCoord = playerChunk + glm::ivec2(dx, dz);
-            if (chunks.find(chunkCoord) == chunks.end()) {
+            if (chunks.find(chunkCoord) == chunks.end())
                 chunksToLoad.push_back(chunkCoord);
-            }
         }
     }
 
     // Determine which chunks need to be unloaded
+    float maxDistanceSquared = (CHUNK_RADIUS + 1.5f) * (CHUNK_RADIUS + 1.5f);
     for (auto& [coord, chunk] : chunks) {
-        if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > CHUNK_RADIUS + 0.90f) {
+        if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > maxDistanceSquared)
             chunksToUnload.push_back(coord);
-        }
     }
 
     // Load new chunks
     for (const glm::ivec2& coord : chunksToLoad) {
-        Chunk& chunk = chunks[coord];
-        generateTerrain(chunk, coord); // Generate terrain data
+        if (chunks.find(coord) == chunks.end()) {
+            Chunk newChunk;
+            generateTerrain(newChunk, coord);
+            chunks.emplace(coord, std::move(newChunk)); 
+        }
     }
 
     // Unload old chunks
-    for (const glm::ivec2& coord : chunksToUnload) {
+    for (const glm::ivec2& coord : chunksToUnload)
         chunks.erase(coord);
-    }
 }
 
 void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) {
@@ -108,7 +115,6 @@ void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::
 }
 
 void World::generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord) {
-    // glm::vec3 blockPos(x + coord.x, y, z + coord.y);
     glm::vec3 blockPos(x + coord.x * Chunk::WIDTH, y, z + coord.y * Chunk::DEPTH);
     uint8_t isActive, r, g, b, blockType;
     unpackVoxelData(chunk.getVoxel(x, y, z), isActive, r, g, b, blockType);
