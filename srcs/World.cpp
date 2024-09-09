@@ -2,13 +2,14 @@
 #include "glad/gl.h"
 #include <iostream>
 
-Chunk::Chunk() : visibility(-1), isVisible(false), isMeshDirty(false), voxels(Chunk::SIZE) {}
+Chunk::Chunk() : visibility(-1), isVisible(false), isMeshDirty(false), queryID(0), voxels(Chunk::SIZE)
+{
+    glGenQueries(1, &queryID);
+}
 
 Chunk::~Chunk()
 {
-    voxels.clear();
-    cachedIndices.clear();
-    cachedVertices.clear();
+    glDeleteQueries(1, &queryID);
 }
 
 Voxel Chunk::getVoxel(int x, int y, int z) const
@@ -35,14 +36,13 @@ bool Chunk::isBlockActive(int x, int y, int z) const
 
 World::World(std::unordered_map<BlockType, GLint> textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
 
-void World::generateWorldMesh(Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+void World::generateWorldMesh(Renderer *renderer, Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
     Frustum frustum;
     static bool updateCulling = true;
 
     if (camera->hasMovedOrRotated()) {
         frustum.updateFrustum(camera->proj, camera->view);
         updateCulling = true;
-
         camera->lastPosition = camera->pos;
         camera->lastDirection = camera->dir;
     }
@@ -52,12 +52,31 @@ void World::generateWorldMesh(Camera *camera, std::vector<Vertex>& vertices, std
         glm::vec3 minPos(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
         glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
 
+        // Perform frustum culling
         if (updateCulling || chunk.visibility == -1) {
             chunk.isVisible = frustum.isBoxInFrustum(minPos, maxPos);
             chunk.visibility = chunk.isVisible;
         }
 
         if (chunk.isVisible) {
+            // Begin occlusion query
+            glBeginQuery(GL_SAMPLES_PASSED, chunk.queryID);
+            renderer->renderBoundingBox(minPos, maxPos); // Render bounding box for occlusion query
+            glEndQuery(GL_SAMPLES_PASSED);
+
+
+            GLuint available = 0;
+            glGetQueryObjectuiv(chunk.queryID, GL_QUERY_RESULT_AVAILABLE, &available);
+
+            if (available) {
+                GLuint sampleCount = 0;
+                glGetQueryObjectuiv(chunk.queryID, GL_QUERY_RESULT, &sampleCount);
+                chunk.isVisible = (sampleCount > 0);
+            }
+            else 
+                chunk.isVisible = chunk.visibility == 1;
+                
+            // If sample count is 0, the chunk is occluded
             if (chunk.isMeshDirty){
                 generateChunkMesh(chunk, chunk.cachedVertices, chunk.cachedIndices, coord);
                 chunk.isMeshDirty = false;

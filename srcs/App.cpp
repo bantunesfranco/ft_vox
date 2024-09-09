@@ -35,7 +35,7 @@ void App::run()
 
         renderer->initProjectionMatrix(window, camera, &mvp);
         world.updateChunks(camera->pos, threadPool);
-        world.generateWorldMesh(camera, vertices, indices);
+        world.generateWorldMesh(renderer, camera, vertices, indices);
         renderer->render(vertices, indices, &mvp);
 
 		renderImGui(fpsCounter, camera, _showWireframe);

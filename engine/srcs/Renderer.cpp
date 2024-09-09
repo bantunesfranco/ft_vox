@@ -219,3 +219,36 @@ void Renderer::releaseVBO() {
     }
 }
 
+void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos) {
+    // Use lines or wireframe to represent the bounding box
+    GLfloat vertices[] = {
+        minPos.x, minPos.y, minPos.z,
+        maxPos.x, minPos.y, minPos.z,
+        maxPos.x, maxPos.y, minPos.z,
+        minPos.x, maxPos.y, minPos.z,
+        minPos.x, minPos.y, maxPos.z,
+        maxPos.x, minPos.y, maxPos.z,
+        maxPos.x, maxPos.y, maxPos.z,
+        minPos.x, maxPos.y, maxPos.z
+    };
+
+    GLuint indices[] = {
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7
+    };
+
+    if (_vbo == 0)
+        _vbo = _vboManager->getVBO();
+
+    if (_ibo == 0)
+        _ibo = _vboManager->getVBO();
+
+    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+
+    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
+}

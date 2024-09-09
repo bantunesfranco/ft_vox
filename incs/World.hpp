@@ -10,6 +10,9 @@
 #include "Camera.hpp"
 #include <functional>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace std {
 	template <>
 	struct hash<glm::ivec2>{
@@ -72,6 +75,7 @@ class Chunk {
         int visibility;
         bool isVisible;
         bool isMeshDirty;
+        GLuint queryID;
 
 	private:
 		std::vector<Voxel> voxels;
@@ -90,7 +94,7 @@ class World {
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		void generateWorldMesh(Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
+		void generateWorldMesh(Renderer *renderer, Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
 		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord);
 		bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction);
 		void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID);
@@ -103,9 +107,6 @@ class World {
 		void generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord);
 		void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 };
-
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 class Frustum {
 public:
@@ -124,39 +125,47 @@ public:
 
         // Normalize the planes
         for (int i = 0; i < 6; i++)
-            glm::normalize(planes[i]);
+            planes[i] = glm::normalize(planes[i]);
     }
 
-bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
-    for (int i = 0; i < 6; i++) {
-        glm::vec3 normal = glm::vec3(planes[i]);
-        float distance = planes[i].w;
+    bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
+        // Define the 8 corners of the box
+        glm::vec3 corners[8] = {
+            glm::vec3(min.x, min.y, min.z),
+            glm::vec3(max.x, min.y, min.z),
+            glm::vec3(min.x, max.y, min.z),
+            glm::vec3(max.x, max.y, min.z),
+            glm::vec3(min.x, min.y, max.z),
+            glm::vec3(max.x, min.y, max.z),
+            glm::vec3(min.x, max.y, max.z),
+            glm::vec3(max.x, max.y, max.z)
+        };
 
-        // Test the positive and negative vertices (closest and farthest from the plane)
-        glm::vec3 positive = glm::vec3(
-            normal.x > 0 ? max.x : min.x,
-            normal.y > 0 ? max.y : min.y,
-            normal.z > 0 ? max.z : min.z
-        );
+        // Check each frustum plane
+        for (int i = 0; i < 6; i++) {
+            const glm::vec3& normal = glm::vec3(planes[i]);
+            float distance = planes[i].w;
 
-        glm::vec3 negative = glm::vec3(
-            normal.x > 0 ? min.x : max.x,
-            normal.y > 0 ? min.y : max.y,
-            normal.z > 0 ? min.z : max.z
-        );
+            bool allPointsOutside = true;
 
-        // If the negative vertex is outside the plane, the whole box is outside
-        if (glm::dot(normal, negative) + distance < 0) {
-            return false;  // Box is fully outside
+            // Check each corner against the plane
+            for (const auto& corner : corners) {
+                if (glm::dot(normal, corner) + distance >= 0) {
+                    allPointsOutside = false;
+                    break; // If any corner is inside, the box is not outside
+                }
+            }
+
+            // If all points are outside the plane, the box is outside the frustum
+            if (allPointsOutside) {
+                return false;
+            }
         }
 
-        // If the positive vertex is inside, the box is fully inside
-        if (glm::dot(normal, positive) + distance >= 0) {
-            return true;  // Box is fully inside
-        }
+        // If none of the planes determined the box was outside, it must be inside or intersecting
+        return true;
     }
-    return true;  // Box is inside or intersects the frustum
-}
+
 
 };
 

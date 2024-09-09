@@ -94,6 +94,7 @@ class Renderer
 		void	setTextureID(GLuint id) { textureID = id; }
 		GLuint	getTextureID() const { return textureID; }
 		void	releaseVBO();
+        void    renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
 };
 
 #endif
