@@ -17,9 +17,7 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 	bool init = glfwInit();
 
 	if (!init)
-	{
 		throw EngineException(VOX_GLFWFAIL);
-	}
 
 	for (auto const& [key, val] : settings)
 		setSetting(key, val);
@@ -118,21 +116,22 @@ GLuint Engine::loadTexture(const char* path) {
     GLuint textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
-
 	if (glGetError() != GL_NO_ERROR)
 		throw EngineException(VOX_TEXTFAIL);
 
-    // Load texture image here (using stb_image or another method)
+    // Load texture image here
     int width, height, channels;
     unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
 
-    if (data) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        stbi_image_free(data);
-    } else {
-        throw EngineException(VOX_TEXTFAIL);
-    }
+    if (!data)
+    	throw EngineException(VOX_TEXTFAIL);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	stbi_image_free(data);
+
+	if (glGetError() != GL_NO_ERROR)
+		throw EngineException(VOX_TEXTFAIL);
 
     // Set texture parameters
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -153,18 +152,6 @@ void	Engine::toggleWireframe(bool showWireframe)
     } else {
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);  // Switch to solid fill mode
     }
-}
-
-void	Engine::setFrameTime()
-{
-	_lastFrameTime = glfwGetTime();
-}
-
-double Engine::getDeltaTime() {
-	double currentFrameTime = glfwGetTime();
-	double deltaTime = currentFrameTime - _lastFrameTime;
-	_lastFrameTime = currentFrameTime;
-	return deltaTime;
 }
 
 bool Engine::isKeyDown(keys_t key){ return glfwGetKey(this->window, key); }

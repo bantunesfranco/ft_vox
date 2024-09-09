@@ -12,8 +12,6 @@
 #include <cmath>
 #include <unistd.h>
 
-
-
 Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-1), textureID(0) {
     std::string *code = loadShaderCode(VSHADER_PATH);
     GLuint vshader = compileShader(code, GL_VERTEX_SHADER);
@@ -72,32 +70,48 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-
         throw Engine::EngineException(VOX_SHDRFAIL);
     }
 
+    _vboManager = new VBOManager(5);
+
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
     glGenVertexArrays(1, &_vao);
     glBindVertexArray(_vao);
 
-    glGenBuffers(1, &_vbo);
-    glGenBuffers(1, &_ibo);
-
+    _vbo = _vboManager->getVBO();
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+
+    glGenBuffers(1, &_ibo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
 
     glEnableVertexAttribArray(vpos_location);
     glVertexAttribPointer(vpos_location, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
 
     glEnableVertexAttribArray(vtex_location);
+    std::cout << glGetError() << std::endl;
     glVertexAttribPointer(vtex_location, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texCoords));
+    std::cout << glGetError() << std::endl;
 
     glBindVertexArray(0);
+    std::cout << glGetError() << std::endl;
+
+    if (glGetError() != GL_NO_ERROR) {
+        glDeleteProgram(_shaderprog);
+        glDeleteBuffers(1, &_vbo);
+        glDeleteBuffers(1, &_ibo);
+        glDeleteVertexArrays(1, &_vao);
+        delete _vboManager;
+        _vboManager = nullptr;
+        throw Engine::EngineException(VOX_GLADFAIL);
+    }
+
 }
 
 Renderer::~Renderer() {
     glDeleteProgram(_shaderprog);
-    glDeleteBuffers(1, &_vbo);
     glDeleteBuffers(1, &_ibo);
     glDeleteVertexArrays(1, &_vao);
+    delete _vboManager;
 }
 
 GLuint Renderer::compileShader(const std::string* code, int32_t type) {
@@ -144,6 +158,9 @@ void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uin
 
     glUseProgram(_shaderprog);
     glBindVertexArray(_vao);
+
+    if (_vbo == 0)
+        _vbo = _vboManager->getVBO();
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
@@ -195,5 +212,12 @@ void Renderer::initProjectionMatrix(GLFWwindow* window, Camera* camera, glm::mat
     camera->proj = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 100.0f);
 
     *mvp = camera->proj * camera->view * glm::mat4(1.0f);
+}
+
+void Renderer::releaseVBO() {
+    if (_vbo != 0) {
+        _vboManager->returnVBO(_vbo);
+        _vbo = 0;
+    }
 }
 

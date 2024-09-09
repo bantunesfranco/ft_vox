@@ -39,10 +39,11 @@ void App::run()
 
 		renderImGui(fpsCounter, camera, _showWireframe);
 		glfwSwapBuffers(window);
-		setFrameTime();
 
         vertices.clear();
         indices.clear();
+
+        renderer->releaseVBO();
 	}
 }
 

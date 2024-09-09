@@ -37,6 +37,5 @@ void renderImGui(FPSCounter* fpsCounter, Camera *camera, bool showWireframe)
 
     ImGui::Render();
     glViewport(0, 0, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-    // glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

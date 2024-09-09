@@ -84,8 +84,6 @@ class Engine
 
 		void 				run();
 		void				closeWindow();
-		double				getDeltaTime();
-		void				setFrameTime();
 		bool				isKeyDown(keys_t key);
 		GLuint				loadTexture(const char* path);
 		void				toggleWireframe(bool showWireframe);

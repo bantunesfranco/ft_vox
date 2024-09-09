@@ -168,7 +168,10 @@ bool World::isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction dir
 }
 
 void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID) {
-    glm::vec3 v0, v1, v2, v3;
+    glm::vec3 v0 = glm::vec3(0.0f);
+    glm::vec3 v1 = glm::vec3(0.0f);
+    glm::vec3 v2 = glm::vec3(0.0f);
+    glm::vec3 v3 = glm::vec3(0.0f);
 
     if (direction == Direction::Front) { // Front face
         v0 = glm::vec3(0.0f, 0.0f, 1.0f);
