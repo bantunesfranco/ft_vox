@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <unordered_map>
 #include "defines.hpp"
+#include "ThreadPool.hpp"
 #include <functional>
 
 namespace std {
@@ -85,7 +86,7 @@ class World {
 		constexpr static int CHUNK_RADIUS = 3;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
-		void updateChunks(const glm::vec3& playerPos);
+		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
 		void generateWorldMesh(const glm::mat4& proj, const glm::mat4& view, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
 		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord);
 		bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction);
@@ -94,6 +95,7 @@ class World {
 		glm::ivec2 playerChunk;
 		std::unordered_map<BlockType, GLint> textures;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
+        std::mutex chunk_mutex;
 
 		void generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord);
 		void generateTerrain(Chunk& chunk, const glm::ivec2& coord);

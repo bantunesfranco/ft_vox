@@ -21,6 +21,7 @@ void App::setCallbackFunctions(void)
 
 void App::run()
 {
+    ThreadPool threadPool(4);
     World world(textures);
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -33,7 +34,7 @@ void App::run()
         fpsCounter->update();
 
         renderer->initProjectionMatrix(window, camera, &mvp);
-        world.updateChunks(camera->pos);
+        world.updateChunks(camera->pos, threadPool);
         world.generateWorldMesh(camera->proj, camera->view, vertices, indices);
         renderer->render(vertices, indices, &mvp);
 

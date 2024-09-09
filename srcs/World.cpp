@@ -39,6 +39,7 @@ void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& view
     Frustum frustum;
     frustum.updateFrustum(projMatrix, viewMatrix);
 
+    std::lock_guard<std::mutex> lock(chunk_mutex);
     for (auto& [coord, chunk] : chunks) {
         glm::vec3 minPos(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
         glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
@@ -58,7 +59,7 @@ void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& view
 }
 
 
-void World::updateChunks(const glm::vec3& cameraPosition) {
+void World::updateChunks(const glm::vec3& cameraPosition, ThreadPool& threadPool) {
     glm::ivec2 newPlayerChunk = glm::ivec2(cameraPosition.x / Chunk::WIDTH, cameraPosition.z / Chunk::DEPTH);
     static bool first_gen = true;
 
@@ -92,15 +93,22 @@ void World::updateChunks(const glm::vec3& cameraPosition) {
     // Load new chunks
     for (const glm::ivec2& coord : chunksToLoad) {
         if (chunks.find(coord) == chunks.end()) {
-            Chunk newChunk;
-            generateTerrain(newChunk, coord);
-            chunks.emplace(coord, std::move(newChunk)); 
+            threadPool.enqueue([this, coord] {
+                Chunk newChunk;
+                generateTerrain(newChunk, coord);
+                {
+                    std::lock_guard<std::mutex> lock(chunk_mutex);
+                    chunks.emplace(coord, std::move(newChunk));
+                }
+            });
         }
     }
 
     // Unload old chunks
-    for (const glm::ivec2& coord : chunksToUnload)
+    for (const glm::ivec2& coord : chunksToUnload) {
+        std::lock_guard<std::mutex> lock(chunk_mutex);
         chunks.erase(coord);
+    }
 }
 
 void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) {

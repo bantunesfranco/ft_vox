@@ -124,7 +124,9 @@ GLuint Engine::loadTexture(const char* path) {
     unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
 
     if (!data)
-    	throw EngineException(VOX_TEXTFAIL);
+	{
+		throw EngineException(VOX_TEXTFAIL);
+	}
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 	glGenerateMipmap(GL_TEXTURE_2D);

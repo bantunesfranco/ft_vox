@@ -81,19 +81,17 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-
     _vbo = _vboManager->getVBO();
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
 
-    glGenBuffers(1, &_ibo);
+    _ibo = _vboManager->getVBO();
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
 
     glEnableVertexAttribArray(vpos_location);
     glVertexAttribPointer(vpos_location, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
 
     glEnableVertexAttribArray(vtex_location);
-    std::cout << glGetError() << std::endl;
     glVertexAttribPointer(vtex_location, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texCoords));
-    std::cout << glGetError() << std::endl;
 
     glBindVertexArray(0);
-    std::cout << glGetError() << std::endl;
+
 
     if (glGetError() != GL_NO_ERROR) {
         glDeleteProgram(_shaderprog);
