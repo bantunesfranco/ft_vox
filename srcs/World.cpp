@@ -2,7 +2,7 @@
 #include "glad/gl.h"
 #include <iostream>
 
-Chunk::Chunk() : isMeshDirty(false), voxels(Chunk::SIZE) {}
+Chunk::Chunk() : visibility(-1), isVisible(false), isMeshDirty(false), voxels(Chunk::SIZE) {}
 
 Chunk::~Chunk()
 {
@@ -35,16 +35,29 @@ bool Chunk::isBlockActive(int x, int y, int z) const
 
 World::World(std::unordered_map<BlockType, GLint> textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
 
-void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& viewMatrix, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+void World::generateWorldMesh(Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
     Frustum frustum;
-    frustum.updateFrustum(projMatrix, viewMatrix);
+    static bool updateCulling = true;
+
+    if (camera->hasMovedOrRotated()) {
+        frustum.updateFrustum(camera->proj, camera->view);
+        updateCulling = true;
+
+        camera->lastPosition = camera->pos;
+        camera->lastDirection = camera->dir;
+    }
 
     std::lock_guard<std::mutex> lock(chunk_mutex);
     for (auto& [coord, chunk] : chunks) {
         glm::vec3 minPos(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
         glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
 
-        if (frustum.isBoxInFrustum(minPos, maxPos)) {
+        if (updateCulling || chunk.visibility == -1) {
+            chunk.isVisible = frustum.isBoxInFrustum(minPos, maxPos);
+            chunk.visibility = chunk.isVisible;
+        }
+
+        if (chunk.isVisible) {
             if (chunk.isMeshDirty){
                 generateChunkMesh(chunk, chunk.cachedVertices, chunk.cachedIndices, coord);
                 chunk.isMeshDirty = false;
@@ -56,6 +69,8 @@ void World::generateWorldMesh(const glm::mat4& projMatrix, const glm::mat4& view
                 indices.push_back(index + vertexOffset);
         }
     }
+
+    updateCulling = false;
 }
 
 

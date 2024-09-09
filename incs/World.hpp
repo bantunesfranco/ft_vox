@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "defines.hpp"
 #include "ThreadPool.hpp"
+#include "Camera.hpp"
 #include <functional>
 
 namespace std {
@@ -68,6 +69,8 @@ class Chunk {
 
         std::vector<Vertex> cachedVertices;
         std::vector<uint32_t> cachedIndices;
+        int visibility;
+        bool isVisible;
         bool isMeshDirty;
 
 	private:
@@ -87,7 +90,7 @@ class World {
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		void generateWorldMesh(const glm::mat4& proj, const glm::mat4& view, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
+		void generateWorldMesh(Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
 		void generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord);
 		bool isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction);
 		void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID);

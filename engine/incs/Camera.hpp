@@ -6,7 +6,7 @@
 
 #if defined(_WIN32) || defined(_WIN64)
     #ifndef M_PI
-    #define M_PI 3.14159265358979323846
+		#define M_PI 3.14159265358979323846
     #endif
 #else
     #include <cmath>
@@ -33,8 +33,14 @@ class Camera
 		glm::mat4	view;
 		glm::mat4	proj;
 
+		glm::vec3 lastPosition;
+		glm::vec3 lastDirection;
+		float rotationThreshold;
+		float movementThreshold;
+
 		void setCameraPosition(const glm::vec3& newPos);
 		void setCameraDirection(const glm::vec3& newDir);
+		bool hasMovedOrRotated() const;
 };
 
 #endif
