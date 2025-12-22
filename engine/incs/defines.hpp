@@ -3,8 +3,6 @@
 
 #include <glm/glm.hpp>
 
-// Define a voxel as a 32-bit integer
-typedef int32_t		Voxel;
 typedef int				GLint;
 typedef unsigned int	GLuint;
 

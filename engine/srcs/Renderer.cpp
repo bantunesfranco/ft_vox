@@ -13,13 +13,13 @@
 #include <unistd.h>
 
 Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-1), textureID(0) {
-    std::string *code = loadShaderCode(VSHADER_PATH);
-    GLuint vshader = compileShader(code, GL_VERTEX_SHADER);
+    const std::string *code = loadShaderCode(VSHADER_PATH);
+    const GLuint vshader = compileShader(code, GL_VERTEX_SHADER);
     delete code;
     if (!vshader) throw Engine::EngineException(VOX_VERTFAIL);
 
     code = loadShaderCode(FSHADER_PATH);
-    GLuint fshader = compileShader(code, GL_FRAGMENT_SHADER);
+    const GLuint fshader = compileShader(code, GL_FRAGMENT_SHADER);
     delete code;
     if (!fshader)
     {
@@ -73,7 +73,7 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-
     _vboManager = new VBOManager(5);
 
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
+    // glEnable(GL_CULL_FACE);
 
     glGenVertexArrays(1, &_vao);
     glBindVertexArray(_vao);
@@ -115,7 +115,7 @@ Renderer::~Renderer() {
 GLuint Renderer::compileShader(const std::string* code, int32_t type) {
     if (!code) return 0;
 
-    GLuint shader = glCreateShader(type);
+    const GLuint shader = glCreateShader(type);
     if (!shader) return 0;
 
     const char* cstr = code->c_str();
@@ -196,20 +196,17 @@ void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uin
     glBindVertexArray(0);
 }
 
-
-void Renderer::initProjectionMatrix(GLFWwindow* window, Camera* camera, glm::mat4* mvp) {
+void Renderer::initProjectionMatrix(const GLFWwindow* window, const std::unique_ptr<Camera>& camera, glm::mat4& mvp) {
     int width, height;
-    glfwGetFramebufferSize(window, &width, &height);
+    glfwGetFramebufferSize(const_cast<GLFWwindow*>(window), &width, &height);
     const float ratio = static_cast<float>(width) / static_cast<float>(height);
 
     glViewport(0, 0, width, height);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glm::vec3 target = camera->pos + camera->dir;
-    camera->view = glm::lookAt(camera->pos, target, camera->up);
+    camera->view = glm::lookAt(camera->pos, camera->pos + camera->dir, camera->up);
     camera->proj = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 100.0f);
-
-    *mvp = camera->proj * camera->view * glm::mat4(1.0f);
+    mvp = camera->proj * camera->view * glm::mat4(1.0f);
 }
 
 void Renderer::releaseVBO() {
@@ -221,7 +218,7 @@ void Renderer::releaseVBO() {
 
 void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos) {
     // Use lines or wireframe to represent the bounding box
-    GLfloat vertices[] = {
+    const GLfloat vertices[] = {
         minPos.x, minPos.y, minPos.z,
         maxPos.x, minPos.y, minPos.z,
         maxPos.x, maxPos.y, minPos.z,
@@ -232,7 +229,7 @@ void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPo
         minPos.x, maxPos.y, maxPos.z
     };
 
-    GLuint indices[] = {
+    const GLuint indices[] = {
         0, 1, 1, 2, 2, 3, 3, 0,
         4, 5, 5, 6, 6, 7, 7, 4,
         0, 4, 1, 5, 2, 6, 3, 7

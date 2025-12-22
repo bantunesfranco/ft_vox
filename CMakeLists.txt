@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Set global flags for all build types
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fsanitize=address")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g")
 
@@ -62,5 +62,4 @@ target_link_libraries(ft_vox PRIVATE engine ImGui)
 target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/incs)
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/incs)
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/include)
-target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/deps)
 target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/stb_image)

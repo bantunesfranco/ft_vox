@@ -1,6 +1,44 @@
 #include "World.hpp"
-#include "glad/gl.h"
+#include "glad/glad.h"
 #include <iostream>
+#include <cmath>
+
+inline int floorDiv(const int x, const int d) {
+    int q = x / d;
+    if (const int r = x % d; r != 0 && ((r < 0) != (d < 0)))
+        --q;
+    return q;
+}
+
+inline bool isFullySurrounded(const Chunk& chunk, const int x, const int y, const int z) {
+    return chunk.isBlockActive(x+1,y,z) &&
+           chunk.isBlockActive(x-1,y,z) &&
+           chunk.isBlockActive(x,y+1,z) &&
+           chunk.isBlockActive(x,y-1,z) &&
+           chunk.isBlockActive(x,y,z+1) &&
+           chunk.isBlockActive(x,y,z-1);
+}
+
+inline bool inBounds(const unsigned int x, const unsigned int y, const unsigned int z) {
+    return x < Chunk::WIDTH && y < Chunk::HEIGHT && z < Chunk::DEPTH;
+}
+
+bool World::isBlockActiveWorld(const int wx, const int wy, const int wz) const {
+    if (wy < 0 || wy >= Chunk::HEIGHT)
+        return false;
+
+    int cx = floorDiv(wx, Chunk::WIDTH);
+    int cz = floorDiv(wz, Chunk::DEPTH);
+
+    const auto it = chunks.find({cx, cz});
+    if (it == chunks.end())
+        return true; // missing chunk = air
+
+    const int lx = wx - cx * Chunk::WIDTH;
+    const int lz = wz - cz * Chunk::DEPTH;
+
+    return it->second.isBlockActive(lx, wy, lz);
+}
 
 Chunk::Chunk() : visibility(-1), isVisible(false), isMeshDirty(false), queryID(0), voxels(Chunk::SIZE)
 {
@@ -12,14 +50,14 @@ Chunk::~Chunk()
     glDeleteQueries(1, &queryID);
 }
 
-Voxel Chunk::getVoxel(int x, int y, int z) const
+Voxel Chunk::getVoxel(const int x, const int y, const int z) const
 {
 	if (x < 0 || x >= Chunk::WIDTH || y < 0 || y >= Chunk::HEIGHT || z < 0 || z >= Chunk::DEPTH)
 		return 0;
 	return voxels[x + y * Chunk::WIDTH + z * Chunk::WIDTH * Chunk::HEIGHT];
 }
 
-void Chunk::setVoxel(int x, int y, int z, Voxel voxel)
+void Chunk::setVoxel(const int x, const int y, const int z, const Voxel voxel)
 {
 	if (x < 0 || x >= Chunk::WIDTH || y < 0 || y >= Chunk::HEIGHT || z < 0 || z >= Chunk::DEPTH)
 		return;
@@ -27,17 +65,15 @@ void Chunk::setVoxel(int x, int y, int z, Voxel voxel)
     isMeshDirty = true;
 }
 
-bool Chunk::isBlockActive(int x, int y, int z) const
+bool Chunk::isBlockActive(const int x, const int y, const int z) const
 {
-	uint8_t isActive, r, g, b, blockType;
-    unpackVoxelData(getVoxel(x, y, z), isActive, r, g, b, blockType);
-    return isActive != 0;
+    return isActive(getVoxel(x, y, z));
 }
 
-World::World(std::unordered_map<BlockType, GLint> textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
+World::World(const std::unordered_map<BlockType, GLuint>& textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
 
-void World::generateWorldMesh(Renderer *renderer, Camera *camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
-    Frustum frustum;
+void World::generateWorldMesh(const std::unique_ptr<Renderer>& renderer, const std::unique_ptr<Camera>& camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+    Frustum frustum{};
     static bool updateCulling = true;
 
     if (camera->hasMovedOrRotated()) {
@@ -82,9 +118,9 @@ void World::generateWorldMesh(Renderer *renderer, Camera *camera, std::vector<Ve
                 chunk.isMeshDirty = false;
             }
 
-            uint32_t vertexOffset = static_cast<uint32_t>(vertices.size());
+            const auto vertexOffset = static_cast<uint32_t>(vertices.size());
             vertices.insert(vertices.end(), chunk.cachedVertices.begin(), chunk.cachedVertices.end());
-            for (uint32_t index : chunk.cachedIndices)
+            for (const uint32_t index : chunk.cachedIndices)
                 indices.push_back(index + vertexOffset);
         }
     }
@@ -93,32 +129,30 @@ void World::generateWorldMesh(Renderer *renderer, Camera *camera, std::vector<Ve
 }
 
 
-void World::updateChunks(const glm::vec3& cameraPosition, ThreadPool& threadPool) {
-    glm::ivec2 newPlayerChunk = glm::ivec2(cameraPosition.x / Chunk::WIDTH, cameraPosition.z / Chunk::DEPTH);
+void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
+    const auto newPlayerChunk = glm::ivec2(floorDiv(playerPos.x , Chunk::WIDTH), floorDiv(playerPos.z, Chunk::DEPTH));
     static bool first_gen = true;
 
-    if (!first_gen && newPlayerChunk == playerChunk) {
-        return; // No need to update if the player chunk hasn't changed
-    }
+    // No need to update if the player chunk hasn't changed
+    if (!first_gen && newPlayerChunk == playerChunk) return;
 
     first_gen = false;
     playerChunk = newPlayerChunk;
 
-    // Calculate the chunks to load
-    std::vector<glm::ivec2> chunksToLoad;
-    std::vector<glm::ivec2> chunksToUnload;
+    std::vector<glm::ivec2> chunksToLoad(9);
+    std::vector<glm::ivec2> chunksToUnload(9);
 
     // Determine which chunks need to be loaded
     for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; ++dx) {
         for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; ++dz) {
-            glm::ivec2 chunkCoord = playerChunk + glm::ivec2(dx, dz);
-            if (chunks.find(chunkCoord) == chunks.end())
+            std::lock_guard<std::mutex> lock(chunk_mutex);
+            if (glm::ivec2 chunkCoord = playerChunk + glm::ivec2(dx, dz); chunks.find(chunkCoord) == chunks.end())
                 chunksToLoad.push_back(chunkCoord);
         }
     }
 
     // Determine which chunks need to be unloaded
-    float maxDistanceSquared = (CHUNK_RADIUS + 1.5f) * (CHUNK_RADIUS + 1.5f);
+    constexpr float maxDistanceSquared = (CHUNK_RADIUS + 1.5f) * (CHUNK_RADIUS + 1.5f);
     for (auto& [coord, chunk] : chunks) {
         if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > maxDistanceSquared)
             chunksToUnload.push_back(coord);
@@ -130,10 +164,10 @@ void World::updateChunks(const glm::vec3& cameraPosition, ThreadPool& threadPool
             threadPool.enqueue([this, coord] {
                 Chunk newChunk;
                 generateTerrain(newChunk, coord);
-                {
-                    std::lock_guard<std::mutex> lock(chunk_mutex);
-                    chunks.emplace(coord, std::move(newChunk));
-                }
+
+                std::lock_guard<std::mutex> lock(chunk_mutex);
+                chunks.emplace(coord, std::move(newChunk));
+                markChunkAndNeighborsDirty(coord);
             });
         }
     }
@@ -142,78 +176,93 @@ void World::updateChunks(const glm::vec3& cameraPosition, ThreadPool& threadPool
     for (const glm::ivec2& coord : chunksToUnload) {
         std::lock_guard<std::mutex> lock(chunk_mutex);
         chunks.erase(coord);
+        markChunkAndNeighborsDirty(coord);
     }
 }
 
-void World::generateChunkMesh(Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) {
-    for (int x = 0; x < Chunk::WIDTH; ++x) {
-        for (int y = 0; y < Chunk::HEIGHT; ++y) {
+
+void World::generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) {
+    vertices.reserve(vertices.size() + Chunk::SIZE * 4);
+    indices.reserve(indices.size() + Chunk::SIZE * 6);
+
+    for (int y = 0; y < Chunk::HEIGHT; ++y) {
+        for (int x = 0; x < Chunk::WIDTH; ++x) {
             for (int z = 0; z < Chunk::DEPTH; ++z) {
-                if (chunk.isBlockActive(x, y, z))
-                    generateBlockFaces(vertices, indices, chunk, x, y, z, coord);
+                if (!chunk.isBlockActive(x, y, z))
+                    continue;
+
+                glm::vec3 blockPos(x + coord.x * Chunk::WIDTH, y, z + coord.y * Chunk::DEPTH);
+                uint8_t blockType = getBlockType(chunk.getVoxel(x, y, z));
+
+                // Loop through visible faces only
+                for (int dir = 0; dir < 6; ++dir) {
+                    if (isFaceVisible(chunk, coord, x, y, z, static_cast<Direction>(dir))) {
+                        createFace(vertices, indices, blockPos,
+                            static_cast<Direction>(dir),
+                            textures[static_cast<BlockType>(blockType)]
+                        );
+                    }
+                }
             }
         }
     }
-}
-
-void World::generateBlockFaces(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const Chunk& chunk, int x, int y, int z, const glm::ivec2& coord) {
-    glm::vec3 blockPos(x + coord.x * Chunk::WIDTH, y, z + coord.y * Chunk::DEPTH);
-    uint8_t isActive, r, g, b, blockType;
-    unpackVoxelData(chunk.getVoxel(x, y, z), isActive, r, g, b, blockType);
-
-    if (isFaceVisible(chunk, x, y, z, Direction::Front))
-        createFace(vertices, indices, blockPos, Direction::Front, textures[static_cast<BlockType>(blockType)]);
-    if (isFaceVisible(chunk, x, y, z, Direction::Back))
-        createFace(vertices, indices, blockPos, Direction::Back, textures[static_cast<BlockType>(blockType)]);
-    if (isFaceVisible(chunk, x, y, z, Direction::Left))
-        createFace(vertices, indices, blockPos, Direction::Left, textures[static_cast<BlockType>(blockType)]);
-    if (isFaceVisible(chunk, x, y, z, Direction::Right))
-        createFace(vertices, indices, blockPos, Direction::Right, textures[static_cast<BlockType>(blockType)]);
-    if (isFaceVisible(chunk, x, y, z, Direction::Top))
-        createFace(vertices, indices, blockPos, Direction::Top, textures[static_cast<BlockType>(blockType)]);
-    if (isFaceVisible(chunk, x, y, z, Direction::Bottom))
-        createFace(vertices, indices, blockPos, Direction::Bottom, textures[static_cast<BlockType>(blockType)]);
 }
 
 void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord) {
-    const float frequency = 0.05f;
-    const float amplitude = 20.0f;
 
     for (int x = 0; x < Chunk::WIDTH; ++x) {
-        for (int z = 0; z < Chunk::DEPTH; ++z) {
+     for (int z = 0; z < Chunk::DEPTH; ++z) {
+        constexpr float amplitude = 20.0f;
+        constexpr float frequency = 0.05f;
             // Basic sine wave terrain with added randomness
-            float height = amplitude * (std::sin(frequency * x + coord.x) + std::sin(frequency * z + coord.y)) +
+            const float height = amplitude * (std::sin(frequency * x + coord.x) + std::sin(frequency * z + coord.y)) +
                            (rand() % 10 - 5) +  // Random value to add noise
                            (Chunk::HEIGHT / 4);
 
-            int intHeight = static_cast<int>(height);
+            const int intHeight = static_cast<int>(height);
 
             for (int y = -Chunk::HEIGHT/4; y < intHeight; ++y) {
-                BlockType blocktype = rand()%2 ? BlockType::Grass : BlockType::Stone;
-                uint32_t voxelData = packVoxelData(1, 100, 255, 100, static_cast<uint8_t>(blocktype));  // Example voxel data (active, color, block type)
+                BlockType blockType = rand()%2 ? BlockType::Grass : BlockType::Stone;
+                const auto voxelData = packVoxelData(1, 100, 255, 100, static_cast<uint8_t>(blockType));
                 chunk.setVoxel(x, y, z, voxelData);
+
             }
         }
     }
 }
 
-bool World::isFaceVisible(const Chunk& chunk, int x, int y, int z, Direction direction) {
-    switch (direction) {
-        case Direction::Front:  return !chunk.isBlockActive(x, y, z + 1);
-        case Direction::Back:   return !chunk.isBlockActive(x, y, z - 1);
-        case Direction::Left:   return !chunk.isBlockActive(x - 1, y, z);
-        case Direction::Right:  return !chunk.isBlockActive(x + 1, y, z);
-        case Direction::Top:    return !chunk.isBlockActive(x, y + 1, z);
-        case Direction::Bottom: return !chunk.isBlockActive(x, y - 1, z);
+bool World::isFaceVisible(const Chunk& chunk, const glm::ivec2& coord,
+        const int x, const int y, const int z,
+        const Direction direction
+) const {
+    constexpr int dx[6] = { 0, 0, -1, 1, 0, 0 };
+    constexpr int dy[6] = { 0, 0, 0, 0, 1, -1 };
+    constexpr int dz[6] = { 1, -1, 0, 0, 0, 0 };
+
+    const int nx = x + dx[static_cast<int>(direction)];
+    const int ny = y + dy[static_cast<int>(direction)];
+    const int nz = z + dz[static_cast<int>(direction)];
+
+    // Neighbor inside this chunk
+    if (static_cast<unsigned>(nx) < Chunk::WIDTH
+        && static_cast<unsigned>(ny) < Chunk::HEIGHT
+        && static_cast<unsigned>(nz) < Chunk::DEPTH)
+    {
+        return !chunk.isBlockActive(nx, ny, nz);
     }
-    return false;
+
+    // Neighbor in another chunk → world lookup
+    const int wx = coord.x * Chunk::WIDTH + nx;
+    const int wz = coord.y * Chunk::DEPTH + nz;
+
+    return !isBlockActiveWorld(wx, ny, wz);
 }
 
 void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID) {
-    glm::vec3 v0 = glm::vec3(0.0f);
-    glm::vec3 v1 = glm::vec3(0.0f);
-    glm::vec3 v2 = glm::vec3(0.0f);
-    glm::vec3 v3 = glm::vec3(0.0f);
+    auto v0 = glm::vec3(0.0f);
+    auto v1 = glm::vec3(0.0f);
+    auto v2 = glm::vec3(0.0f);
+    auto v3 = glm::vec3(0.0f);
 
     if (direction == Direction::Front) { // Front face
         v0 = glm::vec3(0.0f, 0.0f, 1.0f);
@@ -259,5 +308,17 @@ void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& ind
     vertices.push_back({ blockPos + v1, {1.f, 0.f}, textureID });
     vertices.push_back({ blockPos + v2, {1.f, 1.f}, textureID });
     vertices.push_back({ blockPos + v3, {0.f, 1.f}, textureID });
+}
+
+void World::markChunkAndNeighborsDirty(const glm::ivec2& coord) {
+    static constexpr glm::ivec2 offsets[5] = {
+        {0,0},{1,0},{-1,0},{0,1},{0,-1}
+    };
+
+    for (auto& o : offsets) {
+        if (auto it = chunks.find(coord + o); it != chunks.end()) {
+            it->second.isMeshDirty = true;
+        }
+    }
 }
 

@@ -21,26 +21,29 @@ class Camera
 		Camera(GLFWwindow *window);
 		~Camera() = default;
 		Camera(const Camera& camera) = delete;
-		Camera& operator=(const Camera&);
+		Camera& operator=(const Camera&) = delete;
 
 		glm::vec3	pos;
 		glm::vec3	dir;
 		glm::vec3	up;
 		float		pitch;
 		float		yaw;
-		double		mousePos[2];
+		double		mousePos[2]{};
 		float		fov;
-		glm::mat4	view;
-		glm::mat4	proj;
+		glm::mat4	view{};
+		glm::mat4	proj{};
 
-		glm::vec3 lastPosition;
-		glm::vec3 lastDirection;
+		float moveSpeed;
+		float rotSpeed;
+
+		glm::vec3 lastPosition{};
+		glm::vec3 lastDirection{};
 		float rotationThreshold;
 		float movementThreshold;
 
 		void setCameraPosition(const glm::vec3& newPos);
 		void setCameraDirection(const glm::vec3& newDir);
-		bool hasMovedOrRotated() const;
+		[[nodiscard]] bool hasMovedOrRotated() const;
 };
 
 #endif

@@ -1,14 +1,24 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        ::::::::            */
+/*   user_interface.cpp                                 :+:    :+:            */
+/*                                                     +:+                    */
+/*   By: bfranco <bfranco@student.codam.nl>           +#+                     */
+/*                                                   +#+                      */
+/*   Created: 2025/12/21 21:55:36 by bfranco        #+#    #+#                */
+/*   Updated: 2025/12/21 21:55:36 by bfranco        ########   odam.nl        */
+/*                                                                            */
+/* ************************************************************************** */
 
 #include "Renderer.hpp"
+#include "Camera.hpp"
+#include "Engine.hpp"
+
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 #include <iostream>
-#include "Camera.hpp"
-#include "Engine.hpp"
-
-
 
 void setupImGui(GLFWwindow* window)
 {
@@ -18,10 +28,10 @@ void setupImGui(GLFWwindow* window)
     ImGui_ImplOpenGL3_Init("#version 130");
     ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
 
-    // ImGui::StyleColorsDark();
+    ImGui::StyleColorsDark();
 }
 
-void renderImGui(FPSCounter* fpsCounter, Camera *camera, bool showWireframe)
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe)
 {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -30,7 +40,7 @@ void renderImGui(FPSCounter* fpsCounter, Camera *camera, bool showWireframe)
     // Create a simple ImGui window
     ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::Begin("Debug Window");
-    ImGui::Text("FPS: %i", fpsCounter->getFPS());
+    ImGui::Text("FPS: %i", FPSCounter::getFPS());
     ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)", camera->pos[0], camera->pos[1], camera->pos[2]);
     ImGui::Checkbox("Wireframe", &showWireframe);
     ImGui::End();

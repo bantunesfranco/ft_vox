@@ -1,5 +1,7 @@
 #include "Engine.hpp"
+
 #include <iostream>
+#include <cmath>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -12,11 +14,10 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 	glViewport(0, 0, width, height);
 }
 
-Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settings_t, bool> settings) : window(nullptr), renderer(nullptr), camera(nullptr), fpsCounter(nullptr), settings{0, 0, 0, 1, 0, 0}
+Engine::Engine(const int32_t width, const int32_t height, const char* title, std::map<settings_t, bool>& settings)
+	: window(nullptr), renderer(nullptr), camera(nullptr), fpsCounter(nullptr), settings{0, 0, 0, 1, 0, 0}
 {
-	bool init = glfwInit();
-
-	if (!init)
+	if (!glfwInit())
 		throw EngineException(VOX_GLFWFAIL);
 
 	for (auto const& [key, val] : settings)
@@ -32,21 +33,20 @@ Engine::Engine(int32_t width, int32_t height, const char* title, std::map<settin
 	try
 	{
 		initWindow(width, height, title);
-		camera = new Camera(window);
-		renderer =  new Renderer();
-		fpsCounter = new FPSCounter();
+		camera = std::make_unique<Camera>(window);
+		renderer = std::make_unique<Renderer>();
 	}
 	catch (const std::exception &e)
 	{
 		std::cerr << e.what() << std::endl;
-		terminate();
+		Engine::terminate();
 		std::exit(Engine::vox_errno);
 	}
 }
 
 Engine::~Engine()
 {
-	terminate();
+	Engine::terminate();
 }
 
 void	Engine::terminate()
@@ -56,31 +56,16 @@ void	Engine::terminate()
 		glfwDestroyWindow(window);
 		window = nullptr;
 	}
-	if (camera)
-	{
-		delete camera;
-		camera = nullptr;
-	}
-	if (renderer)
-	{
-		delete renderer;
-		renderer = nullptr;
-	}
-	if (fpsCounter)
-	{
-		delete fpsCounter;
-		fpsCounter = nullptr;
-	}
 	glfwTerminate();
 }
 
-void	Engine::setSetting(int32_t setting, bool value)
+void	Engine::setSetting(const int32_t setting, const bool value)
 {
 	VOX_ASSERT(setting >= 0 && setting < VOX_SETTINGS_MAX, "Invalid setting");
 	settings[setting] = value;
 }
 
-void Engine::initWindow(int32_t width, int32_t height, const char* title)
+void Engine::initWindow(const int32_t width, const int32_t height, const char* title)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -96,20 +81,21 @@ void Engine::initWindow(int32_t width, int32_t height, const char* title)
 
 	_width = width;
 	_height = height;
-	window = glfwCreateWindow(width, height, title, settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : NULL, NULL);
+	window = glfwCreateWindow(width, height, title, settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : nullptr, nullptr);
 	if (!window)
 		throw EngineException(VOX_WINFAIL);
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	glfwMakeContextCurrent(window);
-	gladLoadGL(glfwGetProcAddress);
+	gladLoadGL();
 	glfwSwapInterval(1);
 	glfwSetWindowUserPointer(window, (void*)this);
 	glfwSetFramebufferSizeCallback(window, framebuffer_callback);
 
 	if (glGetError() != GL_NO_ERROR)
 		throw EngineException(VOX_WINFAIL);
+
 }
 
 GLuint Engine::loadTexture(const char* path) {
@@ -147,7 +133,7 @@ GLuint Engine::loadTexture(const char* path) {
     return textureID;
 }
 
-void	Engine::toggleWireframe(bool showWireframe)
+void	Engine::toggleWireframe(const bool showWireframe)
 {
 	if (showWireframe) {
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);  // Switch to wireframe mode
@@ -156,79 +142,94 @@ void	Engine::toggleWireframe(bool showWireframe)
     }
 }
 
-bool Engine::isKeyDown(keys_t key){ return glfwGetKey(this->window, key); }
+bool Engine::isKeyDown(const keys_t key) const
+{
+	return glfwGetKey(this->window, key);
+}
 
 bool	Engine::windowIsOpen(GLFWwindow* window)
 {
 	return !glfwWindowShouldClose(window);
 }
 
-void	Engine::closeWindow()
+void	Engine::closeWindow() const
 {
 	glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
-void	Engine::setKeyCallback(GLFWkeyfun callback)
+void	Engine::setKeyCallback(const GLFWkeyfun callback) const
 {
 	glfwSetKeyCallback(window, callback);
 }
 
-void	Engine::setMouseButtonCallback(GLFWmousebuttonfun callback)
+void	Engine::setMouseButtonCallback(const GLFWmousebuttonfun callback) const
 {
 	glfwSetMouseButtonCallback(window, callback);
 }
 
-void	Engine::setCursorPosCallback(GLFWcursorposfun callback)
+void	Engine::setCursorPosCallback(const GLFWcursorposfun callback) const
 {
 	
 	glfwSetCursorPosCallback(window, callback);
 }
 
-void	Engine::setScrollCallback(GLFWscrollfun callback)
+void	Engine::setScrollCallback(const GLFWscrollfun callback) const
 {
 	glfwSetScrollCallback(window, callback);
 }
 
-void	Engine::setResizeCallback(GLFWwindowsizefun callback)
+void	Engine::setResizeCallback(const GLFWwindowsizefun callback) const
 {
 	glfwSetWindowSizeCallback(window, callback);
 }
 
-void	Engine::setFramebufferSizeCallback(GLFWframebuffersizefun callback)
+void	Engine::setFramebufferSizeCallback(const GLFWframebuffersizefun callback) const
 {
 	glfwSetFramebufferSizeCallback(window, callback);
 }
 
-void	Engine::setWindowCloseCallback(GLFWwindowclosefun callback)
+void	Engine::setWindowCloseCallback(const GLFWwindowclosefun callback) const
 {
 	glfwSetWindowCloseCallback(window, callback);
 }
 
-void	Engine::setErrorCallback(GLFWerrorfun callback)
+void	Engine::setErrorCallback(const GLFWerrorfun callback) const
 {
 	glfwSetErrorCallback(callback);
 }
 
-FPSCounter::FPSCounter() : frameCount(0), fps(0)
+FPSCounter::FPSCounter() : _deltaTime(0.0f), _lastTime(static_cast<float>(glfwGetTime())), _frameCount(0), _fps(0) {}
+
+FPSCounter& FPSCounter::getInstance()
 {
-	lastTime = glfwGetTime();
+	if (_instance == nullptr)
+		_instance = std::make_unique<FPSCounter>();
+	return *_instance;
 }
 
-void FPSCounter::update()
-{
-	frameCount++;
-	float currentTime = glfwGetTime();
-	float deltaTime = currentTime - lastTime;
+int FPSCounter::getFPS() { return getInstance()._fps; }
 
-	if (deltaTime >= 1.0f)
-	{
-		fps = frameCount;
-		frameCount = 0;
-		lastTime = currentTime;
+float FPSCounter::getDeltaTime() { return getInstance()._deltaTime; }
+
+void FPSCounter::update() {
+	const auto currentTime = static_cast<float>(glfwGetTime());
+
+	auto& fpsCounter = getInstance();
+
+	// Time elapsed since last frame
+	fpsCounter._deltaTime = currentTime - fpsCounter._lastTime;
+	fpsCounter._lastTime = currentTime;
+
+	// Count frames for FPS
+	fpsCounter._frameCount++;
+
+	// Update FPS every second
+	static float fpsTimer = 0.0f;
+	fpsTimer += fpsCounter._deltaTime;
+	if (fpsTimer >= 1.0f) {
+		fpsCounter._fps = fpsCounter._frameCount;
+		fpsCounter._frameCount = 0;
+		fpsTimer = 0.0f;
 	}
 }
 
-int FPSCounter::getFPS() const
-{
-	return fps;
-}

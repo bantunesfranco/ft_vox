@@ -1,10 +1,10 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)
 
 # Project name and version
-project(engine VERSION 1.0.0 LANGUAGES CXX)
+project(engine VERSION 1.0.0 LANGUAGES C CXX)
 
 # Specify the C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Create the vendor directory within the engine directory
@@ -17,7 +17,7 @@ include(FetchContent)
 FetchContent_Declare(
   glm
   GIT_REPOSITORY https://github.com/g-truc/glm.git
-  GIT_TAG 0.9.9.8
+  GIT_TAG 1.0.2
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
 )
 
@@ -40,26 +40,29 @@ FetchContent_Declare(
 # Fetch the dependencies into the vendor directory
 FetchContent_MakeAvailable(glm glfw stb_image)
 
+# GLAD library
+add_library(glad STATIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glad/src/glad.c")
+target_include_directories(glad PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glad/include")
+
 # Automatically collect all source files and headers
 file(GLOB_RECURSE SOURCES "srcs/*.cpp")
 file(GLOB_RECURSE HEADERS "incs/*.hpp")
 
 # Define the library target
-add_library(engine STATIC ${SOURCES} ${HEADERS})
+add_library(engine STATIC ${SOURCES} ${HEADERS}
+        incs/Voxel.hpp)
 
 # Remove unwanted files from the GLFW dependency
 file(REMOVE ${glfw_SOURCE_DIR}/deps/stb_image_write.h)
 
 # Link the dependencies
-target_link_libraries(engine PUBLIC glfw)
+target_link_libraries(engine PUBLIC glad glfw)
 
 # Add include directories for GLM, GLFW, stb_image, and the engine headers
 target_include_directories(engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/incs)
 target_include_directories(engine PUBLIC ${glfw_SOURCE_DIR}/include)
-target_include_directories(engine PUBLIC ${glfw_SOURCE_DIR}/deps)
 target_include_directories(engine PUBLIC ${glm_SOURCE_DIR})
 target_include_directories(engine PUBLIC ${stb_image_SOURCE_DIR})
-
 
 # Platform-specific options
 if(WIN32)

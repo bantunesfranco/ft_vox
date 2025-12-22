@@ -5,7 +5,7 @@
 #define FSHADER_PATH "./engine/shaders/fragment.glsl"
 #define VSHADER_PATH "./engine/shaders/vertex.glsl"
 
-#include "glad/gl.h"
+#include "glad/glad.h"
 #include "GLFW/glfw3.h"
 
 #include "defines.hpp"
@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <queue>
+#include <memory>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -22,7 +23,7 @@ class Camera;
 
 class VBOManager {
 public:
-    VBOManager(size_t initialPoolSize = 10) {
+    VBOManager(const size_t initialPoolSize = 10) {
         // Preallocate a pool of VBOs
         for (size_t i = 0; i < initialPoolSize; ++i) {
             GLuint vbo = 0;
@@ -50,12 +51,12 @@ public:
         }
 
         // Otherwise, reuse a VBO from the pool
-        GLuint vbo = availableVBOs.front();
+        const GLuint vbo = availableVBOs.front();
         availableVBOs.pop();
         return vbo;
     }
 
-    void returnVBO(GLuint vbo) {
+    void returnVBO(const GLuint vbo) {
         // Return the VBO to the pool for reuse
         availableVBOs.push(vbo);
     }
@@ -75,8 +76,8 @@ class Renderer
 		GLint		_mvpLocation;
 		VBOManager	*_vboManager;
 
-		std::string* loadShaderCode(const char* path);
-		uint32_t	compileShader(const std::string* code, int32_t type);
+		static std::string* loadShaderCode(const char* path);
+		static uint32_t	compileShader(const std::string* code, int32_t type);
 
 	public:
 		Renderer();
@@ -85,14 +86,15 @@ class Renderer
 		Renderer& operator=(const Renderer&) = default;
 
 		GLuint textureID;
-	
+
+		static void	initProjectionMatrix(const GLFWwindow* window, const std::unique_ptr<Camera>& camera, glm::mat4& mvp);
+
 		void	render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4 *mvp);
-		void	initProjectionMatrix(GLFWwindow *window, Camera *camera, glm::mat4 *mvp);
-		GLuint	getShaderProgram() const { return _shaderprog; }
-		GLint	getMVPUniformLocation() const { return _mvpLocation; }
-		GLuint	getVertexArrayObject() const { return _vao; }
-		void	setTextureID(GLuint id) { textureID = id; }
-		GLuint	getTextureID() const { return textureID; }
+		[[nodiscard]] GLuint	getShaderProgram() const { return _shaderprog; }
+		[[nodiscard]] GLint	getMVPUniformLocation() const { return _mvpLocation; }
+		[[nodiscard]] GLuint	getVertexArrayObject() const { return _vao; }
+		void	setTextureID(const GLuint id) { textureID = id; }
+		[[nodiscard]] GLuint	getTextureID() const { return textureID; }
 		void	releaseVBO();
         void    renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
 };

@@ -1,6 +1,11 @@
+.idea
+cmake-build-debug
 build
 ft_vox
 .vscode
 Debug
-vendor
 imgui.ini
+vendor/*
+engine/vendor/*
+
+!engine/vendor/glad
