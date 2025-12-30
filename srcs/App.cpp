@@ -97,7 +97,7 @@ void App::run()
         Renderer::initProjectionMatrix(window, camera, mvp);
         world.updateChunks(camera->pos, threadPool);
         world.generateWorldMesh(renderer, camera, vertices, indices);
-        renderer->render(vertices, indices, &mvp);
+        renderer->render(vertices, indices, mvp);
 
 		renderImGui(camera, _showWireframe);
 		glfwSwapBuffers(window);
@@ -105,7 +105,7 @@ void App::run()
         vertices.clear();
         indices.clear();
 
-        renderer->releaseVBO();
+        // renderer->releaseVBO();
 	}
 }
 

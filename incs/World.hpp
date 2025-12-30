@@ -65,6 +65,46 @@ class Chunk {
 
 };
 
+class Frustum {
+	public:
+	    std::array<glm::vec4, 6> planes;
+
+	    void updateFrustum(const glm::mat4& proj, const glm::mat4& view) {
+	        glm::mat4 clip = proj * view;
+
+	        // Extract planes from the combined view-projection matrix
+	        planes[0] = glm::vec4(clip[0][3] - clip[0][0], clip[1][3] - clip[1][0], clip[2][3] - clip[2][0], clip[3][3] - clip[3][0]); // Right
+	        planes[1] = glm::vec4(clip[0][3] + clip[0][0], clip[1][3] + clip[1][0], clip[2][3] + clip[2][0], clip[3][3] + clip[3][0]); // Left
+	        planes[2] = glm::vec4(clip[0][3] + clip[0][1], clip[1][3] + clip[1][1], clip[2][3] + clip[2][1], clip[3][3] + clip[3][1]); // Bottom
+	        planes[3] = glm::vec4(clip[0][3] - clip[0][1], clip[1][3] - clip[1][1], clip[2][3] - clip[2][1], clip[3][3] - clip[3][1]); // Top
+	        planes[4] = glm::vec4(clip[0][3] - clip[0][2], clip[1][3] - clip[1][2], clip[2][3] - clip[2][2], clip[3][3] - clip[3][2]); // Far
+	        planes[5] = glm::vec4(clip[0][3] + clip[0][2], clip[1][3] + clip[1][2], clip[2][3] + clip[2][2], clip[3][3] + clip[3][2]); // Near
+
+	        // Normalize the planes
+    		for (auto& plane : planes) {
+    			plane /= glm::length(glm::vec3(plane));
+    		}
+	    }
+
+	    [[nodiscard]] bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
+    		for (const auto& plane : planes) {
+    			auto normal = glm::vec3(plane);
+    			const float distance = plane.w;
+
+    			// Compute the positive vertex (vertex most likely outside the plane)
+    			glm::vec3 positiveVertex = min;
+    			if (normal.x >= 0) positiveVertex.x = max.x;
+    			if (normal.y >= 0) positiveVertex.y = max.y;
+    			if (normal.z >= 0) positiveVertex.z = max.z;
+
+    			// If the positive vertex is outside, the box is fully outside
+    			if (glm::dot(normal, positiveVertex) + distance < 0)
+    				return false;
+    		}
+    		return true; // Inside or intersecting
+	    }
+};
+
 constexpr int MAX_FACES = Chunk::WIDTH * Chunk::HEIGHT * Chunk::DEPTH * 6;
 
 // Define the world as a collection of chunks
@@ -75,7 +115,7 @@ class World {
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
 
-		constexpr static int CHUNK_RADIUS = 3;
+		constexpr static int CHUNK_RADIUS = 5;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
@@ -91,71 +131,10 @@ class World {
 		std::unordered_map<BlockType, GLuint> textures;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
         std::mutex chunk_mutex;
+		Frustum frustum;
 
 		void generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord);
 		static void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 };
-
-class Frustum {
-public:
-    glm::vec4 planes[6];
-
-    void updateFrustum(const glm::mat4& proj, const glm::mat4& view) {
-        glm::mat4 clip = proj * view;
-
-        // Extract planes from the combined view-projection matrix
-        planes[0] = glm::vec4(clip[0][3] - clip[0][0], clip[1][3] - clip[1][0], clip[2][3] - clip[2][0], clip[3][3] - clip[3][0]); // Right
-        planes[1] = glm::vec4(clip[0][3] + clip[0][0], clip[1][3] + clip[1][0], clip[2][3] + clip[2][0], clip[3][3] + clip[3][0]); // Left
-        planes[2] = glm::vec4(clip[0][3] + clip[0][1], clip[1][3] + clip[1][1], clip[2][3] + clip[2][1], clip[3][3] + clip[3][1]); // Bottom
-        planes[3] = glm::vec4(clip[0][3] - clip[0][1], clip[1][3] - clip[1][1], clip[2][3] - clip[2][1], clip[3][3] - clip[3][1]); // Top
-        planes[4] = glm::vec4(clip[0][3] - clip[0][2], clip[1][3] - clip[1][2], clip[2][3] - clip[2][2], clip[3][3] - clip[3][2]); // Far
-        planes[5] = glm::vec4(clip[0][3] + clip[0][2], clip[1][3] + clip[1][2], clip[2][3] + clip[2][2], clip[3][3] + clip[3][2]); // Near
-
-        // Normalize the planes
-        for (auto& plane : planes)
-            plane = glm::normalize(plane);
-    }
-
-    [[nodiscard]] bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
-        // Define the 8 corners of the box
-        glm::vec3 corners[8] = {
-            glm::vec3(min.x, min.y, min.z),
-            glm::vec3(max.x, min.y, min.z),
-            glm::vec3(min.x, max.y, min.z),
-            glm::vec3(max.x, max.y, min.z),
-            glm::vec3(min.x, min.y, max.z),
-            glm::vec3(max.x, min.y, max.z),
-            glm::vec3(min.x, max.y, max.z),
-            glm::vec3(max.x, max.y, max.z)
-        };
-
-        // Check each frustum plane
-        for (auto& plane : planes) {
-            const auto& normal = glm::vec3(plane);
-            const float distance = plane.w;
-
-            bool allPointsOutside = true;
-
-            // Check each corner against the plane
-            for (const auto& corner : corners) {
-                if (glm::dot(normal, corner) + distance >= 0) {
-                    allPointsOutside = false;
-                    break; // If any corner is inside, the box is not outside
-                }
-            }
-
-            // If all points are outside the plane, the box is outside the frustum
-            if (allPointsOutside) {
-                return false;
-            }
-        }
-
-        // If none of the planes determined the box was outside, it must be inside or intersecting
-        return true;
-    }
-
-
-};
-
 
 #endif

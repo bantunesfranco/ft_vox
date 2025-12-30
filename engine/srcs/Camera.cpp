@@ -1,6 +1,6 @@
 #include "Camera.hpp"
 
-Camera::Camera(GLFWwindow *window) : pos{0.f, 0.f, 0.f}, dir {0.f, 0.f, 1.f}, up{0.f, 1.f, 0.f}, pitch(0), yaw(0), fov(90.0f) 
+Camera::Camera(GLFWwindow *window) : pos{0.f, 0.f, 0.f}, dir {0.f, 0.f, 1.f}, up{0.f, 1.f, 0.f}, pitch(0), yaw(0), fov(90.0f)
 {
 	moveSpeed = 100.f;
 	rotSpeed = 360.f;

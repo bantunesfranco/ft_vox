@@ -4,13 +4,13 @@
 
 #include "Engine.hpp"
 #include "Renderer.hpp"
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
 #include <cmath>
-#include <unistd.h>
 
 Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-1), textureID(0) {
     const std::string *code = loadShaderCode(VSHADER_PATH);
@@ -70,36 +70,33 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-
         throw Engine::EngineException(VOX_SHDRFAIL);
     }
 
-    _vboManager = new VBOManager(5);
-
     glEnable(GL_DEPTH_TEST);
-    // glEnable(GL_CULL_FACE);
+    glEnable(GL_CULL_FACE);
 
     glGenVertexArrays(1, &_vao);
     glBindVertexArray(_vao);
 
-    _vbo = _vboManager->getVBO();
+    _vbo = VBOManager::get().getVBO();
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
 
-    _ibo = _vboManager->getVBO();
+    _ibo = VBOManager::get().getVBO();
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
 
     glEnableVertexAttribArray(vpos_location);
-    glVertexAttribPointer(vpos_location, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+    glVertexAttribPointer(vpos_location, 3, GL_FLOAT, GL_FALSE,
+            sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
 
     glEnableVertexAttribArray(vtex_location);
-    glVertexAttribPointer(vtex_location, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texCoords));
+    glVertexAttribPointer(vtex_location, 2, GL_FLOAT, GL_FALSE,
+            sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texCoords)));
 
     glBindVertexArray(0);
-
 
     if (glGetError() != GL_NO_ERROR) {
         glDeleteProgram(_shaderprog);
         glDeleteBuffers(1, &_vbo);
         glDeleteBuffers(1, &_ibo);
         glDeleteVertexArrays(1, &_vao);
-        delete _vboManager;
-        _vboManager = nullptr;
         throw Engine::EngineException(VOX_GLADFAIL);
     }
 
@@ -109,7 +106,6 @@ Renderer::~Renderer() {
     glDeleteProgram(_shaderprog);
     glDeleteBuffers(1, &_ibo);
     glDeleteVertexArrays(1, &_vao);
-    delete _vboManager;
 }
 
 GLuint Renderer::compileShader(const std::string* code, int32_t type) {
@@ -148,7 +144,7 @@ std::string* Renderer::loadShaderCode(const char* path) {
     return new std::string(shaderStream.str());
 }
 
-void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4 *mvp) {
+void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4& mvp) {
     if (vertices.empty() || indices.empty()) {
         std::cerr << "No vertices or indices to render." << std::endl;
         return;
@@ -158,7 +154,7 @@ void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uin
     glBindVertexArray(_vao);
 
     if (_vbo == 0)
-        _vbo = _vboManager->getVBO();
+        _vbo = VBOManager::get().getVBO();
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
@@ -169,28 +165,27 @@ void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uin
     if (_mvpLocation == -1) {
         std::cerr << "Failed to get MVP uniform location." << std::endl;
         return;
-    } else {
-        glUniformMatrix4fv(_mvpLocation, 1, GL_FALSE, glm::value_ptr(*mvp));
     }
+    glUniformMatrix4fv(_mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
 
-    GLint texLoc = glGetUniformLocation(_shaderprog, "textureSampler");
+    const GLint texLoc = glGetUniformLocation(_shaderprog, "textureSampler");
     if (texLoc == -1) {
         std::cerr << "Failed to get textureSampler uniform location." << std::endl;
         return;
-    } else {
-        glUniform1i(texLoc, 0);
     }
+    glUniform1i(texLoc, 0);
+
 
     GLuint currentTextureID = vertices[0].textureID;
     for (size_t i = 0; i < indices.size(); i += 6) {
-        GLuint textureID = vertices[indices[i]].textureID;
+        textureID = vertices[indices[i]].textureID;
 
         if (textureID != currentTextureID) {
             currentTextureID = textureID;
             glBindTexture(GL_TEXTURE_2D, currentTextureID);
         }
 
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)(i * sizeof(uint32_t)));
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, reinterpret_cast<void*>(i * sizeof(uint32_t)));
     }
 
     glBindVertexArray(0);
@@ -211,7 +206,7 @@ void Renderer::initProjectionMatrix(const GLFWwindow* window, const std::unique_
 
 void Renderer::releaseVBO() {
     if (_vbo != 0) {
-        _vboManager->returnVBO(_vbo);
+        VBOManager::get().returnVBO(_vbo);
         _vbo = 0;
     }
 }
@@ -236,10 +231,10 @@ void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPo
     };
 
     if (_vbo == 0)
-        _vbo = _vboManager->getVBO();
+        _vbo = VBOManager::get().getVBO();
 
     if (_ibo == 0)
-        _ibo = _vboManager->getVBO();
+        _ibo = VBOManager::get().getVBO();
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
@@ -247,5 +242,5 @@ void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPo
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
 
-    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
+    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
 }

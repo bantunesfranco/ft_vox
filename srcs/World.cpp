@@ -2,6 +2,7 @@
 #include "glad/glad.h"
 #include <iostream>
 #include <cmath>
+#include <random>
 
 inline int floorDiv(const int x, const int d) {
     int q = x / d;
@@ -32,7 +33,7 @@ bool World::isBlockActiveWorld(const int wx, const int wy, const int wz) const {
 
     const auto it = chunks.find({cx, cz});
     if (it == chunks.end())
-        return true; // missing chunk = air
+        return false; // missing chunk = air
 
     const int lx = wx - cx * Chunk::WIDTH;
     const int lz = wz - cz * Chunk::DEPTH;
@@ -73,61 +74,47 @@ bool Chunk::isBlockActive(const int x, const int y, const int z) const
 World::World(const std::unordered_map<BlockType, GLuint>& textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
 
 void World::generateWorldMesh(const std::unique_ptr<Renderer>& renderer, const std::unique_ptr<Camera>& camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
-    Frustum frustum{};
-    static bool updateCulling = true;
 
-    if (camera->hasMovedOrRotated()) {
-        frustum.updateFrustum(camera->proj, camera->view);
-        updateCulling = true;
-        camera->lastPosition = camera->pos;
-        camera->lastDirection = camera->dir;
-    }
+    frustum.updateFrustum(camera->proj, camera->view);
+    camera->lastPosition = camera->pos;
+    camera->lastDirection = camera->dir;
+    // Collect chunks to render outside the mutex
+    std::vector<std::pair<glm::ivec2, Chunk*>> visibleChunks;
+    (void)renderer;
 
-    std::lock_guard<std::mutex> lock(chunk_mutex);
-    for (auto& [coord, chunk] : chunks) {
-        glm::vec3 minPos(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
-        glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
+    {
+        std::lock_guard<std::mutex> lock(chunk_mutex);
+        for (auto& [coord, chunk] : chunks) {
+            // Compute padded bounding box
+            constexpr float epsilon = 0.1f * Chunk::WIDTH;
+            glm::vec3 minPos(coord.x * Chunk::WIDTH - epsilon, 0 - epsilon, coord.y * Chunk::DEPTH - epsilon);
+            glm::vec3 maxPos = minPos + glm::vec3(Chunk::WIDTH + 2*epsilon, Chunk::HEIGHT + 2*epsilon, Chunk::DEPTH + 2*epsilon);
 
-        // Perform frustum culling
-        if (updateCulling || chunk.visibility == -1) {
+            // Frustum culling
             chunk.isVisible = frustum.isBoxInFrustum(minPos, maxPos);
-            chunk.visibility = chunk.isVisible;
-        }
-
-        if (chunk.isVisible) {
-            // Begin occlusion query
-            glBeginQuery(GL_SAMPLES_PASSED, chunk.queryID);
-            renderer->renderBoundingBox(minPos, maxPos); // Render bounding box for occlusion query
-            glEndQuery(GL_SAMPLES_PASSED);
-
-
-            GLuint available = 0;
-            glGetQueryObjectuiv(chunk.queryID, GL_QUERY_RESULT_AVAILABLE, &available);
-
-            if (available) {
-                GLuint sampleCount = 0;
-                glGetQueryObjectuiv(chunk.queryID, GL_QUERY_RESULT, &sampleCount);
-                chunk.isVisible = (sampleCount > 0);
+            if (chunk.isVisible) {
+                visibleChunks.emplace_back(coord, &chunk);
             }
-            else 
-                chunk.isVisible = chunk.visibility == 1;
-                
-            // If sample count is 0, the chunk is occluded
-            if (chunk.isMeshDirty){
-                generateChunkMesh(chunk, chunk.cachedVertices, chunk.cachedIndices, coord);
-                chunk.isMeshDirty = false;
-            }
-
-            const auto vertexOffset = static_cast<uint32_t>(vertices.size());
-            vertices.insert(vertices.end(), chunk.cachedVertices.begin(), chunk.cachedVertices.end());
-            for (const uint32_t index : chunk.cachedIndices)
-                indices.push_back(index + vertexOffset);
         }
     }
 
-    updateCulling = false;
-}
+    // Generate meshes and fill vertex/index buffers outside the mutex
+    for (auto& [coord, chunkPtr] : visibleChunks) {
+        Chunk& chunk = *chunkPtr;
 
+        if (chunk.isMeshDirty) {
+            generateChunkMesh(chunk, chunk.cachedVertices, chunk.cachedIndices, coord);
+            chunk.isMeshDirty = false;
+        }
+
+        // Append to the main vertex/index arrays
+        const auto vertexOffset = static_cast<uint32_t>(vertices.size());
+        indices.reserve(indices.size() + chunk.cachedIndices.size());
+        vertices.insert(vertices.end(), chunk.cachedVertices.begin(), chunk.cachedVertices.end());
+        for (const uint32_t index : chunk.cachedIndices)
+            indices.emplace_back(index + vertexOffset);
+    }
+}
 
 void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
     const auto newPlayerChunk = glm::ivec2(floorDiv(playerPos.x , Chunk::WIDTH), floorDiv(playerPos.z, Chunk::DEPTH));
@@ -209,23 +196,22 @@ void World::generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices,
 }
 
 void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord) {
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<int> noise(-5, 5);
+    std::uniform_int_distribution<int> blocks(0, 1);
 
     for (int x = 0; x < Chunk::WIDTH; ++x) {
-     for (int z = 0; z < Chunk::DEPTH; ++z) {
-        constexpr float amplitude = 20.0f;
-        constexpr float frequency = 0.05f;
-            // Basic sine wave terrain with added randomness
-            const float height = amplitude * (std::sin(frequency * x + coord.x) + std::sin(frequency * z + coord.y)) +
-                           (rand() % 10 - 5) +  // Random value to add noise
-                           (Chunk::HEIGHT / 4);
+        for (int z = 0; z < Chunk::DEPTH; ++z) {
+            constexpr float amplitude = 20.0f;
+            constexpr float frequency = 0.05f;
+            const float height = noise(rng) + (Chunk::HEIGHT / 4)
+                + amplitude * (std::sin(frequency * x + coord.x) + std::sin(frequency * z + coord.y));
 
             const int intHeight = static_cast<int>(height);
-
-            for (int y = -Chunk::HEIGHT/4; y < intHeight; ++y) {
-                BlockType blockType = rand()%2 ? BlockType::Grass : BlockType::Stone;
+            for (int y = 0; y < intHeight; ++y) {
+                BlockType blockType = blocks(rng) ? BlockType::Grass : BlockType::Stone;
                 const auto voxelData = packVoxelData(1, 100, 255, 100, static_cast<uint8_t>(blockType));
                 chunk.setVoxel(x, y, z, voxelData);
-
             }
         }
     }
