@@ -76,11 +76,12 @@ class VBOManager {
 class Renderer
 {
 	private:
-		GLuint		_shaderprog;
-		GLuint		_vao;
-		GLuint		_vbo;
-		GLuint		_ibo;
-		GLint		_mvpLocation;
+		GLuint	_shaderprog;
+		GLuint	_vao;
+		GLuint	_vbo;
+		GLuint	_ibo;
+		GLuint	_cameraUBO;
+		GLuint	_textureArray;
 
 		static std::string* loadShaderCode(const char* path);
 		static uint32_t		compileShader(const std::string* code, int32_t type);
@@ -91,19 +92,15 @@ class Renderer
 		Renderer(const Renderer&) = delete;
 		Renderer& operator=(const Renderer&) = default;
 
-		GLuint textureID;
-
 		static void	initProjectionMatrix(const GLFWwindow* window, const std::unique_ptr<Camera>& camera, glm::mat4& mvp);
 
-		void	render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4& mvp);
-		void	setTextureID(const GLuint id) { textureID = id; }
+		void	render(const std::vector<Vertex>& vertices, const std::vector<unsigned>& indices, const glm::mat4& mvp) const;
 		void	releaseVBO();
         void	renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
+		void	setTexArray(const GLuint textureArray) { _textureArray = textureArray; }
 
 		[[nodiscard]] GLuint	getShaderProgram()      const { return _shaderprog;  }
-		[[nodiscard]] GLint		getMVPUniformLocation() const { return _mvpLocation; }
 		[[nodiscard]] GLuint	getVertexArrayObject()  const { return _vao;         }
-		[[nodiscard]] GLuint	getTextureID()          const { return textureID;    }
 };
 
 #endif

@@ -16,8 +16,9 @@ class App : public Engine
 		void	terminate() override;
 
 		bool	_showWireframe;
-		std::unordered_map<BlockType, GLuint> textures;
-	
+		GLuint textureArray;
+		std::unordered_map<BlockType, GLuint> textureIndices;
+
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();

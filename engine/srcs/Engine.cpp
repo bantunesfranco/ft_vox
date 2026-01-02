@@ -67,8 +67,8 @@ void	Engine::setSetting(const int32_t setting, const bool value)
 
 void Engine::initWindow(const int32_t width, const int32_t height, const char* title)
 {
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
 	glfwWindowHint(GLFW_MAXIMIZED, settings[VOX_MAXIMIZED]);
 	glfwWindowHint(GLFW_DECORATED, settings[VOX_DECORATED]);
 	glfwWindowHint(GLFW_VISIBLE, !settings[VOX_HEADLESS]);
@@ -131,6 +131,82 @@ GLuint Engine::loadTexture(const char* path) {
 		throw EngineException(VOX_TEXTFAIL);
 
     return textureID;
+}
+
+GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outWidth, int& outHeight) {
+	int width, height, channels;
+
+	stbi_uc* first = stbi_load(
+		paths[0].c_str(),
+		&width, &height,
+		&channels,
+		STBI_rgb_alpha
+	);
+
+	if (!first)
+		throw EngineException(VOX_TEXTFAIL);
+
+	outWidth  = width;
+	outHeight = height;
+
+	GLuint texArray;
+	glCreateTextures(GL_TEXTURE_2D_ARRAY, 1, &texArray);
+
+	glTextureStorage3D(
+		texArray,
+		1,
+		GL_RGBA8,
+		width, height,
+		static_cast<GLsizei>(paths.size())
+	);
+
+	glTextureSubImage3D(
+		texArray,
+		0,
+		0, 0, 0,
+		width, height,
+		1,
+		GL_RGBA,
+		GL_UNSIGNED_BYTE,
+		first
+	);
+
+	stbi_image_free(first);
+
+	for (size_t i = 1; i < paths.size(); ++i)
+	{
+		stbi_uc* data = stbi_load(
+			paths[i].c_str(),
+			&width, &height,
+			&channels,
+			STBI_rgb_alpha
+		);
+
+		if (!data)
+			throw EngineException(VOX_TEXTFAIL);
+
+		assert(width == outWidth && height == outHeight);
+
+		glTextureSubImage3D(
+			texArray,
+			0,
+			0, 0, static_cast<GLint>(i),
+			width, height,
+			1,
+			GL_RGBA,
+			GL_UNSIGNED_BYTE,
+			data
+		);
+
+		stbi_image_free(data);
+	}
+
+	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTextureParameteri(texArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTextureParameteri(texArray, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTextureParameteri(texArray, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	return texArray;
 }
 
 void	Engine::toggleWireframe(const bool showWireframe)

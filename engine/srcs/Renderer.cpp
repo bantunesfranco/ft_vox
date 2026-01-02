@@ -12,8 +12,9 @@
 #include <vector>
 #include <cmath>
 
-Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-1), textureID(0) {
-    const std::string *code = loadShaderCode(VSHADER_PATH);
+Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _textureArray(0)
+{
+    const std::string* code = loadShaderCode(VSHADER_PATH);
     const GLuint vshader = compileShader(code, GL_VERTEX_SHADER);
     delete code;
     if (!vshader) throw Engine::EngineException(VOX_VERTFAIL);
@@ -28,44 +29,20 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-
     }
 
     _shaderprog = glCreateProgram();
-    if (!_shaderprog)
-    {
-        glDeleteShader(vshader);
-        glDeleteShader(fshader);
-        throw Engine::EngineException(VOX_SHDRFAIL);
-    }
-
     glAttachShader(_shaderprog, vshader);
     glAttachShader(_shaderprog, fshader);
     glLinkProgram(_shaderprog);
 
-    GLint success;
-    glGetProgramiv(_shaderprog, GL_LINK_STATUS, &success);
-    if (!success) {
-        char infolog[512];
-        glGetProgramInfoLog(_shaderprog, sizeof(infolog), NULL, infolog);
-        std::cerr << "Shader Program Linking Failed: " << infolog << std::endl;
-        glDeleteShader(vshader);
-        glDeleteShader(fshader);
-        glDeleteProgram(_shaderprog);
-        throw Engine::EngineException(VOX_SHDRFAIL);
-    }
-
     glDeleteShader(vshader);
     glDeleteShader(fshader);
 
-    _mvpLocation = glGetUniformLocation(_shaderprog, "MVP");
-    if (_mvpLocation == -1) {
-        std::cerr << "Failed to get MVP uniform location." << std::endl;
-        glDeleteProgram(_shaderprog);
-        throw Engine::EngineException(VOX_SHDRFAIL);
-    }
-
-    const GLint vpos_location = glGetAttribLocation(_shaderprog, "vPos");
-    const GLint vtex_location = glGetAttribLocation(_shaderprog, "vTexCoord");
-
-    if (vpos_location == -1 || vtex_location == -1) {
-        std::cerr << "Failed to get attribute locations." << std::endl;
+    GLint success;
+    glGetProgramiv(_shaderprog, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        char infolog[512];
+        glGetProgramInfoLog(_shaderprog, sizeof(infolog), nullptr, infolog);
+        std::cerr << "Shader Program Linking Failed: " << infolog << std::endl;
         glDeleteProgram(_shaderprog);
         throw Engine::EngineException(VOX_SHDRFAIL);
     }
@@ -77,34 +54,46 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _mvpLocation(-
     glBindVertexArray(_vao);
 
     _vbo = VBOManager::get().getVBO();
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-
     _ibo = VBOManager::get().getVBO();
+
+    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
 
-    glEnableVertexAttribArray(vpos_location);
-    glVertexAttribPointer(vpos_location, 3, GL_FLOAT, GL_FALSE,
-            sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
 
-    glEnableVertexAttribArray(vtex_location);
-    glVertexAttribPointer(vtex_location, 2, GL_FLOAT, GL_FALSE,
-            sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texCoords)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
+                          sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribIPointer(
+        2, 1, GL_UNSIGNED_INT,
+        sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex))
+    );
 
     glBindVertexArray(0);
 
-    if (glGetError() != GL_NO_ERROR) {
-        glDeleteProgram(_shaderprog);
-        glDeleteBuffers(1, &_vbo);
-        glDeleteBuffers(1, &_ibo);
-        glDeleteVertexArrays(1, &_vao);
-        throw Engine::EngineException(VOX_GLADFAIL);
-    }
+    glCreateBuffers(1, &_cameraUBO);
+    glNamedBufferData(_cameraUBO, sizeof(glm::mat4), nullptr, GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, _cameraUBO);
 
+    glUseProgram(_shaderprog);
+    const GLint samplerLoc = glGetUniformLocation(_shaderprog, "uTextures");
+    if (samplerLoc != -1)
+        glUniform1i(samplerLoc, 0);
+
+    glUseProgram(0);
+
+    if (glGetError() != GL_NO_ERROR)
+        throw Engine::EngineException(VOX_GLADFAIL);
 }
 
 Renderer::~Renderer() {
     glDeleteProgram(_shaderprog);
     glDeleteBuffers(1, &_ibo);
+    glDeleteBuffers(1, &_vbo);
     glDeleteVertexArrays(1, &_vao);
 }
 
@@ -144,17 +133,13 @@ std::string* Renderer::loadShaderCode(const char* path) {
     return new std::string(shaderStream.str());
 }
 
-void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4& mvp) {
-    if (vertices.empty() || indices.empty()) {
-        std::cerr << "No vertices or indices to render." << std::endl;
+void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4& mvp) const
+{
+    if (vertices.empty() || indices.empty())
         return;
-    }
 
     glUseProgram(_shaderprog);
     glBindVertexArray(_vao);
-
-    if (_vbo == 0)
-        _vbo = VBOManager::get().getVBO();
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
@@ -162,31 +147,12 @@ void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uin
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint32_t), indices.data(), GL_DYNAMIC_DRAW);
 
-    if (_mvpLocation == -1) {
-        std::cerr << "Failed to get MVP uniform location." << std::endl;
-        return;
-    }
-    glUniformMatrix4fv(_mvpLocation, 1, GL_FALSE, glm::value_ptr(mvp));
+    glBindBuffer(GL_UNIFORM_BUFFER, _cameraUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4),glm::value_ptr(mvp));
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-    const GLint texLoc = glGetUniformLocation(_shaderprog, "textureSampler");
-    if (texLoc == -1) {
-        std::cerr << "Failed to get textureSampler uniform location." << std::endl;
-        return;
-    }
-    glUniform1i(texLoc, 0);
-
-
-    GLuint currentTextureID = vertices[0].textureID;
-    for (size_t i = 0; i < indices.size(); i += 6) {
-        textureID = vertices[indices[i]].textureID;
-
-        if (textureID != currentTextureID) {
-            currentTextureID = textureID;
-            glBindTexture(GL_TEXTURE_2D, currentTextureID);
-        }
-
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, reinterpret_cast<void*>(i * sizeof(uint32_t)));
-    }
+    glBindTextureUnit(0, _textureArray);
+    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
 
     glBindVertexArray(0);
 }

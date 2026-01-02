@@ -3,25 +3,13 @@
 #include <iostream>
 #include <cmath>
 #include <random>
+#include <ranges>
 
 inline int floorDiv(const int x, const int d) {
     int q = x / d;
     if (const int r = x % d; r != 0 && ((r < 0) != (d < 0)))
         --q;
     return q;
-}
-
-inline bool isFullySurrounded(const Chunk& chunk, const int x, const int y, const int z) {
-    return chunk.isBlockActive(x+1,y,z) &&
-           chunk.isBlockActive(x-1,y,z) &&
-           chunk.isBlockActive(x,y+1,z) &&
-           chunk.isBlockActive(x,y-1,z) &&
-           chunk.isBlockActive(x,y,z+1) &&
-           chunk.isBlockActive(x,y,z-1);
-}
-
-inline bool inBounds(const unsigned int x, const unsigned int y, const unsigned int z) {
-    return x < Chunk::WIDTH && y < Chunk::HEIGHT && z < Chunk::DEPTH;
 }
 
 bool World::isBlockActiveWorld(const int wx, const int wy, const int wz) const {
@@ -71,7 +59,7 @@ bool Chunk::isBlockActive(const int x, const int y, const int z) const
     return isActive(getVoxel(x, y, z));
 }
 
-World::World(const std::unordered_map<BlockType, GLuint>& textures) : playerChunk(glm::ivec2(0,0)), textures(textures) {}
+World::World(const std::unordered_map<BlockType, uint32_t>& indices): playerChunk(0, 0), textureIndices(indices) {}
 
 void World::generateWorldMesh(const std::unique_ptr<Renderer>& renderer, const std::unique_ptr<Camera>& camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
 
@@ -126,28 +114,30 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
     first_gen = false;
     playerChunk = newPlayerChunk;
 
-    std::vector<glm::ivec2> chunksToLoad(9);
-    std::vector<glm::ivec2> chunksToUnload(9);
+    std::vector<glm::ivec2> chunksToLoad;
+    std::vector<glm::ivec2> chunksToUnload;
+    chunksToLoad.reserve(32);
+    chunksToUnload.reserve(32);
 
     // Determine which chunks need to be loaded
     for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; ++dx) {
         for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; ++dz) {
             std::lock_guard<std::mutex> lock(chunk_mutex);
-            if (glm::ivec2 chunkCoord = playerChunk + glm::ivec2(dx, dz); chunks.find(chunkCoord) == chunks.end())
+            if (glm::ivec2 chunkCoord = playerChunk + glm::ivec2(dx, dz); !chunks.contains(chunkCoord))
                 chunksToLoad.push_back(chunkCoord);
         }
     }
 
     // Determine which chunks need to be unloaded
     constexpr float maxDistanceSquared = (CHUNK_RADIUS + 1.5f) * (CHUNK_RADIUS + 1.5f);
-    for (auto& [coord, chunk] : chunks) {
+    for (const auto& coord : chunks | std::views::keys) {
         if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > maxDistanceSquared)
             chunksToUnload.push_back(coord);
     }
 
     // Load new chunks
     for (const glm::ivec2& coord : chunksToLoad) {
-        if (chunks.find(coord) == chunks.end()) {
+        if (!chunks.contains(coord)) {
             threadPool.enqueue([this, coord] {
                 Chunk newChunk;
                 generateTerrain(newChunk, coord);
@@ -168,7 +158,10 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 }
 
 
-void World::generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) {
+void World::generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) const
+{
+    // vertices.clear();
+    // indices.clear();
     vertices.reserve(vertices.size() + Chunk::SIZE * 4);
     indices.reserve(indices.size() + Chunk::SIZE * 6);
 
@@ -178,17 +171,18 @@ void World::generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices,
                 if (!chunk.isBlockActive(x, y, z))
                     continue;
 
-                glm::vec3 blockPos(x + coord.x * Chunk::WIDTH, y, z + coord.y * Chunk::DEPTH);
-                uint8_t blockType = getBlockType(chunk.getVoxel(x, y, z));
+                const auto blockType = static_cast<BlockType>(getBlockType(chunk.getVoxel(x, y, z)));
+                const auto it = textureIndices.find(blockType);
+                if (blockType == BlockType::Air || it == textureIndices.end())
+                    continue;
+
+                const glm::vec3 blockPos(x + coord.x * Chunk::WIDTH, y, z + coord.y * Chunk::DEPTH);
+                const uint32_t texIndex = it->second;
 
                 // Loop through visible faces only
                 for (int dir = 0; dir < 6; ++dir) {
-                    if (isFaceVisible(chunk, coord, x, y, z, static_cast<Direction>(dir))) {
-                        createFace(vertices, indices, blockPos,
-                            static_cast<Direction>(dir),
-                            textures[static_cast<BlockType>(blockType)]
-                        );
-                    }
+                    if (isFaceVisible(chunk, coord, x, y, z, static_cast<Direction>(dir)))
+                        createFace(vertices, indices, blockPos, static_cast<Direction>(dir), texIndex);
                 }
             }
         }
@@ -205,7 +199,8 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord) {
             constexpr float amplitude = 20.0f;
             constexpr float frequency = 0.05f;
             const float height = noise(rng) + (Chunk::HEIGHT / 4)
-                + amplitude * (std::sin(frequency * x + coord.x) + std::sin(frequency * z + coord.y));
+                + amplitude * (std::sin(frequency * x + coord.x)
+                + std::sin(frequency * z + coord.y));
 
             const int intHeight = static_cast<int>(height);
             for (int y = 0; y < intHeight; ++y) {
@@ -244,7 +239,7 @@ bool World::isFaceVisible(const Chunk& chunk, const glm::ivec2& coord,
     return !isBlockActiveWorld(wx, ny, wz);
 }
 
-void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const GLuint textureID) {
+void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, const Direction direction, const uint32_t texIndex) {
     auto v0 = glm::vec3(0.0f);
     auto v1 = glm::vec3(0.0f);
     auto v2 = glm::vec3(0.0f);
@@ -286,14 +281,15 @@ void World::createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& ind
     indices.push_back(startIndex);
     indices.push_back(startIndex + 1);
     indices.push_back(startIndex + 2);
+
     indices.push_back(startIndex);
     indices.push_back(startIndex + 2);
     indices.push_back(startIndex + 3);
 
-    vertices.push_back({ blockPos + v0, {0.f, 0.f}, textureID });
-    vertices.push_back({ blockPos + v1, {1.f, 0.f}, textureID });
-    vertices.push_back({ blockPos + v2, {1.f, 1.f}, textureID });
-    vertices.push_back({ blockPos + v3, {0.f, 1.f}, textureID });
+    vertices.push_back({blockPos + v0, {0.f, 0.f}, texIndex});
+    vertices.push_back({blockPos + v1, {1.f, 0.f}, texIndex});
+    vertices.push_back({blockPos + v2, {1.f, 1.f}, texIndex});
+    vertices.push_back({blockPos + v3, {0.f, 1.f}, texIndex});
 }
 
 void World::markChunkAndNeighborsDirty(const glm::ivec2& coord) {
@@ -301,8 +297,8 @@ void World::markChunkAndNeighborsDirty(const glm::ivec2& coord) {
         {0,0},{1,0},{-1,0},{0,1},{0,-1}
     };
 
-    for (auto& o : offsets) {
-        if (auto it = chunks.find(coord + o); it != chunks.end()) {
+    for (auto& off : offsets) {
+        if (auto it = chunks.find(coord + off); it != chunks.end()) {
             it->second.isMeshDirty = true;
         }
     }

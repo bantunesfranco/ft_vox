@@ -82,7 +82,7 @@ void App::setCallbackFunctions() const
 void App::run()
 {
     ThreadPool threadPool(8);
-    World world(textures);
+    World world(textureIndices);
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 
@@ -124,13 +124,22 @@ void App::terminate()
 void App::loadTextures() {
     try
     {
-        // textures[BlockType::Grass] = loadTexture("./textures/grass.png");
-        // textures[BlockType::Dirt] = loadTexture("./textures/dirt.png");
-        // textures[BlockType::Stone] = loadTexture("./textures/stone.png");
-        // textures[BlockType::Sand] = loadTexture("./textures/sand.png");
-        // textures[BlockType::Water] = loadTexture("./textures/water.png");
-        textures[BlockType::Grass] = loadTexture("./textures/grass.png");
-        textures[BlockType::Stone] = loadTexture("./textures/amethyst.png");
+    	const std::vector<std::string> paths = {
+    		"./textures/grass.png",      // texIndex 0
+			"./textures/amethyst.png",	// texIndex 1
+    		// "./textures/dirt.png",
+    		// "./textures/sand.png",
+    		// "./textures/water.png",
+		};
+
+    	int texWidth, texHeight;
+    	textureArray = loadTextureArray(paths, texWidth, texHeight);
+    	std::cout << "textures loaded: " << texWidth << "x" << texHeight << std::endl;
+
+        textureIndices[BlockType::Grass] = 0;
+        textureIndices[BlockType::Stone] = 1;
+
+    	renderer->setTexArray(textureArray);
     }
     catch(const std::exception& e)
     {

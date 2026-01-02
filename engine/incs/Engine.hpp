@@ -91,6 +91,7 @@ class Engine
 		void				closeWindow() const;
 		[[nodiscard]] bool	isKeyDown(keys_t key) const;
 		static GLuint		loadTexture(const char* path);
+		static GLuint		loadTextureArray(const std::vector<std::string>& paths, int& outWidth, int& outHeight);
 		static void			toggleWireframe(bool showWireframe);
 };
 

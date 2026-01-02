@@ -110,7 +110,7 @@ constexpr int MAX_FACES = Chunk::WIDTH * Chunk::HEIGHT * Chunk::DEPTH * 6;
 // Define the world as a collection of chunks
 class World {
 	public:
-		World(const std::unordered_map<BlockType, GLuint>& textures);
+		World(const std::unordered_map<BlockType, uint32_t>& indices);
 		~World() = default;
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
@@ -128,12 +128,12 @@ class World {
 
 	private:
 		glm::ivec2 playerChunk;
-		std::unordered_map<BlockType, GLuint> textures;
+		std::unordered_map<BlockType, GLuint> textureIndices;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
         std::mutex chunk_mutex;
-		Frustum frustum;
+		Frustum frustum{};
 
-		void generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord);
+		void generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) const;
 		static void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 };
 

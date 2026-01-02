@@ -7,9 +7,9 @@ typedef int				GLint;
 typedef unsigned int	GLuint;
 
 typedef struct Vertex {
-    glm::vec3	position;  // Vertex position
-    glm::vec2	texCoords; // Texture coordinates
-	GLuint		textureID; // Texture ID
+    glm::vec3	position;
+	glm::vec2	uv;
+	uint32_t	texIndex;
 } Vertex;
 
 typedef enum settings
