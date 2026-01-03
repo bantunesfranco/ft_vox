@@ -1,7 +1,7 @@
 #include "World.hpp"
+#include "stb_perlin.h"
+
 #include <cmath>
-#include <iostream>
-#include <random>
 #include <ranges>
 
 inline int floorDiv(const int x, const int d) {
@@ -119,59 +119,131 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord) {
             }
         }
     }
+
 }
 
 /* ===================== Greedy Meshing ===================== */
 void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const {
-    if (!chunk.isMeshDirty)
-        return;
-
+    // if (!chunk.isMeshDirty)
+    //     return;
+    //
+    // chunk.cachedVertices.clear();
+    // chunk.cachedIndices.clear();
+    //
+    // constexpr int dims[3] = {Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH};
+    //
+    // for (int axis = 0; axis < 3; ++axis) {
+    //     const int u = (axis + 1) % 3;
+    //     const int v = (axis + 2) % 3;
+    //     std::vector<int> mask(dims[u] * dims[v]);
+    //
+    //     for (int slice = 0; slice <= dims[axis]; ++slice) {
+    //         for (int i = 0; i < dims[u]; ++i) {
+    //             for (int j = 0; j < dims[v]; ++j) {
+    //                 const int x = (axis == 0) ? slice : i;
+    //                 const int y = (axis == 1) ? slice : ((axis == 0) ? i : j);
+    //                 const int z = (axis == 2) ? slice : j;
+    //
+    //                 bool solidA = (slice < dims[axis]) && chunk.isBlockActive(x, y, z);
+    //                 bool solidB = (slice > 0) && chunk.isBlockActive(x - (axis == 0), y - (axis == 1), z - (axis == 2));
+    //
+    //                 if (solidA != solidB) {
+    //                     mask[i + j * dims[u]] = solidA ? getBlockType(chunk.getVoxel(x, y, z))
+    //                                                    : getBlockType(chunk.getVoxel(x - (axis == 0), y - (axis == 1), z - (axis == 2)));
+    //                 } else {
+    //                     mask[i + j * dims[u]] = -1;
+    //                 }
+    //             }
+    //         }
+    //         applyGreedy2D(mask, dims[u], dims[v], axis, slice, chunk, coord);
+    //     }
+    // }
+    //
+    // chunk.isMeshDirty = false;
     chunk.cachedVertices.clear();
     chunk.cachedIndices.clear();
 
-    constexpr int dims[3] = {Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH};
+    for (int x = 0; x < Chunk::WIDTH; ++x)
+    {
+        for (int y = 0; y < Chunk::HEIGHT; ++y)
+        {
+            for (int z = 0; z < Chunk::DEPTH; ++z) {
+                if (!chunk.isBlockActive(x, y, z))
+                    continue;
 
-    for (int axis = 0; axis < 3; ++axis) {
-        const int u = (axis + 1) % 3;
-        const int v = (axis + 2) % 3;
+                const uint32_t texIndex = textureIndices.at(static_cast<BlockType>(getBlockType(chunk.getVoxel(x, y, z))));
+                auto base = static_cast<uint32_t>(chunk.cachedVertices.size());
 
-        std::vector<int> mask(dims[u] * dims[v]);
+                // +X face
+                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x+1, y, z))
+                {
+                    chunk.cachedVertices.push_back({{x+1, y,   z}, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, {0,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, {1,0}, texIndex});
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+                    base += 4;
+                }
 
-        // Loop over slices along the main axis
-        for (int slice = 0; slice <= dims[axis]; ++slice) {
-            for (int i = 0; i < dims[u]; ++i) {
-                for (int j = 0; j < dims[v]; ++j) {
-                    const int x = (axis == 0) ? slice : i;
-                    const int y = (axis == 1) ? slice : ((axis == 0) ? i : j);
-                    const int z = (axis == 2) ? slice : j;
+                // -X face
+                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x-1, y, z))
+                {
+                    chunk.cachedVertices.push_back({{x, y,   z}, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y,   z+1}, {1,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1}, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z}, {0,1}, texIndex});
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+                    base += 4;
+                }
 
-                    bool solidA = false;
-                    bool solidB = false;
+                // +Y face
+                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y+1, z))
+                {
+                    chunk.cachedVertices.push_back({{x, y+1, z}, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1}, {0,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, {1,0}, texIndex});
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+                    base += 4;
+                }
 
-                    // Check bounds before accessing chunk
-                    if (slice < dims[axis] && x < Chunk::WIDTH && y < Chunk::HEIGHT && z < Chunk::DEPTH)
-                        solidA = chunk.isBlockActive(x, y, z);
+                // -Y face
+                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y-1, z))
+                {
+                    chunk.cachedVertices.push_back({{x, y, z}, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y, z}, {1,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y, z+1}, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y, z+1}, {0,1}, texIndex});
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+                    base += 4;
+                }
 
-                    if (slice > 0 && x - (axis == 0) >= 0 && y - (axis == 1) >= 0 && z - (axis == 2) >= 0)
-                        solidB = chunk.isBlockActive(x - (axis == 0), y - (axis == 1), z - (axis == 2));
+                // +Z face
+                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z+1))
+                {
+                    chunk.cachedVertices.push_back({{x, y,   z+1}, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, {1,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1}, {0,1}, texIndex});
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+                    base += 4;
+                }
 
-                    if (solidA != solidB) {
-                        if (solidA) {
-                            mask[i + j * dims[u]] = getBlockType(chunk.getVoxel(x, y, z));
-                        } else {
-                            const auto voxel = chunk.getVoxel(x - (axis == 0), y - (axis == 1), z - (axis == 2));
-                            mask[i + j * dims[u]] = getBlockType(voxel);
-                        }
-                    } else {
-                        mask[i + j * dims[u]] = -1;
-                    }
+                // -Z face
+                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z-1))
+                {
+                    chunk.cachedVertices.push_back({{x, y,   z}, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z}, {0,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y,   z}, {1,0}, texIndex});
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                 }
             }
-
-            applyGreedy2D(mask, dims[u], dims[v], axis, slice, chunk, coord);
         }
     }
 
+    const glm::vec3 chunkOffset(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
+    for (auto& v : chunk.cachedVertices) v.position += chunkOffset;
     chunk.isMeshDirty = false;
 }
 
