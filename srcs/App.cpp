@@ -103,9 +103,11 @@ void App::run()
 		}
 
     glm::mat4 mvp;
+	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
 	while (windowIsOpen(window))
 	{
+		glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
 		glfwPollEvents();
         FPSCounter::update();
 		handleMovement(window, camera);
@@ -124,7 +126,7 @@ void App::run()
 			}
 		}
 
-		renderImGui(camera, _showWireframe);
+		renderImGui(camera, _showWireframe, rgba);
 		glfwSwapBuffers(window);
 	}
 }
@@ -146,17 +148,18 @@ void App::loadTextures() {
     {
     	const std::vector<std::string> paths = {
     		"./textures/grass.png",      // texIndex 0
-			"./textures/amethyst.png",	// texIndex 1
-    		// "./textures/dirt.png",
+    		"./textures/dirt.png",		// texIndex 1
+    		"./textures/stone.png",
     		// "./textures/sand.png",
-    		// "./textures/water.png",
+			// "./textures/amethyst.png",
 		};
 
     	int texWidth, texHeight;
     	textureArray = loadTextureArray(paths, texWidth, texHeight);
 
         textureIndices[BlockType::Grass] = 0;
-        textureIndices[BlockType::Stone] = 1;
+        textureIndices[BlockType::Dirt] = 1;
+        textureIndices[BlockType::Stone] = 2;
 
     	renderer->setTexArray(textureArray);
     }

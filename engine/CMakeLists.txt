@@ -31,14 +31,14 @@ FetchContent_Declare(
 
 # Fetch stb_image
 FetchContent_Declare(
-  stb_image
+  stb
   GIT_REPOSITORY https://github.com/nothings/stb.git
   GIT_TAG master
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb_image
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
 
 # Fetch the dependencies into the vendor directory
-FetchContent_MakeAvailable(glm glfw stb_image)
+FetchContent_MakeAvailable(glm glfw stb)
 
 # GLAD library
 add_library(glad STATIC "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glad/src/glad.c")
@@ -49,8 +49,7 @@ file(GLOB_RECURSE SOURCES "srcs/*.cpp")
 file(GLOB_RECURSE HEADERS "incs/*.hpp")
 
 # Define the library target
-add_library(engine STATIC ${SOURCES} ${HEADERS}
-        incs/Voxel.hpp)
+add_library(engine STATIC ${SOURCES} ${HEADERS} incs/Voxel.hpp)
 
 # Remove unwanted files from the GLFW dependency
 file(REMOVE ${glfw_SOURCE_DIR}/deps/stb_image_write.h)
@@ -58,11 +57,11 @@ file(REMOVE ${glfw_SOURCE_DIR}/deps/stb_image_write.h)
 # Link the dependencies
 target_link_libraries(engine PUBLIC glad glfw)
 
-# Add include directories for GLM, GLFW, stb_image, and the engine headers
+# Add include directories for GLM, GLFW, stb, and the engine headers
 target_include_directories(engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/incs)
 target_include_directories(engine PUBLIC ${glfw_SOURCE_DIR}/include)
 target_include_directories(engine PUBLIC ${glm_SOURCE_DIR})
-target_include_directories(engine PUBLIC ${stb_image_SOURCE_DIR})
+target_include_directories(engine PUBLIC ${stb_SOURCE_DIR})
 
 # Platform-specific options
 if(WIN32)

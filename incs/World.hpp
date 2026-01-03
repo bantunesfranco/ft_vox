@@ -58,7 +58,7 @@ class Chunk {
 
 		// Define the dimensions of a chunk
 		static constexpr uint8_t WIDTH = 16;
-		static constexpr uint16_t HEIGHT = 32;
+		static constexpr uint16_t HEIGHT = 64;
 		static constexpr uint8_t DEPTH = 16;
 		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 

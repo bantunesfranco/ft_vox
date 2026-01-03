@@ -59,4 +59,10 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         App::toggleWireframe(app->_showWireframe);
         std::cout << "Toggle wireframe" << std::endl;
     }
+    else if (key == VOX_KEY_Z && action == VOX_PRESS)
+    {
+        static bool mouseMode = false;
+        glfwSetInputMode(window, GLFW_CURSOR, mouseMode? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+        mouseMode = !mouseMode;
+    }
 }

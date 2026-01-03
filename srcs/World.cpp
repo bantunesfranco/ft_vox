@@ -1,7 +1,8 @@
 #include "World.hpp"
+
+#define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
 
-#include <cmath>
 #include <ranges>
 
 inline int floorDiv(const int x, const int d) {
@@ -103,23 +104,35 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
 /* ===================== Terrain ===================== */
 
-void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord) {
-    // std::mt19937 rng(coord.x * 73856093 ^ coord.y * 19349663);
+void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
+{
+    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 3;
+    constexpr int MAX_Y = Chunk::HEIGHT - 3;
+    constexpr int MIN_Y = 1;
 
-    for (int x = 0; x < Chunk::WIDTH; ++x)
-    {
+    for (int x = 0; x < Chunk::WIDTH; ++x) {
         for (int z = 0; z < Chunk::DEPTH; ++z) {
-            const int h = Chunk::HEIGHT / 4 +
-                    static_cast<int>(10 * std::sin(0.1f * (x + coord.x * 16)) +
-                        10 * std::cos(0.1f * (z + coord.y * 16)));
 
-            for (int y = 0; y < h; ++y) {
-                auto type = (y == h - 1) ? BlockType::Grass : BlockType::Stone;
+            const int wx = coord.x * Chunk::WIDTH + x;
+            const int wz = coord.y * Chunk::DEPTH + z;
+
+            const float n = stb_perlin_noise3( wx * 0.05f, 0.0f, wz * 0.05f, 0, 0, 0);
+
+            int height = BASE_HEIGHT + static_cast<int>(n * 15.0f);
+            height = std::clamp(height, MIN_Y, MAX_Y);
+
+            for (int y = MIN_Y; y <= height; ++y) {
+                BlockType type =
+                    (y == height)        ? BlockType::Grass :
+                    (y >= height - 4)    ? BlockType::Dirt  :
+                                           BlockType::Stone;
+
                 chunk.setVoxel(x, y, z, packVoxelData(1, 255, 255, 255, static_cast<uint8_t>(type)));
             }
         }
     }
 
+    chunk.isMeshDirty = true;
 }
 
 /* ===================== Greedy Meshing ===================== */
