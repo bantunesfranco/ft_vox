@@ -40,7 +40,7 @@ Engine::Engine(const int32_t width, const int32_t height, const char* title, std
 	{
 		std::cerr << e.what() << std::endl;
 		Engine::terminate();
-		std::exit(Engine::vox_errno);
+		std::exit(vox_errno);
 	}
 }
 

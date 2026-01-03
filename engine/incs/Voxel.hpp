@@ -20,7 +20,7 @@
 #include <cstdint>
 
 // Define a voxel as a 32-bit integer
-typedef uint32_t		Voxel;
+typedef uint32_t    Voxel;
 
 inline uint8_t getBlockType(const Voxel data) { return (data >> 24) & 0x7; }
 

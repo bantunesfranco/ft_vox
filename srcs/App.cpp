@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include <imgui.h>
+#include <ranges>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
@@ -64,7 +65,8 @@ static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& ca
 	}
 }
 
-App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings) : Engine(width, height, title, settings) {
+App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings)
+	: Engine(width, height, title, settings) {
 
 	_showWireframe = false;
 	setCallbackFunctions();
@@ -83,8 +85,22 @@ void App::run()
 {
     ThreadPool threadPool(8);
     World world(textureIndices);
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
+
+	for (int dx = -World::CHUNK_RADIUS; dx <= World::CHUNK_RADIUS; ++dx)
+		for (int dz = -World::CHUNK_RADIUS; dz <= World::CHUNK_RADIUS; ++dz) {
+			glm::ivec2 coord(
+				floorDiv(static_cast<int>(camera->pos.x), Chunk::WIDTH) + dx,
+				floorDiv(static_cast<int>(camera->pos.z), Chunk::DEPTH) + dz
+			);
+
+			std::cout << coord.x << ' ' << coord.y << std::endl;
+
+			Chunk chunk;
+			world.generateTerrain(chunk, coord);
+			world.generateChunkMeshGreedy(chunk, coord);
+
+			world.getChunks()[coord] = std::move(chunk);
+		}
 
     glm::mat4 mvp;
 
@@ -95,17 +111,21 @@ void App::run()
 		handleMovement(window, camera);
 
         Renderer::initProjectionMatrix(window, camera, mvp);
+
         world.updateChunks(camera->pos, threadPool);
-        world.generateWorldMesh(renderer, camera, vertices, indices);
-        renderer->render(vertices, indices, mvp);
+
+		{
+			std::lock_guard lock(world.chunk_mutex);
+			for (auto& [coord, chunk] : world.getChunks()) {
+				if (!chunk.cachedVertices.empty()) {
+					uploadChunk(chunk, chunk.renderData);
+					renderChunk(chunk, mvp);
+				}
+			}
+		}
 
 		renderImGui(camera, _showWireframe);
 		glfwSwapBuffers(window);
-
-        vertices.clear();
-        indices.clear();
-
-        // renderer->releaseVBO();
 	}
 }
 
@@ -134,7 +154,6 @@ void App::loadTextures() {
 
     	int texWidth, texHeight;
     	textureArray = loadTextureArray(paths, texWidth, texHeight);
-    	std::cout << "textures loaded: " << texWidth << "x" << texHeight << std::endl;
 
         textureIndices[BlockType::Grass] = 0;
         textureIndices[BlockType::Stone] = 1;
@@ -147,4 +166,59 @@ void App::loadTextures() {
         terminate();
         std::exit(Engine::vox_errno);
     }
+}
+
+void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
+{
+	if (chunk.cachedVertices.empty() || chunk.cachedIndices.empty())
+		return;
+
+	if (data.vao == 0)
+		glGenVertexArrays(1, &data.vao);
+	if (data.vbo == 0)
+		data.vbo = VBOManager::get().getVBO();
+	if (data.ibo == 0)
+		data.ibo = VBOManager::get().getVBO();
+
+	data.indexCount = chunk.cachedIndices.size();
+
+	glBindVertexArray(data.vao);
+
+	glBindBuffer(GL_ARRAY_BUFFER, data.vbo);
+	glBufferData(GL_ARRAY_BUFFER, chunk.cachedVertices.size() * sizeof(Vertex),
+				 chunk.cachedVertices.data(), GL_STATIC_DRAW);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data.ibo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indexCount * sizeof(uint32_t),
+				 chunk.cachedIndices.data(), GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3,
+		GL_FLOAT, GL_FALSE,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2,
+		GL_FLOAT, GL_FALSE,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
+
+	glEnableVertexAttribArray(2);
+	glVertexAttribIPointer(2, 1,
+		GL_UNSIGNED_INT,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
+
+	glBindVertexArray(0);
+}
+
+void App::renderChunk(const Chunk& chunk, const glm::mat4& mvp) const
+{
+	glUseProgram(renderer->getShaderProgram());
+	glBindVertexArray(chunk.renderData.vao);
+
+	glBindBuffer(GL_UNIFORM_BUFFER, renderer->getCameraUBO());
+	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4),glm::value_ptr(mvp));
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	glBindTextureUnit(0, renderer->getTextureArray());
+	glDrawElements(GL_TRIANGLES, chunk.renderData.indexCount, GL_UNSIGNED_INT, nullptr);
 }

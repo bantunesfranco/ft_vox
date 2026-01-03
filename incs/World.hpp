@@ -34,17 +34,26 @@ typedef struct Face {
 	uint32_t indices[6]; // Two triangles per face
 } Face;
 
+int floorDiv(const int x, const int d);
 
 // Define a chunk as a 1D vector of voxels
 class Chunk {
 	public:
+		struct ChunkRenderData {
+			GLuint vao = 0;
+			GLuint vbo = 0;
+			GLuint ibo = 0;
+			uint32_t indexCount = 0;
+		} renderData;
+
 		Chunk();
-		~Chunk();
+		~Chunk() = default;
 		Chunk(const Chunk&) = default;
 		Chunk& operator=(const Chunk&) = default;
 
 		void		setVoxel(int x, int y, int z, Voxel voxel);
 		[[nodiscard]] Voxel		getVoxel(int x, int y, int z) const;
+		[[nodiscard]] auto 		getVoxels() const { return voxels; }
 		[[nodiscard]] bool		isBlockActive(int x, int y, int z) const;
 
 		// Define the dimensions of a chunk
@@ -55,10 +64,7 @@ class Chunk {
 
         std::vector<Vertex> cachedVertices;
         std::vector<uint32_t> cachedIndices;
-        int visibility;
-        bool isVisible;
-        bool isMeshDirty;
-        GLuint queryID;
+        bool isMeshDirty = true;
 
 	private:
 		std::vector<Voxel> voxels;
@@ -110,31 +116,30 @@ constexpr int MAX_FACES = Chunk::WIDTH * Chunk::HEIGHT * Chunk::DEPTH * 6;
 // Define the world as a collection of chunks
 class World {
 	public:
+		constexpr static int CHUNK_RADIUS = 5;
+		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
+
+		std::mutex chunk_mutex;
+
 		World(const std::unordered_map<BlockType, uint32_t>& indices);
 		~World() = default;
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
 
-		constexpr static int CHUNK_RADIUS = 5;
-		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
-
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		void generateWorldMesh(const std::unique_ptr<Renderer>& renderer, const std::unique_ptr<Camera>& camera, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices);
-		bool isFaceVisible(const Chunk& chunk, const glm::ivec2& coord, int x, int y, int z, Direction direction) const;
+		void generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const;
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
-		void markChunkAndNeighborsDirty(const glm::ivec2& coord);
+		std::unordered_map<glm::ivec2, Chunk>& getChunks() { return chunks; }
 
-		static void createFace(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::vec3& blockPos, Direction direction, GLuint textureID);
+		static void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 
 	private:
-		glm::ivec2 playerChunk;
+		glm::ivec2 playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
 		std::unordered_map<BlockType, GLuint> textureIndices;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
-        std::mutex chunk_mutex;
 		Frustum frustum{};
 
-		void generateChunkMesh(const Chunk& chunk, std::vector<Vertex>& vertices, std::vector<uint32_t>& indices, const glm::ivec2& coord) const;
-		static void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
+		void applyGreedy2D(const std::vector<int>& mask, int width, int height, int axis, int slice, Chunk& chunk, const glm::ivec2& coord) const;
 };
 
 #endif

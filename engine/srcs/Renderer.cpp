@@ -12,7 +12,7 @@
 #include <vector>
 #include <cmath>
 
-Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _textureArray(0)
+Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _cameraUBO(0), _textureArray(0)
 {
     const std::string* code = loadShaderCode(VSHADER_PATH);
     const GLuint vshader = compileShader(code, GL_VERTEX_SHADER);

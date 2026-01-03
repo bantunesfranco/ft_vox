@@ -99,8 +99,10 @@ class Renderer
         void	renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
 		void	setTexArray(const GLuint textureArray) { _textureArray = textureArray; }
 
-		[[nodiscard]] GLuint	getShaderProgram()      const { return _shaderprog;  }
-		[[nodiscard]] GLuint	getVertexArrayObject()  const { return _vao;         }
+		[[nodiscard]] GLuint	getShaderProgram()      const { return _shaderprog;    }
+		[[nodiscard]] GLuint	getVertexArrayObject()  const { return _vao;           }
+		[[nodiscard]] GLuint	getCameraUBO()			const { return _cameraUBO;     }
+		[[nodiscard]] GLuint	getTextureArray()		const { return _textureArray;  }
 };
 
 #endif
