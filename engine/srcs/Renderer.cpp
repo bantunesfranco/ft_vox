@@ -75,10 +75,6 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _cameraUBO(0),
 
     glBindVertexArray(0);
 
-    glCreateBuffers(1, &_cameraUBO);
-    glNamedBufferData(_cameraUBO, sizeof(glm::mat4), nullptr, GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, _cameraUBO);
-
     glUseProgram(_shaderprog);
     const GLint samplerLoc = glGetUniformLocation(_shaderprog, "uTextures");
     if (samplerLoc != -1)

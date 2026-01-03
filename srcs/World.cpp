@@ -35,7 +35,18 @@ bool Chunk::isBlockActive(int x, int y, int z) const {
 
 /* ========================== World ========================== */
 
-World::World(const std::unordered_map<BlockType, uint32_t>& indices): textureIndices(indices) {}
+World::World(const std::unordered_map<BlockType, uint32_t>& indices) : ubo(0), textureIndices(indices)
+{
+    glCreateBuffers(1, &ubo);
+    glNamedBufferData(ubo, sizeof(WorldUBO), nullptr, GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
+
+    worldUBO = {
+        .MVP = glm::mat4(1.f),
+        .light = {69.0f, 420.0f, 69.0f, 30.f},
+        .ambientData = {0.5f, 0.0f, 0.0f, 0.0f},
+    };
+}
 
 bool World::isBlockActiveWorld(const int wx, const int wy, const int wz) const {
     if (static_cast<unsigned>(wy) >= Chunk::HEIGHT)
@@ -190,10 +201,11 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 // +X face
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x+1, y, z))
                 {
-                    chunk.cachedVertices.push_back({{x+1, y,   z}, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, {0,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, {1,0}, texIndex});
+                    constexpr glm::vec3 normal(1.0f, 0.0f, 0.0f);
+                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {0,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, normal, {1,0}, texIndex});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -201,10 +213,11 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 // -X face
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x-1, y, z))
                 {
-                    chunk.cachedVertices.push_back({{x, y,   z}, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y,   z+1}, {1,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1}, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z}, {0,1}, texIndex});
+                    constexpr glm::vec3 normal(-1.0f, 0.0f, 0.0f);
+                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {1,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1}, normal, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z},   normal, {0,1}, texIndex});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -212,10 +225,11 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 // +Y face
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y+1, z))
                 {
-                    chunk.cachedVertices.push_back({{x, y+1, z}, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1}, {0,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, {1,0}, texIndex});
+                    constexpr glm::vec3 normal(0.0f, 1.0f, 0.0f);
+                    chunk.cachedVertices.push_back({{x, y+1, z},     normal, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z},   normal, {1,0}, texIndex});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -223,10 +237,11 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 // -Y face
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y-1, z))
                 {
-                    chunk.cachedVertices.push_back({{x, y, z}, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y, z}, {1,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y, z+1}, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y, z+1}, {0,1}, texIndex});
+                    constexpr glm::vec3 normal(0.0f, -1.0f, 0.0f);
+                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y, z},   normal, {1,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y, z+1}, normal, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {0,1}, texIndex});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -234,10 +249,11 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 // +Z face
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z+1))
                 {
-                    chunk.cachedVertices.push_back({{x, y,   z+1}, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, {1,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1}, {0,1}, texIndex});
+                    constexpr glm::vec3 normal(0.0f, 0.0f, 1.0f);
+                    chunk.cachedVertices.push_back({{x, y, z+1},     normal, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y, z+1},   normal, {1,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal,  {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -245,10 +261,11 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 // -Z face
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z-1))
                 {
-                    chunk.cachedVertices.push_back({{x, y,   z}, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z}, {0,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y,   z}, {1,0}, texIndex});
+                    glm::vec3 normal(0.0f, 0.0f, -1.0f);
+                    chunk.cachedVertices.push_back({{x, y,   z}, normal, {0,0}, texIndex});
+                    chunk.cachedVertices.push_back({{x, y+1, z}, normal, {0,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {1,1}, texIndex});
+                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {1,0}, texIndex});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                 }
             }
@@ -260,96 +277,96 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
     chunk.isMeshDirty = false;
 }
 
-void World::applyGreedy2D(
-    const std::vector<int>& mask,
-    const int width, const int height, const int axis,
-    const int slice,
-    Chunk& chunk, const glm::ivec2& coord
-) const {
-
-    std::vector<uint8_t> used(width * height, 0);
-
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const int idx = x + y * width;
-            if (used[idx] || mask[idx] < 0)
-                continue;
-
-            int blockType = mask[idx];
-
-            // Find width
-            int w = 1;
-            while (x + w < width && mask[idx + w] == blockType && !used[idx + w])
-                ++w;
-
-            // Find height
-            int h = 1;
-            bool stop = false;
-            while (y + h < height && !stop) {
-                for (int k = 0; k < w; ++k) {
-                    if (mask[(x + k) + (y + h) * width] != blockType ||
-                        used[(x + k) + (y + h) * width]) {
-                        stop = true;
-                        break;
-                    }
-                }
-                if (!stop) ++h;
-            }
-
-            // Mark used
-            for (int dy = 0; dy < h; ++dy)
-                for (int dx = 0; dx < w; ++dx)
-                    used[(x + dx) + (y + dy) * width] = 1;
-
-            // Create quad vertices
-            glm::vec3 p[4];
-            switch (axis) {
-                case 0:
-                    p[0] = {slice, y, x};
-                    p[1] = {slice, y, x + w};
-                    p[2] = {slice, y + h, x + w};
-                    p[3] = {slice, y + h, x};
-                    break;
-                case 1:
-                    p[0] = {x, slice, y};
-                    p[1] = {x + w, slice, y};
-                    p[2] = {x + w, slice, y + h};
-                    p[3] = {x, slice, y + h};
-                    break;
-                case 2:
-                    p[0] = {x, y, slice};
-                    p[1] = {x + w, y, slice};
-                    p[2] = {x + w, y + h, slice};
-                    p[3] = {x, y + h, slice};
-                    break;
-                default: throw std::logic_error("unrecognized axis");
-            }
-
-            // Offset by chunk position
-            const glm::vec3 chunkOffset(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
-            for (auto& v : p) v += chunkOffset;
-
-            const uint32_t texIndex = textureIndices.at(static_cast<BlockType>(blockType));
-            auto base = static_cast<uint32_t>(chunk.cachedVertices.size());
-
-            chunk.cachedVertices.push_back({p[0], {0, 0}, texIndex});
-            chunk.cachedVertices.push_back({p[1], {1, 0}, texIndex});
-            chunk.cachedVertices.push_back({p[2], {1, 1}, texIndex});
-            chunk.cachedVertices.push_back({p[3], {0, 1}, texIndex});
-
-            // Determine if face is back-facing (flip winding)
-            bool flipFace = false;
-            if (axis == 0) flipFace = (mask[idx] != getBlockType(chunk.getVoxel(slice, y, x)));
-            if (axis == 1) flipFace = (mask[idx] != getBlockType(chunk.getVoxel(x, slice, y)));
-            if (axis == 2) flipFace = (mask[idx] != getBlockType(chunk.getVoxel(x, y, slice)));
-
-            if (flipFace) {
-                chunk.cachedIndices.insert(chunk.cachedIndices.end(),
-                    {base, base + 2, base + 1, base, base + 3, base + 2});
-            } else {
-                chunk.cachedIndices.insert(chunk.cachedIndices.end(),
-                    {base, base + 1, base + 2, base, base + 2, base + 3});
-            }
-        }
-    }
-}
+// void World::applyGreedy2D(
+//     const std::vector<int>& mask,
+//     const int width, const int height, const int axis,
+//     const int slice,
+//     Chunk& chunk, const glm::ivec2& coord
+// ) const {
+//
+//     std::vector<uint8_t> used(width * height, 0);
+//
+//     for (int y = 0; y < height; ++y) {
+//         for (int x = 0; x < width; ++x) {
+//             const int idx = x + y * width;
+//             if (used[idx] || mask[idx] < 0)
+//                 continue;
+//
+//             int blockType = mask[idx];
+//
+//             // Find width
+//             int w = 1;
+//             while (x + w < width && mask[idx + w] == blockType && !used[idx + w])
+//                 ++w;
+//
+//             // Find height
+//             int h = 1;
+//             bool stop = false;
+//             while (y + h < height && !stop) {
+//                 for (int k = 0; k < w; ++k) {
+//                     if (mask[(x + k) + (y + h) * width] != blockType ||
+//                         used[(x + k) + (y + h) * width]) {
+//                         stop = true;
+//                         break;
+//                     }
+//                 }
+//                 if (!stop) ++h;
+//             }
+//
+//             // Mark used
+//             for (int dy = 0; dy < h; ++dy)
+//                 for (int dx = 0; dx < w; ++dx)
+//                     used[(x + dx) + (y + dy) * width] = 1;
+//
+//             // Create quad vertices
+//             glm::vec3 p[4];
+//             switch (axis) {
+//                 case 0:
+//                     p[0] = {slice, y, x};
+//                     p[1] = {slice, y, x + w};
+//                     p[2] = {slice, y + h, x + w};
+//                     p[3] = {slice, y + h, x};
+//                     break;
+//                 case 1:
+//                     p[0] = {x, slice, y};
+//                     p[1] = {x + w, slice, y};
+//                     p[2] = {x + w, slice, y + h};
+//                     p[3] = {x, slice, y + h};
+//                     break;
+//                 case 2:
+//                     p[0] = {x, y, slice};
+//                     p[1] = {x + w, y, slice};
+//                     p[2] = {x + w, y + h, slice};
+//                     p[3] = {x, y + h, slice};
+//                     break;
+//                 default: throw std::logic_error("unrecognized axis");
+//             }
+//
+//             // Offset by chunk position
+//             const glm::vec3 chunkOffset(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
+//             for (auto& v : p) v += chunkOffset;
+//
+//             const uint32_t texIndex = textureIndices.at(static_cast<BlockType>(blockType));
+//             auto base = static_cast<uint32_t>(chunk.cachedVertices.size());
+//
+//             chunk.cachedVertices.push_back({p[0], {0, 0}, texIndex});
+//             chunk.cachedVertices.push_back({p[1], {1, 0}, texIndex});
+//             chunk.cachedVertices.push_back({p[2], {1, 1}, texIndex});
+//             chunk.cachedVertices.push_back({p[3], {0, 1}, texIndex});
+//
+//             // Determine if face is back-facing (flip winding)
+//             bool flipFace = false;
+//             if (axis == 0) flipFace = (mask[idx] != getBlockType(chunk.getVoxel(slice, y, x)));
+//             if (axis == 1) flipFace = (mask[idx] != getBlockType(chunk.getVoxel(x, slice, y)));
+//             if (axis == 2) flipFace = (mask[idx] != getBlockType(chunk.getVoxel(x, y, slice)));
+//
+//             if (flipFace) {
+//                 chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+//                     {base, base + 2, base + 1, base, base + 3, base + 2});
+//             } else {
+//                 chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+//                     {base, base + 1, base + 2, base, base + 2, base + 3});
+//             }
+//         }
+//     }
+// }

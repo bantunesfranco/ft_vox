@@ -22,7 +22,7 @@ class App : public Engine
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();
-		void	renderChunk(const Chunk& chunk, const glm::mat4& mvp) const;
+		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo) const;
 
 		static void	uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data);
 };

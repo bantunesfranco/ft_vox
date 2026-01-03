@@ -1,20 +1,28 @@
 #version 450 core
 
-layout(location = 0) in vec3  aPos;
-layout(location = 1) in vec2  aUV;
-layout(location = 2) in uint  aTexIndex;
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aUV;
+layout(location = 3) in uint aTexIndex;
 
-layout(std140, binding = 0) uniform CameraUBO
+layout(std140, binding = 0) uniform WorldUBO
 {
-    mat4 MVP;
+    mat4 MVP;          // 64 bytes
+
+    vec4 light;        // xyz = lightPos, w = lightRadius
+    vec4 ambientData;  // x = ambient, yzw = padding
 };
 
 out vec2 vUV;
+out vec3 vNormal;
+out vec3 vWorldPos;
 flat out uint vTexIndex;
 
 void main()
 {
     gl_Position = MVP * vec4(aPos, 1.0);
     vUV = aUV;
+    vNormal = aNormal;
+    vWorldPos = aPos;
     vTexIndex = aTexIndex;
 }

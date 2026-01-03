@@ -102,7 +102,6 @@ void App::run()
 			world.getChunks()[coord] = std::move(chunk);
 		}
 
-    glm::mat4 mvp;
 	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
 	while (windowIsOpen(window))
@@ -112,7 +111,7 @@ void App::run()
         FPSCounter::update();
 		handleMovement(window, camera);
 
-        Renderer::initProjectionMatrix(window, camera, mvp);
+        Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
 
         world.updateChunks(camera->pos, threadPool);
 
@@ -121,7 +120,7 @@ void App::run()
 			for (auto& [coord, chunk] : world.getChunks()) {
 				if (!chunk.cachedVertices.empty()) {
 					uploadChunk(chunk, chunk.renderData);
-					renderChunk(chunk, mvp);
+					renderChunk(chunk, world.worldUBO, world.ubo);
 				}
 			}
 		}
@@ -201,25 +200,31 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
 
 	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 2,
+	glVertexAttribPointer(1, 3,
+		GL_FLOAT, GL_FALSE,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, normal)));
+
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2,
 		GL_FLOAT, GL_FALSE,
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
 
-	glEnableVertexAttribArray(2);
-	glVertexAttribIPointer(2, 1,
+	glEnableVertexAttribArray(3);
+	glVertexAttribIPointer(3, 1,
 		GL_UNSIGNED_INT,
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
 
 	glBindVertexArray(0);
 }
 
-void App::renderChunk(const Chunk& chunk, const glm::mat4& mvp) const
+void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo) const
 {
 	glUseProgram(renderer->getShaderProgram());
 	glBindVertexArray(chunk.renderData.vao);
 
-	glBindBuffer(GL_UNIFORM_BUFFER, renderer->getCameraUBO());
-	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4),glm::value_ptr(mvp));
+	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+	// glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), glm::value_ptr(worldUbo.MVP));
+	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &worldUbo);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	glBindTextureUnit(0, renderer->getTextureArray());

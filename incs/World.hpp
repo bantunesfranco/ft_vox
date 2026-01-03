@@ -113,6 +113,12 @@ class Frustum {
 
 constexpr int MAX_FACES = Chunk::WIDTH * Chunk::HEIGHT * Chunk::DEPTH * 6;
 
+struct WorldUBO {
+	glm::mat4 MVP;
+	glm::vec4 light;       // xyz = pos, w = radius
+	glm::vec4 ambientData; // x = ambient, yzw = padding
+};
+
 // Define the world as a collection of chunks
 class World {
 	public:
@@ -120,6 +126,8 @@ class World {
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		std::mutex chunk_mutex;
+		WorldUBO worldUBO;
+		GLuint ubo;
 
 		World(const std::unordered_map<BlockType, uint32_t>& indices);
 		~World() = default;
@@ -139,7 +147,7 @@ class World {
 		std::unordered_map<glm::ivec2, Chunk> chunks;
 		Frustum frustum{};
 
-		void applyGreedy2D(const std::vector<int>& mask, int width, int height, int axis, int slice, Chunk& chunk, const glm::ivec2& coord) const;
+		// void applyGreedy2D(const std::vector<int>& mask, int width, int height, int axis, int slice, Chunk& chunk, const glm::ivec2& coord) const;
 };
 
 #endif

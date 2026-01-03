@@ -8,6 +8,7 @@ typedef unsigned int	GLuint;
 
 typedef struct Vertex {
     glm::vec3	position;
+	glm::vec3	normal;
 	glm::vec2	uv;
 	uint32_t	texIndex;
 } Vertex;
