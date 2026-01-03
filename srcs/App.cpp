@@ -93,8 +93,6 @@ void App::run()
 				floorDiv(static_cast<int>(camera->pos.z), Chunk::DEPTH) + dz
 			);
 
-			std::cout << coord.x << ' ' << coord.y << std::endl;
-
 			Chunk chunk;
 			world.generateTerrain(chunk, coord);
 			world.generateChunkMeshGreedy(chunk, coord);
@@ -214,6 +212,11 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 		GL_UNSIGNED_INT,
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
 
+	glEnableVertexAttribArray(4);
+	glVertexAttribPointer(4, 1,
+		GL_FLOAT, GL_FALSE,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, ao)));
+
 	glBindVertexArray(0);
 }
 
@@ -223,7 +226,6 @@ void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint
 	glBindVertexArray(chunk.renderData.vao);
 
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-	// glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), glm::value_ptr(worldUbo.MVP));
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &worldUbo);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 

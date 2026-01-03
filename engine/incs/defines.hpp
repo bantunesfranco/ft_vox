@@ -11,6 +11,7 @@ typedef struct Vertex {
 	glm::vec3	normal;
 	glm::vec2	uv;
 	uint32_t	texIndex;
+	float		ao;
 } Vertex;
 
 typedef enum settings

@@ -187,6 +187,16 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
     chunk.cachedVertices.clear();
     chunk.cachedIndices.clear();
 
+    auto calcAO = [&](const int vx, const int vy, const int vz) -> float {
+        int solid = 0;
+        // three neighbors along corner edges
+        if (chunk.isBlockActive(vx - 1, vy, vz)) solid++;
+        if (chunk.isBlockActive(vx, vy - 1, vz)) solid++;
+        if (chunk.isBlockActive(vx, vy, vz - 1)) solid++;
+        return 1.0f - 0.2f * solid; // AO factor 0.4 - 1.0
+    };
+
+
     for (int x = 0; x < Chunk::WIDTH; ++x)
     {
         for (int y = 0; y < Chunk::HEIGHT; ++y)
@@ -202,10 +212,14 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x+1, y, z))
                 {
                     constexpr glm::vec3 normal(1.0f, 0.0f, 0.0f);
-                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {0,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, normal, {1,0}, texIndex});
+                    float ao0 = calcAO(x+1, y, z);
+                    float ao1 = calcAO(x+1, y+1, z);
+                    float ao2 = calcAO(x+1, y+1, z+1);
+                    float ao3 = calcAO(x+1, y, z+1);
+                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {0,0}, texIndex, ao0});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {0,1}, texIndex, ao1});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex, ao2});
+                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, normal, {1,0}, texIndex, ao3});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -214,10 +228,14 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x-1, y, z))
                 {
                     constexpr glm::vec3 normal(-1.0f, 0.0f, 0.0f);
-                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {1,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1}, normal, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z},   normal, {0,1}, texIndex});
+                    float ao0 = calcAO(x+1, y, z);
+                    float ao1 = calcAO(x+1, y+1, z);
+                    float ao2 = calcAO(x+1, y+1, z+1);
+                    float ao3 = calcAO(x+1, y, z+1);
+                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex, ao0});
+                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {1,0}, texIndex, ao1});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1}, normal, {1,1}, texIndex, ao2});
+                    chunk.cachedVertices.push_back({{x, y+1, z},   normal, {0,1}, texIndex, ao3});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -226,10 +244,14 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y+1, z))
                 {
                     constexpr glm::vec3 normal(0.0f, 1.0f, 0.0f);
-                    chunk.cachedVertices.push_back({{x, y+1, z},     normal, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z},   normal, {1,0}, texIndex});
+                    float ao0 = calcAO(x+1, y, z);
+                    float ao1 = calcAO(x+1, y+1, z);
+                    float ao2 = calcAO(x+1, y+1, z+1);
+                    float ao3 = calcAO(x+1, y, z+1);
+                    chunk.cachedVertices.push_back({{x, y+1, z},     normal, {0,0}, texIndex, ao0});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex, ao1});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex, ao2});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z},   normal, {1,0}, texIndex, ao3});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -238,10 +260,14 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y-1, z))
                 {
                     constexpr glm::vec3 normal(0.0f, -1.0f, 0.0f);
-                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y, z},   normal, {1,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y, z+1}, normal, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {0,1}, texIndex});
+                    float ao0 = calcAO(x+1, y, z);
+                    float ao1 = calcAO(x+1, y+1, z);
+                    float ao2 = calcAO(x+1, y+1, z+1);
+                    float ao3 = calcAO(x+1, y, z+1);
+                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex, ao0});
+                    chunk.cachedVertices.push_back({{x+1, y, z},   normal, {1,0}, texIndex, ao1});
+                    chunk.cachedVertices.push_back({{x+1, y, z+1}, normal, {1,1}, texIndex, ao2});
+                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {0,1}, texIndex, ao3});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -250,10 +276,14 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z+1))
                 {
                     constexpr glm::vec3 normal(0.0f, 0.0f, 1.0f);
-                    chunk.cachedVertices.push_back({{x, y, z+1},     normal, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y, z+1},   normal, {1,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal,  {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex});
+                    float ao0 = calcAO(x+1, y, z);
+                    float ao1 = calcAO(x+1, y+1, z);
+                    float ao2 = calcAO(x+1, y+1, z+1);
+                    float ao3 = calcAO(x+1, y, z+1);
+                    chunk.cachedVertices.push_back({{x, y, z+1},     normal, {0,0}, texIndex, ao0});
+                    chunk.cachedVertices.push_back({{x+1, y, z+1},   normal, {1,0}, texIndex, ao1});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal,  {1,1}, texIndex, ao2});
+                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex, ao3});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                     base += 4;
                 }
@@ -262,10 +292,14 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
                 if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z-1))
                 {
                     glm::vec3 normal(0.0f, 0.0f, -1.0f);
-                    chunk.cachedVertices.push_back({{x, y,   z}, normal, {0,0}, texIndex});
-                    chunk.cachedVertices.push_back({{x, y+1, z}, normal, {0,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {1,1}, texIndex});
-                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {1,0}, texIndex});
+                    float ao0 = calcAO(x+1, y, z);
+                    float ao1 = calcAO(x+1, y+1, z);
+                    float ao2 = calcAO(x+1, y+1, z+1);
+                    float ao3 = calcAO(x+1, y, z+1);
+                    chunk.cachedVertices.push_back({{x, y,   z}, normal, {0,0}, texIndex, ao0});
+                    chunk.cachedVertices.push_back({{x, y+1, z}, normal, {0,1}, texIndex, ao1});
+                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {1,1}, texIndex, ao2});
+                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {1,0}, texIndex, ao3});
                     chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
                 }
             }
