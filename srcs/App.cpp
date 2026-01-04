@@ -154,6 +154,7 @@ void App::loadTextures() {
     	int texWidth, texHeight;
     	textureArray = loadTextureArray(paths, texWidth, texHeight);
 
+    	// textureIndices[BlockType::Air] = -1;
         textureIndices[BlockType::Grass] = 0;
         textureIndices[BlockType::Dirt] = 1;
         textureIndices[BlockType::Stone] = 2;

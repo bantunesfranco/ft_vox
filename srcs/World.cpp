@@ -148,167 +148,300 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
 
 /* ===================== Greedy Meshing ===================== */
 void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const {
-    // if (!chunk.isMeshDirty)
-    //     return;
-    //
-    // chunk.cachedVertices.clear();
-    // chunk.cachedIndices.clear();
-    //
-    // constexpr int dims[3] = {Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH};
-    //
-    // for (int axis = 0; axis < 3; ++axis) {
-    //     const int u = (axis + 1) % 3;
-    //     const int v = (axis + 2) % 3;
-    //     std::vector<int> mask(dims[u] * dims[v]);
-    //
-    //     for (int slice = 0; slice <= dims[axis]; ++slice) {
-    //         for (int i = 0; i < dims[u]; ++i) {
-    //             for (int j = 0; j < dims[v]; ++j) {
-    //                 const int x = (axis == 0) ? slice : i;
-    //                 const int y = (axis == 1) ? slice : ((axis == 0) ? i : j);
-    //                 const int z = (axis == 2) ? slice : j;
-    //
-    //                 bool solidA = (slice < dims[axis]) && chunk.isBlockActive(x, y, z);
-    //                 bool solidB = (slice > 0) && chunk.isBlockActive(x - (axis == 0), y - (axis == 1), z - (axis == 2));
-    //
-    //                 if (solidA != solidB) {
-    //                     mask[i + j * dims[u]] = solidA ? getBlockType(chunk.getVoxel(x, y, z))
-    //                                                    : getBlockType(chunk.getVoxel(x - (axis == 0), y - (axis == 1), z - (axis == 2)));
-    //                 } else {
-    //                     mask[i + j * dims[u]] = -1;
-    //                 }
-    //             }
-    //         }
-    //         applyGreedy2D(mask, dims[u], dims[v], axis, slice, chunk, coord);
-    //     }
-    // }
-    //
-    // chunk.isMeshDirty = false;
+    constexpr int W = Chunk::WIDTH;
+    constexpr int H = Chunk::HEIGHT;
+    constexpr int D = Chunk::DEPTH;
+
     chunk.cachedVertices.clear();
     chunk.cachedIndices.clear();
 
-    auto calcAO = [&](const int vx, const int vy, const int vz) -> float {
-        int solid = 0;
-        // three neighbors along corner edges
-        if (chunk.isBlockActive(vx - 1, vy, vz)) solid++;
-        if (chunk.isBlockActive(vx, vy - 1, vz)) solid++;
-        if (chunk.isBlockActive(vx, vy, vz - 1)) solid++;
-        return 1.0f - 0.2f * solid; // AO factor 0.4 - 1.0
+    // Reserve once (huge perf win)
+    chunk.cachedVertices.reserve(W * H * D * 12);
+    chunk.cachedIndices.reserve(W * H * D * 18);
+
+    // ----------------------------------------------------
+    // 1. Cache solidity with padding (NO bounds checks)
+    // ----------------------------------------------------
+    bool solid[W + 2][H + 2][D + 2] = {};
+
+    for (int x = 0; x < W; ++x) {
+        for (int y = 0; y < H; ++y) {
+            for (int z = 0; z < D; ++z)
+                solid[x + 1][y + 1][z + 1] = chunk.isBlockActive(x, y, z);
+        }
+    }
+
+    // ----------------------------------------------------
+    // 2. AO helper (cheap & fast)
+    // ----------------------------------------------------
+    auto AO = [](const bool s1, const bool s2, const bool c) -> float {
+        return 1.0f - 0.2f * static_cast<float>(s1 + s2 + c);
     };
 
+    // ----------------------------------------------------
+    // 3. Main loop
+    // ----------------------------------------------------
+    GLuint blockTypeToTex[256] = {};
+    for (auto [blockType, index] : textureIndices)
+        blockTypeToTex[static_cast<int>(blockType)] = index;
 
-    for (int x = 0; x < Chunk::WIDTH; ++x)
-    {
-        for (int y = 0; y < Chunk::HEIGHT; ++y)
-        {
-            for (int z = 0; z < Chunk::DEPTH; ++z) {
-                if (!chunk.isBlockActive(x, y, z))
+    for (int x = 0; x < W; ++x) {
+        for (int y = 0; y < H; ++y) {
+            for (int z = 0; z < D; ++z) {
+                if (!solid[x + 1][y + 1][z + 1])
                     continue;
 
-                const uint32_t texIndex = textureIndices.at(static_cast<BlockType>(getBlockType(chunk.getVoxel(x, y, z))));
-                auto base = static_cast<uint32_t>(chunk.cachedVertices.size());
+                const uint8_t blockType = getBlockType(chunk.getVoxel(x, y, z));
+                if (blockType == 0) continue;
 
+                const uint32_t tex = blockTypeToTex[blockType];
+
+                const auto fx = static_cast<float>(x);
+                const auto fy = static_cast<float>(y);
+                const auto fz = static_cast<float>(z);
+
+                // ==================================================
                 // +X face
-                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x+1, y, z))
-                {
-                    constexpr glm::vec3 normal(1.0f, 0.0f, 0.0f);
-                    float ao0 = calcAO(x+1, y, z);
-                    float ao1 = calcAO(x+1, y+1, z);
-                    float ao2 = calcAO(x+1, y+1, z+1);
-                    float ao3 = calcAO(x+1, y, z+1);
-                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {0,0}, texIndex, ao0});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {0,1}, texIndex, ao1});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex, ao2});
-                    chunk.cachedVertices.push_back({{x+1, y,   z+1}, normal, {1,0}, texIndex, ao3});
-                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
-                    base += 4;
+                // ==================================================
+                if (!solid[x + 2][y + 1][z + 1]) {
+                    uint32_t base = chunk.cachedVertices.size();
+                    glm::vec3 n(1,0,0);
+
+                    float ao0 = AO(solid[x+2][y  ][z+1], solid[x+2][y+1][z  ], solid[x+2][y  ][z  ]);
+                    float ao1 = AO(solid[x+2][y+2][z+1], solid[x+2][y+1][z  ], solid[x+2][y+2][z  ]);
+                    float ao2 = AO(solid[x+2][y+2][z+2], solid[x+2][y+1][z+2], solid[x+2][y+2][z+1]);
+                    float ao3 = AO(solid[x+2][y  ][z+2], solid[x+2][y+1][z+2], solid[x+2][y  ][z+1]);
+
+                    chunk.cachedVertices.push_back({{fx+1, fy,   fz  }, n, {0,0}, tex, ao0});
+                    chunk.cachedVertices.push_back({{fx+1, fy+1, fz  }, n, {0,1}, tex, ao1});
+                    chunk.cachedVertices.push_back({{fx+1, fy+1, fz+1}, n, {1,1}, tex, ao2});
+                    chunk.cachedVertices.push_back({{fx+1, fy,   fz+1}, n, {1,0}, tex, ao3});
+
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+                        {base, base+1, base+2, base, base+2, base+3});
                 }
 
+                // ==================================================
                 // -X face
-                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x-1, y, z))
-                {
-                    constexpr glm::vec3 normal(-1.0f, 0.0f, 0.0f);
-                    float ao0 = calcAO(x+1, y, z);
-                    float ao1 = calcAO(x+1, y+1, z);
-                    float ao2 = calcAO(x+1, y+1, z+1);
-                    float ao3 = calcAO(x+1, y, z+1);
-                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex, ao0});
-                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {1,0}, texIndex, ao1});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1}, normal, {1,1}, texIndex, ao2});
-                    chunk.cachedVertices.push_back({{x, y+1, z},   normal, {0,1}, texIndex, ao3});
-                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
-                    base += 4;
+                // ==================================================
+                if (!solid[x][y + 1][z + 1]) {
+                    uint32_t base = chunk.cachedVertices.size();
+                    glm::vec3 n(-1,0,0);
+
+                    float ao0 = AO(solid[x][y  ][z+1], solid[x][y+1][z  ], solid[x][y  ][z  ]);
+                    float ao1 = AO(solid[x][y  ][z+2], solid[x][y+1][z+2], solid[x][y  ][z+1]);
+                    float ao2 = AO(solid[x][y+2][z+2], solid[x][y+1][z+2], solid[x][y+2][z+1]);
+                    float ao3 = AO(solid[x][y+2][z+1], solid[x][y+1][z  ], solid[x][y+2][z  ]);
+
+                    chunk.cachedVertices.push_back({{fx, fy,   fz  }, n, {0,0}, tex, ao0});
+                    chunk.cachedVertices.push_back({{fx, fy,   fz+1}, n, {1,0}, tex, ao1});
+                    chunk.cachedVertices.push_back({{fx, fy+1, fz+1}, n, {1,1}, tex, ao2});
+                    chunk.cachedVertices.push_back({{fx, fy+1, fz  }, n, {0,1}, tex, ao3});
+
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+                        {base, base+1, base+2, base, base+2, base+3});
                 }
 
+                // ==================================================
                 // +Y face
-                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y+1, z))
-                {
-                    constexpr glm::vec3 normal(0.0f, 1.0f, 0.0f);
-                    float ao0 = calcAO(x+1, y, z);
-                    float ao1 = calcAO(x+1, y+1, z);
-                    float ao2 = calcAO(x+1, y+1, z+1);
-                    float ao3 = calcAO(x+1, y, z+1);
-                    chunk.cachedVertices.push_back({{x, y+1, z},     normal, {0,0}, texIndex, ao0});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex, ao1});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex, ao2});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z},   normal, {1,0}, texIndex, ao3});
-                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
-                    base += 4;
+                // ==================================================
+                if (!solid[x + 1][y + 2][z + 1]) {
+                    uint32_t base = chunk.cachedVertices.size();
+                    glm::vec3 n(0,1,0);
+
+                    chunk.cachedVertices.push_back({{fx,   fy+1, fz  }, n, {0,0}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx,   fy+1, fz+1}, n, {0,1}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy+1, fz+1}, n, {1,1}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy+1, fz  }, n, {1,0}, tex, 1});
+
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+                        {base, base+1, base+2, base, base+2, base+3});
                 }
 
+                // ==================================================
                 // -Y face
-                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y-1, z))
-                {
-                    constexpr glm::vec3 normal(0.0f, -1.0f, 0.0f);
-                    float ao0 = calcAO(x+1, y, z);
-                    float ao1 = calcAO(x+1, y+1, z);
-                    float ao2 = calcAO(x+1, y+1, z+1);
-                    float ao3 = calcAO(x+1, y, z+1);
-                    chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex, ao0});
-                    chunk.cachedVertices.push_back({{x+1, y, z},   normal, {1,0}, texIndex, ao1});
-                    chunk.cachedVertices.push_back({{x+1, y, z+1}, normal, {1,1}, texIndex, ao2});
-                    chunk.cachedVertices.push_back({{x, y, z+1},   normal, {0,1}, texIndex, ao3});
-                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
-                    base += 4;
+                // ==================================================
+                if (!solid[x + 1][y][z + 1]) {
+                    uint32_t base = chunk.cachedVertices.size();
+                    glm::vec3 n(0,-1,0);
+
+                    chunk.cachedVertices.push_back({{fx,   fy, fz  }, n, {0,0}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy, fz  }, n, {1,0}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy, fz+1}, n, {1,1}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx,   fy, fz+1}, n, {0,1}, tex, 1});
+
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+                        {base, base+1, base+2, base, base+2, base+3});
                 }
 
+                // ==================================================
                 // +Z face
-                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z+1))
-                {
-                    constexpr glm::vec3 normal(0.0f, 0.0f, 1.0f);
-                    float ao0 = calcAO(x+1, y, z);
-                    float ao1 = calcAO(x+1, y+1, z);
-                    float ao2 = calcAO(x+1, y+1, z+1);
-                    float ao3 = calcAO(x+1, y, z+1);
-                    chunk.cachedVertices.push_back({{x, y, z+1},     normal, {0,0}, texIndex, ao0});
-                    chunk.cachedVertices.push_back({{x+1, y, z+1},   normal, {1,0}, texIndex, ao1});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal,  {1,1}, texIndex, ao2});
-                    chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex, ao3});
-                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
-                    base += 4;
+                // ==================================================
+                if (!solid[x + 1][y + 1][z + 2]) {
+                    uint32_t base = chunk.cachedVertices.size();
+                    glm::vec3 n(0,0,1);
+
+                    chunk.cachedVertices.push_back({{fx,   fy,   fz+1}, n, {0,0}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy,   fz+1}, n, {1,0}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy+1, fz+1}, n, {1,1}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx,   fy+1, fz+1}, n, {0,1}, tex, 1});
+
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+                        {base, base+1, base+2, base, base+2, base+3});
                 }
 
+                // ==================================================
                 // -Z face
-                if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z-1))
-                {
-                    glm::vec3 normal(0.0f, 0.0f, -1.0f);
-                    float ao0 = calcAO(x+1, y, z);
-                    float ao1 = calcAO(x+1, y+1, z);
-                    float ao2 = calcAO(x+1, y+1, z+1);
-                    float ao3 = calcAO(x+1, y, z+1);
-                    chunk.cachedVertices.push_back({{x, y,   z}, normal, {0,0}, texIndex, ao0});
-                    chunk.cachedVertices.push_back({{x, y+1, z}, normal, {0,1}, texIndex, ao1});
-                    chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {1,1}, texIndex, ao2});
-                    chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {1,0}, texIndex, ao3});
-                    chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+                // ==================================================
+                if (!solid[x + 1][y + 1][z]) {
+                    uint32_t base = chunk.cachedVertices.size();
+                    glm::vec3 n(0,0,-1);
+
+                    chunk.cachedVertices.push_back({{fx,   fy,   fz}, n, {0,0}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx,   fy+1, fz}, n, {0,1}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy+1, fz}, n, {1,1}, tex, 1});
+                    chunk.cachedVertices.push_back({{fx+1, fy,   fz}, n, {1,0}, tex, 1});
+
+                    chunk.cachedIndices.insert(chunk.cachedIndices.end(),
+                        {base, base+1, base+2, base, base+2, base+3});
                 }
             }
         }
     }
 
-    const glm::vec3 chunkOffset(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
-    for (auto& v : chunk.cachedVertices) v.position += chunkOffset;
+    // ----------------------------------------------------
+    // 4. Apply chunk offset once
+    // ----------------------------------------------------
+    glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
+    for (auto& v : chunk.cachedVertices)
+        v.position += offset;
+
     chunk.isMeshDirty = false;
+
+    // chunk.cachedVertices.clear();
+    // chunk.cachedIndices.clear();
+    //
+    // auto calcAO = [&](const int vx, const int vy, const int vz) -> float {
+    //     int solid = 0;
+    //     // three neighbors along corner edges
+    //     if (chunk.isBlockActive(vx - 1, vy, vz)) solid++;
+    //     if (chunk.isBlockActive(vx, vy - 1, vz)) solid++;
+    //     if (chunk.isBlockActive(vx, vy, vz - 1)) solid++;
+    //     return 1.0f - 0.2f * solid; // AO factor 0.4 - 1.0
+    // };
+    //
+    // for (int x = 0; x < Chunk::WIDTH; ++x)
+    // {
+    //     for (int y = 0; y < Chunk::HEIGHT; ++y)
+    //     {
+    //         for (int z = 0; z < Chunk::DEPTH; ++z) {
+    //             if (!chunk.isBlockActive(x, y, z))
+    //                 continue;
+    //
+    //             const uint32_t texIndex = textureIndices.at(static_cast<BlockType>(getBlockType(chunk.getVoxel(x, y, z))));
+    //             auto base = static_cast<uint32_t>(chunk.cachedVertices.size());
+    //
+    //             // +X face
+    //             if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x+1, y, z))
+    //             {
+    //                 constexpr glm::vec3 normal(1.0f, 0.0f, 0.0f);
+    //                 float ao0 = calcAO(x+1, y, z);
+    //                 float ao1 = calcAO(x+1, y+1, z);
+    //                 float ao2 = calcAO(x+1, y+1, z+1);
+    //                 float ao3 = calcAO(x+1, y, z+1);
+    //                 chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {0,0}, texIndex, ao0});
+    //                 chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {0,1}, texIndex, ao1});
+    //                 chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex, ao2});
+    //                 chunk.cachedVertices.push_back({{x+1, y,   z+1}, normal, {1,0}, texIndex, ao3});
+    //                 chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+    //                 base += 4;
+    //             }
+    //
+    //             // -X face
+    //             if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x-1, y, z))
+    //             {
+    //                 constexpr glm::vec3 normal(-1.0f, 0.0f, 0.0f);
+    //                 float ao0 = calcAO(x+1, y, z);
+    //                 float ao1 = calcAO(x+1, y+1, z);
+    //                 float ao2 = calcAO(x+1, y+1, z+1);
+    //                 float ao3 = calcAO(x+1, y, z+1);
+    //                 chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex, ao0});
+    //                 chunk.cachedVertices.push_back({{x, y, z+1},   normal, {1,0}, texIndex, ao1});
+    //                 chunk.cachedVertices.push_back({{x, y+1, z+1}, normal, {1,1}, texIndex, ao2});
+    //                 chunk.cachedVertices.push_back({{x, y+1, z},   normal, {0,1}, texIndex, ao3});
+    //                 chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+    //                 base += 4;
+    //             }
+    //
+    //             // +Y face
+    //             if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y+1, z))
+    //             {
+    //                 constexpr glm::vec3 normal(0.0f, 1.0f, 0.0f);
+    //                 float ao0 = calcAO(x+1, y, z);
+    //                 float ao1 = calcAO(x+1, y+1, z);
+    //                 float ao2 = calcAO(x+1, y+1, z+1);
+    //                 float ao3 = calcAO(x+1, y, z+1);
+    //                 chunk.cachedVertices.push_back({{x, y+1, z},     normal, {0,0}, texIndex, ao0});
+    //                 chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex, ao1});
+    //                 chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal, {1,1}, texIndex, ao2});
+    //                 chunk.cachedVertices.push_back({{x+1, y+1, z},   normal, {1,0}, texIndex, ao3});
+    //                 chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+    //                 base += 4;
+    //             }
+    //
+    //             // -Y face
+    //             if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y-1, z))
+    //             {
+    //                 constexpr glm::vec3 normal(0.0f, -1.0f, 0.0f);
+    //                 float ao0 = calcAO(x+1, y, z);
+    //                 float ao1 = calcAO(x+1, y+1, z);
+    //                 float ao2 = calcAO(x+1, y+1, z+1);
+    //                 float ao3 = calcAO(x+1, y, z+1);
+    //                 chunk.cachedVertices.push_back({{x, y, z},     normal, {0,0}, texIndex, ao0});
+    //                 chunk.cachedVertices.push_back({{x+1, y, z},   normal, {1,0}, texIndex, ao1});
+    //                 chunk.cachedVertices.push_back({{x+1, y, z+1}, normal, {1,1}, texIndex, ao2});
+    //                 chunk.cachedVertices.push_back({{x, y, z+1},   normal, {0,1}, texIndex, ao3});
+    //                 chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+    //                 base += 4;
+    //             }
+    //
+    //             // +Z face
+    //             if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z+1))
+    //             {
+    //                 constexpr glm::vec3 normal(0.0f, 0.0f, 1.0f);
+    //                 float ao0 = calcAO(x+1, y, z);
+    //                 float ao1 = calcAO(x+1, y+1, z);
+    //                 float ao2 = calcAO(x+1, y+1, z+1);
+    //                 float ao3 = calcAO(x+1, y, z+1);
+    //                 chunk.cachedVertices.push_back({{x, y, z+1},     normal, {0,0}, texIndex, ao0});
+    //                 chunk.cachedVertices.push_back({{x+1, y, z+1},   normal, {1,0}, texIndex, ao1});
+    //                 chunk.cachedVertices.push_back({{x+1, y+1, z+1}, normal,  {1,1}, texIndex, ao2});
+    //                 chunk.cachedVertices.push_back({{x, y+1, z+1},   normal, {0,1}, texIndex, ao3});
+    //                 chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+    //                 base += 4;
+    //             }
+    //
+    //             // -Z face
+    //             if (x+1 >= Chunk::WIDTH || !chunk.isBlockActive(x, y, z-1))
+    //             {
+    //                 glm::vec3 normal(0.0f, 0.0f, -1.0f);
+    //                 float ao0 = calcAO(x+1, y, z);
+    //                 float ao1 = calcAO(x+1, y+1, z);
+    //                 float ao2 = calcAO(x+1, y+1, z+1);
+    //                 float ao3 = calcAO(x+1, y, z+1);
+    //                 chunk.cachedVertices.push_back({{x, y,   z}, normal, {0,0}, texIndex, ao0});
+    //                 chunk.cachedVertices.push_back({{x, y+1, z}, normal, {0,1}, texIndex, ao1});
+    //                 chunk.cachedVertices.push_back({{x+1, y+1, z}, normal, {1,1}, texIndex, ao2});
+    //                 chunk.cachedVertices.push_back({{x+1, y,   z}, normal, {1,0}, texIndex, ao3});
+    //                 chunk.cachedIndices.insert(chunk.cachedIndices.end(), {base, base+1, base+2, base, base+2, base+3});
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // const glm::vec3 chunkOffset(coord.x * Chunk::WIDTH, 0, coord.y * Chunk::DEPTH);
+    // for (auto& v : chunk.cachedVertices) v.position += chunkOffset;
+    // chunk.isMeshDirty = false;
 }
 
 // void World::applyGreedy2D(

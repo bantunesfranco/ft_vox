@@ -34,7 +34,7 @@ typedef struct Face {
 	uint32_t indices[6]; // Two triangles per face
 } Face;
 
-int floorDiv(const int x, const int d);
+int floorDiv(int x, int d);
 
 // Define a chunk as a 1D vector of voxels
 class Chunk {
@@ -147,7 +147,6 @@ class World {
 		std::unordered_map<glm::ivec2, Chunk> chunks;
 		Frustum frustum{};
 
-		// void applyGreedy2D(const std::vector<int>& mask, int width, int height, int axis, int slice, Chunk& chunk, const glm::ivec2& coord) const;
 };
 
 #endif
