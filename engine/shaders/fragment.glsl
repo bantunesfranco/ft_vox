@@ -21,15 +21,14 @@ void main()
 {
     vec2 uv = clamp(vUV, 0.001, 0.999);
     vec4 tex = texture(uTextures, vec3(uv, vTexIndex));
+    if (tex.a < 0.1) discard;
 
-    // point light
     float dist = distance(vWorldPos, light.xyz);
-    float lightFactor = 1.0 - (dist / light.w);
-    lightFactor = clamp(lightFactor, 0.0, 1.0);
+    float lightFactor = clamp(1.0 - dist / light.w, 0.0, 1.0);
 
-    // combine with AO and ambient
     float ambient = ambientData.x;
-    float brightness = max(lightFactor, ambient) * vAO;
+    float brightness = (ambient + lightFactor) * vAO * 1.25;
 
     FragColor = vec4(tex.rgb * brightness, tex.a);
+
 }
