@@ -5,13 +5,6 @@
 
 #include <ranges>
 
-inline int floorDiv(const int x, const int d) {
-    int q = x / d;
-    if (const int r = x % d; r && ((r < 0) != (d < 0)))
-        --q;
-    return q;
-}
-
 /* ========================== Chunk ========================== */
 
 Chunk::Chunk(): isMeshDirty(true), voxels(Chunk::SIZE) {}
@@ -117,7 +110,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
 void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
 {
-    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 3;
+    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 8;
     constexpr int MAX_Y = Chunk::HEIGHT - 3;
     constexpr int MIN_Y = 1;
 
@@ -127,9 +120,10 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
             const int wx = coord.x * Chunk::WIDTH + x;
             const int wz = coord.y * Chunk::DEPTH + z;
 
-            const float n = stb_perlin_noise3( wx * 0.05f, 0.0f, wz * 0.05f, 0, 0, 0);
+            const int seed = 0; // time(nullptr);
+            const float n = stb_perlin_noise3_seed( wx * 0.05f, 0.0f, wz * 0.05f, 0, 0, 0, seed);
 
-            int height = BASE_HEIGHT + static_cast<int>(n * 15.0f);
+            int height = BASE_HEIGHT + static_cast<int>(n * 25.0f);
             height = std::clamp(height, MIN_Y, MAX_Y);
 
             for (int y = MIN_Y; y <= height; ++y) {

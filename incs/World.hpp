@@ -34,7 +34,12 @@ typedef struct Face {
 	uint32_t indices[6]; // Two triangles per face
 } Face;
 
-int floorDiv(int x, int d);
+inline int floorDiv(const int x, const int d) {
+	int q = x / d;
+	if (const int r = x % d; r && ((r < 0) != (d < 0)))
+		--q;
+	return q;
+}
 
 // Define a chunk as a 1D vector of voxels
 class Chunk {
@@ -58,7 +63,7 @@ class Chunk {
 
 		// Define the dimensions of a chunk
 		static constexpr uint8_t WIDTH = 16;
-		static constexpr uint16_t HEIGHT = 64;
+		static constexpr uint16_t HEIGHT = 128;
 		static constexpr uint8_t DEPTH = 16;
 		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
@@ -122,7 +127,7 @@ struct WorldUBO {
 // Define the world as a collection of chunks
 class World {
 	public:
-		constexpr static int CHUNK_RADIUS = 5;
+		constexpr static int CHUNK_RADIUS = 8;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		std::mutex chunk_mutex;

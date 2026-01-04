@@ -94,10 +94,10 @@ void App::run()
 			);
 
 			Chunk chunk;
-			world.generateTerrain(chunk, coord);
+			World::generateTerrain(chunk, coord);
 			world.generateChunkMeshGreedy(chunk, coord);
 
-			world.getChunks()[coord] = std::move(chunk);
+			world.getChunks()[coord] = chunk;
 		}
 
 	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
