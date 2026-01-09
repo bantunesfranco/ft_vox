@@ -7,6 +7,9 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include "glm/gtx/norm.hpp"
+
 static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& camera)
 {
 	glm::vec3 moveDir(0.0f);
@@ -86,20 +89,6 @@ void App::run()
     ThreadPool threadPool(8);
     World world(textureIndices);
 
-	for (int dx = -World::CHUNK_RADIUS; dx <= World::CHUNK_RADIUS; ++dx)
-		for (int dz = -World::CHUNK_RADIUS; dz <= World::CHUNK_RADIUS; ++dz) {
-			glm::ivec2 coord(
-				floorDiv(static_cast<int>(camera->pos.x), Chunk::WIDTH) + dx,
-				floorDiv(static_cast<int>(camera->pos.z), Chunk::DEPTH) + dz
-			);
-
-			Chunk chunk;
-			World::generateTerrain(chunk, coord);
-			world.generateChunkMeshGreedy(chunk, coord);
-
-			world.getChunks()[coord] = chunk;
-		}
-
 	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
 	while (windowIsOpen(window))
@@ -110,17 +99,33 @@ void App::run()
 		handleMovement(window, camera);
 
         Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
+		world.frustum.updateFrustum(camera->proj, camera->view);
 
-        world.updateChunks(camera->pos, threadPool);
+		world.updateChunks(camera->pos, threadPool);
 
+		std::vector<Chunk*> visibleChunks;
 		{
 			std::lock_guard lock(world.chunk_mutex);
-			for (auto& [coord, chunk] : world.getChunks()) {
-				if (!chunk.cachedVertices.empty()) {
-					uploadChunk(chunk, chunk.renderData);
-					renderChunk(chunk, world.worldUBO, world.ubo);
-				}
+			auto chunks = world.getChunks() | std::views::values;
+			visibleChunks.reserve(chunks.size());
+			for (auto& chunk : chunks) {
+				if (chunk.cachedVertices.empty())
+					continue;
+				if (!world.frustum.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
+					continue;
+				visibleChunks.push_back(&chunk);
 			}
+		}
+
+		glm::vec3 camPos = camera->pos;
+		std::sort(visibleChunks.begin(), visibleChunks.end(),
+			[&camPos](const Chunk* a, const Chunk* b) {
+				return glm::distance2(a->worldCenter, camPos) < glm::distance2(b->worldCenter, camPos);
+			});
+
+		for (const auto& chunk : visibleChunks) {
+			uploadChunk(*chunk, chunk->renderData);
+			renderChunk(*chunk, world.worldUBO, world.ubo);
 		}
 
 		renderImGui(camera, _showWireframe, rgba);

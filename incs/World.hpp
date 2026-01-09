@@ -51,6 +51,7 @@ class Chunk {
 			uint32_t indexCount = 0;
 		} renderData;
 
+
 		Chunk();
 		~Chunk() = default;
 		Chunk(const Chunk&) = default;
@@ -70,6 +71,9 @@ class Chunk {
         std::vector<Vertex> cachedVertices;
         std::vector<uint32_t> cachedIndices;
         bool isMeshDirty = true;
+		glm::vec3 worldMax;
+		glm::vec3 worldMin;
+		glm::vec3 worldCenter;
 
 	private:
 		std::vector<Voxel> voxels;
@@ -127,9 +131,10 @@ struct WorldUBO {
 // Define the world as a collection of chunks
 class World {
 	public:
-		constexpr static int CHUNK_RADIUS = 8;
+		constexpr static int CHUNK_RADIUS = 16;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
+		Frustum frustum{};
 		std::mutex chunk_mutex;
 		WorldUBO worldUBO;
 		GLuint ubo;
@@ -150,7 +155,6 @@ class World {
 		glm::ivec2 playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
 		std::unordered_map<BlockType, GLuint> textureIndices;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
-		Frustum frustum{};
 
 };
 

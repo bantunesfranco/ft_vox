@@ -3,6 +3,9 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include "glm/gtx/norm.hpp"
+
 #include <ranges>
 
 /* ========================== Chunk ========================== */
@@ -66,42 +69,69 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
         floorDiv(static_cast<int>(playerPos.z), Chunk::DEPTH)
     );
 
-    if (newChunk == playerChunk && !chunks.empty())
-        return;
+    if (newChunk == playerChunk) return;
 
     playerChunk = newChunk;
 
-    std::vector<glm::ivec2> toLoad;
-    std::vector<glm::ivec2> toUnload;
+    std::vector<glm::ivec2> loadQueue;
+    std::vector<glm::ivec2> unloadQueue;
 
-    {
-        std::lock_guard lock(chunk_mutex);
+    // -------- generate spiral load order --------
+    for (int r = 0; r <= CHUNK_RADIUS; ++r) {
+        for (int dx = -r; dx <= r; ++dx) {
+            for (int dz = -r; dz <= r; ++dz) {
+                if (std::abs(dx) != r && std::abs(dz) != r)
+                    continue;
 
-        for (int dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; ++dx)
-            for (int dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; ++dz) {
                 if (glm::ivec2 c = playerChunk + glm::ivec2(dx, dz); !chunks.contains(c))
-                    toLoad.push_back(c);
+                    loadQueue.push_back(c);
             }
-
-        for (auto& c : chunks | std::views::keys)
-            if (glm::distance(glm::vec2(c), glm::vec2(playerChunk)) > CHUNK_RADIUS + 1)
-                toUnload.push_back(c);
+        }
     }
 
-    for (auto& c : toLoad) {
-        threadPool.enqueue([this, c] {
+    // TODO: check if this is actually needed
+    // std::sort(loadQueue.begin(), loadQueue.end(),
+    // [this](const glm::ivec2& a, const glm::ivec2& b) {
+    //     return glm::distance2(glm::vec2(a), glm::vec2(playerChunk)) <
+    //            glm::distance2(glm::vec2(b), glm::vec2(playerChunk));
+    // });
+
+    // -------- unload far chunks --------
+    {
+        std::lock_guard lock(chunk_mutex);
+        for (const auto& coord : chunks | std::views::keys) {
+            if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > CHUNK_RADIUS + 1)
+                unloadQueue.push_back(coord);
+        }
+    }
+
+    // -------- enqueue chunk generation --------
+    int spawned = 0;
+    for (auto& c : loadQueue) {
+        if (constexpr int MAX_CHUNKS_PER_UPDATE = 16; spawned++ >= MAX_CHUNKS_PER_UPDATE)
+            break;
+
+        threadPool.enqueue([this, c]
+        {
             Chunk chunk;
+            chunk.worldMin = {c.x * Chunk::WIDTH, 0.0f, c.y * Chunk::DEPTH};
+            chunk.worldMax = chunk.worldMin + glm::vec3(Chunk::WIDTH,Chunk::HEIGHT,Chunk::DEPTH);
+            chunk.worldCenter = (chunk.worldMin + chunk.worldMax) * 0.5f;
+
             generateTerrain(chunk, c);
             generateChunkMeshGreedy(chunk, c);
 
-            std::lock_guard lock(chunk_mutex);
-            chunks.emplace(c, std::move(chunk));
+            {
+                std::lock_guard lock(chunk_mutex);
+                chunks.emplace(c, std::move(chunk));
+            }
         });
     }
 
+    // -------- erase unloaded chunks --------
     {
         std::lock_guard lock(chunk_mutex);
-        for (auto& c : toUnload)
+        for (auto& c : unloadQueue)
             chunks.erase(c);
     }
 }
