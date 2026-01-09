@@ -69,12 +69,12 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
         floorDiv(static_cast<int>(playerPos.z), Chunk::DEPTH)
     );
 
-    if (newChunk == playerChunk) return;
-
     playerChunk = newChunk;
 
     std::vector<glm::ivec2> loadQueue;
     std::vector<glm::ivec2> unloadQueue;
+    loadQueue.reserve(CHUNK_DIAMETER * CHUNK_DIAMETER);
+    unloadQueue.reserve(chunks.size());
 
     // -------- generate spiral load order --------
     for (int r = 0; r <= CHUNK_RADIUS; ++r) {
@@ -89,13 +89,6 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
         }
     }
 
-    // TODO: check if this is actually needed
-    // std::sort(loadQueue.begin(), loadQueue.end(),
-    // [this](const glm::ivec2& a, const glm::ivec2& b) {
-    //     return glm::distance2(glm::vec2(a), glm::vec2(playerChunk)) <
-    //            glm::distance2(glm::vec2(b), glm::vec2(playerChunk));
-    // });
-
     // -------- unload far chunks --------
     {
         std::lock_guard lock(chunk_mutex);
@@ -108,7 +101,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
     // -------- enqueue chunk generation --------
     int spawned = 0;
     for (auto& c : loadQueue) {
-        if (constexpr int MAX_CHUNKS_PER_UPDATE = 16; spawned++ >= MAX_CHUNKS_PER_UPDATE)
+        if (constexpr int MAX_CHUNKS_PER_UPDATE = 12; spawned++ >= MAX_CHUNKS_PER_UPDATE)
             break;
 
         threadPool.enqueue([this, c]
