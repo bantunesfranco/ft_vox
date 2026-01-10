@@ -2,9 +2,9 @@
 #define WORLD_HPP
 
 #include "defines.hpp"
-#include "Voxel.hpp"
 #include "ThreadPool.hpp"
 #include "Camera.hpp"
+#include "Chunk.hpp"
 
 #include <vector>
 #include <unordered_map>
@@ -41,44 +41,7 @@ inline int floorDiv(const int x, const int d) {
 	return q;
 }
 
-// Define a chunk as a 1D vector of voxels
-class Chunk {
-	public:
-		struct ChunkRenderData {
-			GLuint vao = 0;
-			GLuint vbo = 0;
-			GLuint ibo = 0;
-			uint32_t indexCount = 0;
-		} renderData;
 
-
-		Chunk();
-		~Chunk() = default;
-		Chunk(const Chunk&) = default;
-		Chunk& operator=(const Chunk&) = default;
-
-		void		setVoxel(int x, int y, int z, Voxel voxel);
-		[[nodiscard]] Voxel		getVoxel(int x, int y, int z) const;
-		[[nodiscard]] auto 		getVoxels() const { return voxels; }
-		[[nodiscard]] bool		isBlockActive(int x, int y, int z) const;
-
-		// Define the dimensions of a chunk
-		static constexpr uint8_t WIDTH = 16;
-		static constexpr uint16_t HEIGHT = 128;
-		static constexpr uint8_t DEPTH = 16;
-		static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
-
-        std::vector<Vertex> cachedVertices;
-        std::vector<uint32_t> cachedIndices;
-        bool isMeshDirty = true;
-		glm::vec3 worldMax;
-		glm::vec3 worldMin;
-		glm::vec3 worldCenter;
-
-	private:
-		std::vector<Voxel> voxels;
-
-};
 
 class Frustum {
 	public:
@@ -146,6 +109,7 @@ class World {
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
 		void generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const;
+		void generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const;
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
 		std::unordered_map<glm::ivec2, Chunk>& getChunks() { return chunks; }
 

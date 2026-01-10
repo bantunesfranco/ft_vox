@@ -1,4 +1,5 @@
 #include "World.hpp"
+#include "GreedyMesher.hpp"
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
@@ -8,28 +9,6 @@
 
 #include <ranges>
 
-/* ========================== Chunk ========================== */
-
-Chunk::Chunk(): isMeshDirty(true), voxels(Chunk::SIZE) {}
-
-Voxel Chunk::getVoxel(const int x, const int y, const int z) const {
-    if (static_cast<unsigned>(x) >= WIDTH || static_cast<unsigned>(y) >= HEIGHT || static_cast<unsigned>(z) >= DEPTH)
-        return 0;
-    return voxels[x + y * WIDTH + z * WIDTH * HEIGHT];
-}
-
-void Chunk::setVoxel(const int x, const int y, const int z, const Voxel voxel) {
-    if (static_cast<unsigned>(x) >= WIDTH || static_cast<unsigned>(y) >= HEIGHT || static_cast<unsigned>(z) >= DEPTH)
-        return;
-    voxels[x + y * WIDTH + z * WIDTH * HEIGHT] = voxel;
-    isMeshDirty = true;
-}
-
-bool Chunk::isBlockActive(const int x, const int y, const int z) const {
-    return isActive(getVoxel(x, y, z));
-}
-
-/* ========================== World ========================== */
 
 World::World(const std::unordered_map<BlockType, uint32_t>& indices) : ubo(0), textureIndices(indices)
 {
@@ -112,7 +91,9 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
             chunk.worldCenter = (chunk.worldMin + chunk.worldMax) * 0.5f;
 
             generateTerrain(chunk, c);
-            generateChunkMesh(chunk, c);
+            // generateChunkMesh(chunk, c);
+
+            generateChunkGreedyMesh(chunk, c);
 
             {
                 std::lock_guard lock(chunk_mutex);
@@ -163,7 +144,16 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
     chunk.isMeshDirty = true;
 }
 
-/* ===================== Greedy Meshing ===================== */
+void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
+{
+    GLuint blockTypeToTex[256] = {};
+    for (auto [blockType, index] : textureIndices)
+        blockTypeToTex[static_cast<int>(blockType)] = index;
+
+    GreedyMesher::generateGreedyMesh(chunk, coord, blockTypeToTex);
+}
+
+/* ===================== Meshing ===================== */
 void World::generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const {
     constexpr int W = Chunk::WIDTH;
     constexpr int H = Chunk::HEIGHT;
