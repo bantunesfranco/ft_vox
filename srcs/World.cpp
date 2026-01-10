@@ -112,7 +112,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
             chunk.worldCenter = (chunk.worldMin + chunk.worldMax) * 0.5f;
 
             generateTerrain(chunk, c);
-            generateChunkMeshGreedy(chunk, c);
+            generateChunkMesh(chunk, c);
 
             {
                 std::lock_guard lock(chunk_mutex);
@@ -164,7 +164,7 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
 }
 
 /* ===================== Greedy Meshing ===================== */
-void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const {
+void World::generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const {
     constexpr int W = Chunk::WIDTH;
     constexpr int H = Chunk::HEIGHT;
     constexpr int D = Chunk::DEPTH;
@@ -173,8 +173,8 @@ void World::generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const
     chunk.cachedIndices.clear();
 
     // Reserve once (huge perf win)
-    chunk.cachedVertices.reserve(W * H * D * 12);
-    chunk.cachedIndices.reserve(W * H * D * 18);
+    chunk.cachedVertices.reserve(Chunk::SIZE * 12);
+    chunk.cachedIndices.reserve(Chunk::SIZE * 18);
 
     // ----------------------------------------------------
     // 1. Cache solidity with padding (NO bounds checks)

@@ -145,7 +145,7 @@ class World {
 		World& operator=(const World&) = delete;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		void generateChunkMeshGreedy(Chunk& chunk, const glm::ivec2& coord) const;
+		void generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const;
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
 		std::unordered_map<glm::ivec2, Chunk>& getChunks() { return chunks; }
 
