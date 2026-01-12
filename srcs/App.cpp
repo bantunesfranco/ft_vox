@@ -99,7 +99,7 @@ void App::run()
 		handleMovement(window, camera);
 
         Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
-		world.frustum.updateFrustum(camera->proj, camera->view);
+		world.updateFrustum(camera->proj, camera->view);
 
 		world.updateChunks(camera->pos, threadPool);
 
@@ -111,7 +111,7 @@ void App::run()
 			for (auto& chunk : chunks) {
 				if (chunk.cachedVertices.empty())
 					continue;
-				if (!world.frustum.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
+				if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
 					continue;
 				visibleChunks.push_back(&chunk);
 			}

@@ -19,7 +19,7 @@ out vec4 FragColor;
 
 void main()
 {
-    vec2 uv = clamp(vUV, 0.001, 0.999);
+    vec2 uv = clamp(fract(vUV), 0.001, 0.999);
     vec4 tex = texture(uTextures, vec3(uv, vTexIndex));
     if (tex.a < 0.1) discard;
 
