@@ -152,7 +152,9 @@ void App::loadTextures() {
     		"./textures/grass.png",      // texIndex 0
     		"./textures/dirt.png",		// texIndex 1
     		"./textures/stone.png",
-    		// "./textures/sand.png",
+    		"./textures/sand.png",
+    		"./textures/iron_ore.png",
+    		"./textures/snow.png",
 			// "./textures/amethyst.png",
 		};
 
@@ -163,6 +165,8 @@ void App::loadTextures() {
         textureIndices[BlockType::Grass] = 0;
         textureIndices[BlockType::Dirt] = 1;
         textureIndices[BlockType::Stone] = 2;
+    	textureIndices[BlockType::IronOre] = 4;
+    	textureIndices[BlockType::Snow] = 5;
 
     	renderer->setTexArray(textureArray);
     }

@@ -5,6 +5,8 @@
 #include "stb_perlin.h"
 
 #define GLM_ENABLE_EXPERIMENTAL
+#include <iostream>
+
 #include "glm/gtx/norm.hpp"
 
 #include <ranges>
@@ -100,8 +102,6 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
             chunk.worldCenter = (chunk.worldMin + chunk.worldMax) * 0.5f;
 
             generateTerrain(chunk, c);
-            // generateChunkMesh(chunk, c);
-
             generateChunkGreedyMesh(chunk, c);
 
             {
@@ -123,35 +123,121 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
 void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
 {
-    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 8;
-    constexpr int MAX_Y = Chunk::HEIGHT - 3;
     constexpr int MIN_Y = 1;
+    constexpr int MAX_Y = Chunk::HEIGHT - 1;
+    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 8;
+    constexpr int SNOW_HEIGHT = Chunk::HEIGHT / 4; // above this, snow
+
+    const int seed = 1337; // deterministic seed
+
+    // Precompute 2D noise for height & biome
+    int heightMap[Chunk::WIDTH][Chunk::DEPTH];
+    const int baseWX = coord.x * Chunk::WIDTH;
+    const int baseWZ = coord.y * Chunk::DEPTH;
+    for (int x = 0; x < Chunk::WIDTH; ++x) {
+        for (int z = 0; z < Chunk::DEPTH; ++z) {
+            const int wx = baseWX + x;
+            const int wz = baseWZ + z;
+
+            const float largeHill = stb_perlin_noise3_seed(wx * 0.005f, 0.0f, wz * 0.005f, 0,0,0, seed) * 96.0f; // mountains
+            const float smallBump = stb_perlin_noise3_seed(wx * 0.05f, 0.0f, wz * 0.05f, 0,0,0, seed) * 16.0f;   // hills & bumps
+
+            int height = BASE_HEIGHT + static_cast<int>(largeHill + smallBump);
+            heightMap[x][z] = std::clamp(height, MIN_Y, MAX_Y);
+        }
+    }
+
+    static const uint32_t STONE = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Stone));
+    static const uint32_t DIRT  = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Dirt));
+    static const uint32_t GRASS = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Grass));
+    static const uint32_t SNOW  = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Snow));
 
     for (int x = 0; x < Chunk::WIDTH; ++x) {
         for (int z = 0; z < Chunk::DEPTH; ++z) {
+            const int height = heightMap[x][z];
 
-            const int wx = coord.x * Chunk::WIDTH + x;
-            const int wz = coord.y * Chunk::DEPTH + z;
+            // stone
+            int y = MIN_Y;
+            for (; y < height - 4; ++y)
+                chunk.setVoxel(x, y, z, STONE);
 
-            const int seed = 0; // time(nullptr);
-            const float n = stb_perlin_noise3_seed( wx * 0.05f, 0.0f, wz * 0.05f, 0, 0, 0, seed);
+            // dirt
+            for (; y < height; ++y)
+                chunk.setVoxel(x, y, z, DIRT);
 
-            int height = BASE_HEIGHT + static_cast<int>(n * 25.0f);
-            height = std::clamp(height, MIN_Y, MAX_Y);
-
-            for (int y = MIN_Y; y <= height; ++y) {
-                BlockType type =
-                    (y == height)        ? BlockType::Grass :
-                    (y >= height - 4)    ? BlockType::Dirt  :
-                                           BlockType::Stone;
-
-                chunk.setVoxel(x, y, z, packVoxelData(1, 255, 255, 255, static_cast<uint8_t>(type)));
-            }
+            // top block
+            chunk.setVoxel(x, height, z, (height >= SNOW_HEIGHT) ? SNOW : GRASS);
         }
     }
 
     chunk.isMeshDirty = true;
 }
+
+// void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
+// {
+//     constexpr int BASE_HEIGHT = Chunk::HEIGHT / 4;
+//     constexpr int MAX_Y = Chunk::HEIGHT - 3;
+//     constexpr int MIN_Y = 1;
+//
+//     const int seed = 0;
+//
+//     // Precompute 2D noise for height & biome
+//     float heightMap[Chunk::WIDTH][Chunk::DEPTH];
+//
+//     for (int x = 0; x < Chunk::WIDTH; ++x) {
+//         for (int z = 0; z < Chunk::DEPTH; ++z) {
+//             const int wx = coord.x * Chunk::WIDTH + x;
+//             const int wz = coord.y * Chunk::DEPTH + z;
+//
+//             float largeHill = stb_perlin_noise3_seed(wx * 0.005f, 0.0f, wz * 0.005f, 0,0,0, seed) * 80.0f; // mountains
+//             float smallBump = stb_perlin_noise3_seed(wx * 0.05f, 0.0f, wz * 0.05f, 0,0,0, seed) * 10.0f;   // hills & bumps
+//
+//             int height = BASE_HEIGHT + static_cast<int>(largeHill + smallBump);
+//             heightMap[x][z] = std::clamp(height, MIN_Y, MAX_Y);
+//         }
+//     }
+//
+//     // Generate voxels
+//     for (int x = 0; x < Chunk::WIDTH; ++x) {
+//         for (int z = 0; z < Chunk::DEPTH; ++z) {
+//             int topY = static_cast<int>(heightMap[x][z]);
+//             for (int y = MIN_Y; y <= topY; ++y) {
+//                 BlockType blockType = BlockType::Stone;
+//
+//                 // Top layers
+//                 if (y == topY) {
+//                     if (y > Chunk::HEIGHT * 0.75f) blockType = BlockType::Snow; // snow only high
+//                     else blockType = BlockType::Grass; // most of the map
+//                 }
+//                 else if (y >= topY - 4) {
+//                     blockType = BlockType::Dirt;
+//                 }
+//
+//                 // Caves only below surface
+//                 // if (y < topY - 2) {
+//                 //     float caveNoise = stb_perlin_noise3_seed(
+//                 //         (coord.x * Chunk::WIDTH + x) * 0.1f, y * 0.1f,
+//                 //         (coord.y * Chunk::DEPTH + z) * 0.1f,
+//                 //         0,0,0, seed);
+//                 //     if (caveNoise > 0.55f) continue;
+//                 // }
+//                 //
+//                 // // Ores
+//                 // if (y < 40) {
+//                 //     float oreNoise = stb_perlin_noise3_seed(
+//                 //         (coord.x * Chunk::WIDTH + x) * 0.2f, y * 0.2f,
+//                 //         (coord.y * Chunk::DEPTH + z) * 0.2f,
+//                 //         0,0,0, seed);
+//                 //     if (oreNoise > 0.75f) blockType = BlockType::IronOre;
+//                 // }
+//
+//                 chunk.setVoxel(x, y, z, packVoxelData(1, 255, 255, 255, static_cast<uint8_t>(blockType)));
+//             }
+//         }
+//     }
+//
+//     chunk.isMeshDirty = true;
+// }
 
 void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
 {

@@ -27,6 +27,8 @@ typedef enum class Direction {
 
 typedef enum class BlockType {
 	Air, Grass, Dirt , Stone, Sand, Water,
+	Snow,
+	IronOre,
 } BlockType;
 
 typedef struct Face {
