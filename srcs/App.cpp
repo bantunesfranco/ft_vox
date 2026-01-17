@@ -118,17 +118,21 @@ void App::run()
                     continue;
 
                 // Queue AO calculation if not already done
-                if (!chunk.aoCalculated) {
-                    chunksToCalcAO.emplace_back(coord, &chunk);
-                    chunk.aoCalculated = true;
-                }
+                // if (!chunk.aoCalculated) {
+                //     chunksToCalcAO.emplace_back(coord, &chunk);
+                //     chunk.aoCalculated = true;
+                // }
+
+            	// for (auto& [coord, chunk] : chunks) {
+            		if (!chunk.aoCalculated) {
+            			calcChunkAO(coord, chunk, world);  // Direct call, no threading
+            			chunk.aoCalculated = true;
+            		}
+            	// }
 
                 visibleChunks.push_back(&chunk);
             }
         }
-
-        // Queue tasks outside the lock
-        queueVisibleChunksAO(world, chunksToCalcAO, threadPool);
 
         glm::vec3 camPos = camera->pos;
         std::sort(visibleChunks.begin(), visibleChunks.end(),
@@ -146,7 +150,7 @@ void App::run()
         renderImGui(camera, _showWireframe, rgba);
         glfwSwapBuffers(window);
 
-        chunksToCalcAO.clear();
+        // chunksToCalcAO.clear();
     }
 }
 
@@ -289,62 +293,59 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
     };
 
     const size_t vertexCount = chunk.cachedVertices.size();
+    const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
 
     for (size_t i = 0; i < vertexCount; ++i) {
         auto& v = chunk.cachedVertices[i];
 
-        // Get vertex position in chunk space
-        int vx = static_cast<int>(v.position.x) % W;
-        int vy = static_cast<int>(v.position.y);
-        int vz = static_cast<int>(v.position.z) % D;
-
-        if (vx < 0) vx += W;
-        if (vz < 0) vz += D;
+        // Remove offset to get local chunk coordinates
+        glm::vec3 localPos = v.position - offset;
+        int vx = static_cast<int>(localPos.x);
+        int vy = static_cast<int>(localPos.y);
+        int vz = static_cast<int>(localPos.z);
 
         uint8_t normalIdx = v.normal;
 
         // Use lookup table for corner detection
-        // cornerLUT maps vertex index in quad (0-3) to corner bits (x, y)
-        constexpr uint8_t cornerLUT[4] = {0, 1, 3, 2}; // (0,0), (1,0), (1,1), (0,1)
+        constexpr uint8_t cornerLUT[4] = {0, 1, 3, 2};
         uint8_t corner = cornerLUT[i % 4];
 
-        bool cornerX = corner & 1;  // 0 or 1
-        bool cornerY = corner & 2;  // 0 or 2
-        bool cornerZ = corner & 1;  // For Z faces, reuse X bit
+        bool cornerX = corner & 1;
+        bool cornerY = corner & 2;
 
-        uint8_t ao = 3; // Default full brightness
+        uint8_t ao = 3;
 
-        if (normalIdx < 2) { // X faces (YZ plane)
+        if (normalIdx < 2) { // X faces
             int axq = vx + (normalIdx == 0 ? 1 : 0);
             int py = cornerY ? vy + 1 : vy - 1;
             int pz = cornerX ? vz + 1 : vz - 1;
 
             ao = calcAO(
-                getBlock(axq, py, vz),           // Adjacent on Y
-                getBlock(axq, vy, pz),           // Adjacent on Z
-                getBlock(axq, py, pz)            // Corner diagonal
+                getBlock(axq, py, vz),
+                getBlock(axq, vy, pz),
+                getBlock(axq, py, pz)
             );
         }
-        else if (normalIdx < 4) { // Y faces (XZ plane)
+        else if (normalIdx < 4) { // Y faces
             int ayq = vy + (normalIdx == 2 ? 1 : 0);
             int px = cornerX ? vx + 1 : vx - 1;
-            int pz = cornerZ ? vz + 1 : vz - 1;
+            int pz = cornerX ? vz + 1 : vz - 1;
 
             ao = calcAO(
-                getBlock(px, ayq, vz),           // Adjacent on X
-                getBlock(vx, ayq, pz),           // Adjacent on Z
-                getBlock(px, ayq, pz)            // Corner diagonal
+                getBlock(px, ayq, vz),
+                getBlock(vx, ayq, pz),
+                getBlock(px, ayq, pz)
             );
         }
-        else { // Z faces (XY plane)
+        else { // Z faces
             int azq = vz + (normalIdx == 4 ? 1 : 0);
             int px = cornerX ? vx + 1 : vx - 1;
             int py = cornerY ? vy + 1 : vy - 1;
 
             ao = calcAO(
-                getBlock(px, vy, azq),           // Adjacent on X
-                getBlock(vx, py, azq),           // Adjacent on Y
-                getBlock(px, py, azq)            // Corner diagonal
+                getBlock(px, vy, azq),
+                getBlock(vx, py, azq),
+                getBlock(px, py, azq)
             );
         }
 

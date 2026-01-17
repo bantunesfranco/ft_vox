@@ -173,7 +173,7 @@ void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
 }
 
 
-void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
+void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
 {
     constexpr int W = Chunk::WIDTH;
     constexpr int H = Chunk::HEIGHT;
@@ -341,6 +341,17 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
     for (auto& v : vertices) v.position += offset;
 
     chunk.isMeshDirty = false;
+
+    {
+        std::lock_guard lock(chunk_mutex);
+        for (int dz = -1; dz <= 1; ++dz) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dz == 0) continue;  // Skip self
+                if (auto it = chunks.find(coord + glm::ivec2(dx, dz)); it != chunks.end())
+                    it->second.aoCalculated = false;
+            }
+        }
+    }
 }
 
 /* ===================== Meshing ===================== */

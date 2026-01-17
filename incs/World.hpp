@@ -107,7 +107,7 @@ class World {
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
 		// void generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const;
-		void generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const;
+		void generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord);
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
 		bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const;
 		void updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat);
