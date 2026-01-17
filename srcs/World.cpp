@@ -346,7 +346,7 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
         std::lock_guard lock(chunk_mutex);
         for (int dz = -1; dz <= 1; ++dz) {
             for (int dx = -1; dx <= 1; ++dx) {
-                if (dx == 0 && dz == 0) continue;  // Skip self
+                if (dx == 0 && dz == 0) continue;
                 if (auto it = chunks.find(coord + glm::ivec2(dx, dz)); it != chunks.end())
                     it->second.aoCalculated = false;
             }

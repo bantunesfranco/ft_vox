@@ -104,7 +104,7 @@ void App::run()
         world.updateChunks(camera->pos, threadPool);
 
         std::vector<Chunk*> visibleChunks;
-        std::vector<std::pair<glm::ivec2, Chunk*>> chunksToCalcAO;
+        // std::vector<std::pair<glm::ivec2, Chunk*>> chunksToCalcAO;
 
         {
             std::lock_guard lock(world.chunk_mutex);
@@ -288,9 +288,10 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
         return neighbor ? neighbor->isBlockActive(cx, y, cz) : false;
     };
 
-    constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
-        return (s1 && s2) ? 0 : (3 - (s1 + s2 + c));
-    };
+	constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
+		int darkness = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0);
+		return std::max(1, 3 - darkness);  // Never go below 1 (never fully dark)
+	};
 
     const size_t vertexCount = chunk.cachedVertices.size();
     const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
