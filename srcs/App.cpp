@@ -86,7 +86,7 @@ void App::setCallbackFunctions() const
 
 void App::run()
 {
-    ThreadPool threadPool(8);
+    ThreadPool threadPool(10);
     World world(textureIndices);
 
 	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
@@ -120,7 +120,9 @@ void App::run()
 		glm::vec3 camPos = camera->pos;
 		std::sort(visibleChunks.begin(), visibleChunks.end(),
 			[&camPos](const Chunk* a, const Chunk* b) {
-				return glm::distance2(a->worldCenter, camPos) < glm::distance2(b->worldCenter, camPos);
+				const auto worldCenterA = (a->worldMin + a->worldMax) * 0.5f;
+				const auto worldCenterB = (b->worldMin + b->worldMax) * 0.5f;
+				return glm::distance2(worldCenterA, camPos) < glm::distance2(worldCenterB, camPos);
 			});
 
 		for (const auto& chunk : visibleChunks) {
@@ -174,21 +176,17 @@ void App::loadTextures() {
     {
         std::cerr << e.what() << std::endl;
         terminate();
-        std::exit(Engine::vox_errno);
+        std::exit(vox_errno);
     }
 }
 
 void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 {
-	if (chunk.cachedVertices.empty() || chunk.cachedIndices.empty())
-		return;
+	if (chunk.cachedIndices.empty()) return;
 
-	if (data.vao == 0)
-		glGenVertexArrays(1, &data.vao);
-	if (data.vbo == 0)
-		data.vbo = VBOManager::get().getVBO();
-	if (data.ibo == 0)
-		data.ibo = VBOManager::get().getVBO();
+	if (data.vao == 0) glGenVertexArrays(1, &data.vao);
+	if (data.vbo == 0) data.vbo = VBOManager::get().getVBO();
+	if (data.ibo == 0) data.ibo = VBOManager::get().getVBO();
 
 	data.indexCount = chunk.cachedIndices.size();
 
@@ -203,29 +201,24 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 				 chunk.cachedIndices.data(), GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+		(void*)offsetof(Vertex, position));
 
 	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 3,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, normal)));
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+		(void*)offsetof(Vertex, uv));
 
 	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 2,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
+	glVertexAttribIPointer(2, 1, GL_UNSIGNED_SHORT, sizeof(Vertex),
+		(void*)offsetof(Vertex, texIndex));
 
 	glEnableVertexAttribArray(3);
-	glVertexAttribIPointer(3, 1,
-		GL_UNSIGNED_INT,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
+	glVertexAttribIPointer(3, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
+		(void*)offsetof(Vertex, normal));
 
 	glEnableVertexAttribArray(4);
-	glVertexAttribPointer(4, 1,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, ao)));
+	glVertexAttribIPointer(4, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
+		(void*)offsetof(Vertex, ao));
 
 	glBindVertexArray(0);
 }

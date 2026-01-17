@@ -15,7 +15,7 @@ public:
     } renderData;
 
 
-    Chunk(): isMeshDirty(true), voxels(SIZE) {}
+    Chunk() {}
     ~Chunk() = default;
     Chunk(const Chunk&) = default;
     Chunk& operator=(const Chunk&) = default;
@@ -50,10 +50,9 @@ public:
     bool isMeshDirty = true;
     glm::vec3 worldMax{};
     glm::vec3 worldMin{};
-    glm::vec3 worldCenter{};
 
 private:
-    std::vector<Voxel> voxels;
+    std::array<Voxel, SIZE> voxels{};
 };
 
 #endif // CHUNK_HPP

@@ -43,8 +43,6 @@ inline int floorDiv(const int x, const int d) {
 	return q;
 }
 
-
-
 class Frustum {
 	public:
 	    std::array<glm::vec4, 6> planes;
@@ -110,7 +108,7 @@ class World {
 		World& operator=(const World&) = delete;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		void generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const;
+		// void generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const;
 		void generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const;
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
 		bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const;

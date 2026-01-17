@@ -149,12 +149,19 @@ GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outW
 	outWidth  = width;
 	outHeight = height;
 
+	int maxDim = std::max(width, height);
+	GLsizei mipLevels = 1;
+	while (maxDim > 1) {
+		maxDim /= 2;
+		mipLevels++;
+	}
+
 	GLuint texArray;
 	glCreateTextures(GL_TEXTURE_2D_ARRAY, 1, &texArray);
 
 	glTextureStorage3D(
 		texArray,
-		1,
+		mipLevels,
 		GL_RGBA8,
 		width, height,
 		static_cast<GLsizei>(paths.size())
@@ -201,10 +208,13 @@ GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outW
 		stbi_image_free(data);
 	}
 
-	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTextureParameteri(texArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTextureParameteri(texArray, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTextureParameteri(texArray, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTextureParameteri(texArray, GL_TEXTURE_WRAP_R, GL_REPEAT);
+
+	glGenerateTextureMipmap(texArray);
 
 	return texArray;
 }

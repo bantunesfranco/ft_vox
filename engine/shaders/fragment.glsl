@@ -19,8 +19,8 @@ out vec4 FragColor;
 
 void main()
 {
-    vec2 uv = clamp(fract(vUV), 0.001, 0.999);
-    vec4 tex = texture(uTextures, vec3(uv, vTexIndex));
+    vec2 uv = fract(vUV);
+    vec4 tex = texture(uTextures, vec3(uv, float(vTexIndex)));
     if (tex.a < 0.1) discard;
 
     float dist = distance(vWorldPos, light.xyz);
@@ -30,5 +30,4 @@ void main()
     float brightness = (ambient + lightFactor) * vAO * 1.25;
 
     FragColor = vec4(tex.rgb * brightness, tex.a);
-
 }
