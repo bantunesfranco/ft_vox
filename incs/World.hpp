@@ -26,9 +26,7 @@ typedef enum class Direction {
 } Direction;
 
 typedef enum class BlockType {
-	Air, Grass, Dirt , Stone, Sand, Water,
-	Snow,
-	IronOre,
+	Air, Grass, Dirt , Stone, Sand, Water, Snow, IronOre,
 } BlockType;
 
 typedef struct Face {
@@ -102,7 +100,7 @@ class World {
 		WorldUBO worldUBO;
 		GLuint ubo;
 
-		World(const std::unordered_map<BlockType, uint32_t>& indices);
+		World(std::array<GLuint, 256>& indices);
 		~World() = default;
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
@@ -114,12 +112,13 @@ class World {
 		bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const;
 		void updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat);
 		std::unordered_map<glm::ivec2, Chunk>& getChunks() { return chunks; }
+		const std::unordered_map<glm::ivec2, Chunk>& getChunks() const { return chunks; }
 
 		static void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
 
 	private:
 		glm::ivec2 playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
-		std::unordered_map<BlockType, GLuint> textureIndices;
+		std::array<GLuint, 256>& textureIndices;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
 
 };

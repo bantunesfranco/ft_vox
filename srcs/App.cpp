@@ -89,50 +89,65 @@ void App::run()
     ThreadPool threadPool(10);
     World world(textureIndices);
 
-	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
+    float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
-	while (windowIsOpen(window))
-	{
-		glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
-		glfwPollEvents();
+    while (windowIsOpen(window))
+    {
+        glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
+        glfwPollEvents();
         FPSCounter::update();
-		handleMovement(window, camera);
+        handleMovement(window, camera);
 
         Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
-		world.updateFrustum(camera->proj, camera->view);
+        world.updateFrustum(camera->proj, camera->view);
 
-		world.updateChunks(camera->pos, threadPool);
+        world.updateChunks(camera->pos, threadPool);
 
-		std::vector<Chunk*> visibleChunks;
-		{
-			std::lock_guard lock(world.chunk_mutex);
-			auto chunks = world.getChunks() | std::views::values;
-			visibleChunks.reserve(chunks.size());
-			for (auto& chunk : chunks) {
-				if (chunk.cachedVertices.empty())
-					continue;
-				if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
-					continue;
-				visibleChunks.push_back(&chunk);
-			}
-		}
+        std::vector<Chunk*> visibleChunks;
+        std::vector<std::pair<glm::ivec2, Chunk*>> chunksToCalcAO;
 
-		glm::vec3 camPos = camera->pos;
-		std::sort(visibleChunks.begin(), visibleChunks.end(),
-			[&camPos](const Chunk* a, const Chunk* b) {
-				const auto worldCenterA = (a->worldMin + a->worldMax) * 0.5f;
-				const auto worldCenterB = (b->worldMin + b->worldMax) * 0.5f;
-				return glm::distance2(worldCenterA, camPos) < glm::distance2(worldCenterB, camPos);
-			});
+        {
+            std::lock_guard lock(world.chunk_mutex);
+            auto& chunks = world.getChunks();
+            visibleChunks.reserve(chunks.size());
 
-		for (const auto& chunk : visibleChunks) {
-			uploadChunk(*chunk, chunk->renderData);
-			renderChunk(*chunk, world.worldUBO, world.ubo);
-		}
+            for (auto& [coord, chunk] : chunks) {
+                if (chunk.cachedVertices.empty())
+                    continue;
+                if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
+                    continue;
 
-		renderImGui(camera, _showWireframe, rgba);
-		glfwSwapBuffers(window);
-	}
+                // Queue AO calculation if not already done
+                if (!chunk.aoCalculated) {
+                    chunksToCalcAO.emplace_back(coord, &chunk);
+                    chunk.aoCalculated = true;
+                }
+
+                visibleChunks.push_back(&chunk);
+            }
+        }
+
+        // Queue tasks outside the lock
+        queueVisibleChunksAO(world, chunksToCalcAO, threadPool);
+
+        glm::vec3 camPos = camera->pos;
+        std::sort(visibleChunks.begin(), visibleChunks.end(),
+            [&camPos](const Chunk* a, const Chunk* b) {
+                const auto worldCenterA = (a->worldMin + a->worldMax) * 0.5f;
+                const auto worldCenterB = (b->worldMin + b->worldMax) * 0.5f;
+                return glm::distance2(worldCenterA, camPos) < glm::distance2(worldCenterB, camPos);
+            });
+
+        for (const auto& chunk : visibleChunks) {
+            uploadChunk(*chunk, chunk->renderData);
+            renderChunk(*chunk, world.worldUBO, world.ubo);
+        }
+
+        renderImGui(camera, _showWireframe, rgba);
+        glfwSwapBuffers(window);
+
+        chunksToCalcAO.clear();
+    }
 }
 
 void App::terminate()
@@ -164,11 +179,11 @@ void App::loadTextures() {
     	textureArray = loadTextureArray(paths, texWidth, texHeight);
 
     	// textureIndices[BlockType::Air] = -1;
-        textureIndices[BlockType::Grass] = 0;
-        textureIndices[BlockType::Dirt] = 1;
-        textureIndices[BlockType::Stone] = 2;
-    	textureIndices[BlockType::IronOre] = 4;
-    	textureIndices[BlockType::Snow] = 5;
+        textureIndices[static_cast<int>(BlockType::Grass)] = 0;
+        textureIndices[static_cast<int>(BlockType::Dirt)] = 1;
+        textureIndices[static_cast<int>(BlockType::Stone)] = 2;
+    	textureIndices[static_cast<int>(BlockType::IronOre)] = 4;
+    	textureIndices[static_cast<int>(BlockType::Snow)] = 5;
 
     	renderer->setTexArray(textureArray);
     }
@@ -202,19 +217,19 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-		(void*)offsetof(Vertex, position));
+		reinterpret_cast<void*>(offsetof(Vertex, position)));
 
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-		(void*)offsetof(Vertex, uv));
+		reinterpret_cast<void*>(offsetof(Vertex, uv)));
 
 	glEnableVertexAttribArray(2);
 	glVertexAttribIPointer(2, 1, GL_UNSIGNED_SHORT, sizeof(Vertex),
-		(void*)offsetof(Vertex, texIndex));
+		reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
 
 	glEnableVertexAttribArray(3);
 	glVertexAttribIPointer(3, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
-		(void*)offsetof(Vertex, normal));
+		reinterpret_cast<void*>(offsetof(Vertex, normal)));
 
 	glEnableVertexAttribArray(4);
 	glVertexAttribIPointer(4, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
@@ -234,4 +249,116 @@ void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint
 
 	glBindTextureUnit(0, renderer->getTextureArray());
 	glDrawElements(GL_TRIANGLES, chunk.renderData.indexCount, GL_UNSIGNED_INT, nullptr);
+}
+
+void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
+{
+    constexpr int W = Chunk::WIDTH;
+    constexpr int H = Chunk::HEIGHT;
+    constexpr int D = Chunk::DEPTH;
+
+    const auto& chunks = world.getChunks();
+
+    // Pre-fetch neighbor chunks
+    const Chunk* neighbors[9] = {nullptr};
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            auto it = chunks.find(coord + glm::ivec2(dx, dz));
+            neighbors[(dz + 1) * 3 + (dx + 1)] = (it != chunks.end()) ? &it->second : nullptr;
+        }
+    }
+
+    auto getBlock = [&](int x, int y, int z) -> bool {
+        if (y < 0 || y >= H) return false;
+
+        int cx = x, cz = z;
+        int nidx_x = 1, nidx_z = 1;
+
+        if (x < 0) { nidx_x = 0; cx += W; }
+        else if (x >= W) { nidx_x = 2; cx -= W; }
+
+        if (z < 0) { nidx_z = 0; cz += D; }
+        else if (z >= D) { nidx_z = 2; cz -= D; }
+
+        const Chunk* neighbor = neighbors[nidx_z * 3 + nidx_x];
+        return neighbor ? neighbor->isBlockActive(cx, y, cz) : false;
+    };
+
+    constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
+        return (s1 && s2) ? 0 : (3 - (s1 + s2 + c));
+    };
+
+    const size_t vertexCount = chunk.cachedVertices.size();
+
+    for (size_t i = 0; i < vertexCount; ++i) {
+        auto& v = chunk.cachedVertices[i];
+
+        // Get vertex position in chunk space
+        int vx = static_cast<int>(v.position.x) % W;
+        int vy = static_cast<int>(v.position.y);
+        int vz = static_cast<int>(v.position.z) % D;
+
+        if (vx < 0) vx += W;
+        if (vz < 0) vz += D;
+
+        uint8_t normalIdx = v.normal;
+
+        // Use lookup table for corner detection
+        // cornerLUT maps vertex index in quad (0-3) to corner bits (x, y)
+        constexpr uint8_t cornerLUT[4] = {0, 1, 3, 2}; // (0,0), (1,0), (1,1), (0,1)
+        uint8_t corner = cornerLUT[i % 4];
+
+        bool cornerX = corner & 1;  // 0 or 1
+        bool cornerY = corner & 2;  // 0 or 2
+        bool cornerZ = corner & 1;  // For Z faces, reuse X bit
+
+        uint8_t ao = 3; // Default full brightness
+
+        if (normalIdx < 2) { // X faces (YZ plane)
+            int axq = vx + (normalIdx == 0 ? 1 : 0);
+            int py = cornerY ? vy + 1 : vy - 1;
+            int pz = cornerX ? vz + 1 : vz - 1;
+
+            ao = calcAO(
+                getBlock(axq, py, vz),           // Adjacent on Y
+                getBlock(axq, vy, pz),           // Adjacent on Z
+                getBlock(axq, py, pz)            // Corner diagonal
+            );
+        }
+        else if (normalIdx < 4) { // Y faces (XZ plane)
+            int ayq = vy + (normalIdx == 2 ? 1 : 0);
+            int px = cornerX ? vx + 1 : vx - 1;
+            int pz = cornerZ ? vz + 1 : vz - 1;
+
+            ao = calcAO(
+                getBlock(px, ayq, vz),           // Adjacent on X
+                getBlock(vx, ayq, pz),           // Adjacent on Z
+                getBlock(px, ayq, pz)            // Corner diagonal
+            );
+        }
+        else { // Z faces (XY plane)
+            int azq = vz + (normalIdx == 4 ? 1 : 0);
+            int px = cornerX ? vx + 1 : vx - 1;
+            int py = cornerY ? vy + 1 : vy - 1;
+
+            ao = calcAO(
+                getBlock(px, vy, azq),           // Adjacent on X
+                getBlock(vx, py, azq),           // Adjacent on Y
+                getBlock(px, py, azq)            // Corner diagonal
+            );
+        }
+
+        v.ao = ao;
+    }
+}
+
+void App::queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::ivec2, Chunk*>>& chunksToCalcAO, ThreadPool& threadPool)
+{
+	for (const auto& coord : chunksToCalcAO | std::views::keys) {
+		threadPool.enqueue([coord, &world]() {
+			std::lock_guard lock(world.chunk_mutex);
+			if (const auto it = world.getChunks().find(coord); it != world.getChunks().end())
+				calcChunkAO(coord, it->second, world);
+		});
+	}
 }

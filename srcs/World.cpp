@@ -11,7 +11,7 @@
 
 #include <ranges>
 
-World::World(const std::unordered_map<BlockType, uint32_t>& indices) : ubo(0), textureIndices(indices)
+World::World(std::array<uint32_t, 256>& indices) : ubo(0), textureIndices(indices)
 {
     glCreateBuffers(1, &ubo);
     glNamedBufferData(ubo, sizeof(WorldUBO), nullptr, GL_DYNAMIC_DRAW);
@@ -91,7 +91,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
     // -------- enqueue chunk generation --------
     int spawned = 0;
     for (auto& c : loadQueue) {
-        if (constexpr int MAX_CHUNKS_PER_UPDATE = 32; spawned++ >= MAX_CHUNKS_PER_UPDATE)
+        if (constexpr int MAX_CHUNKS_PER_UPDATE = 16; spawned++ >= MAX_CHUNKS_PER_UPDATE)
             break;
 
         threadPool.enqueue([this, c]
@@ -187,50 +187,25 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
     vertices.reserve(Chunk::SIZE * 4);
     indices.reserve(Chunk::SIZE * 6);
 
-    // Texture lookup
-    uint16_t blockTypeToTex[256] = {};
-    for (auto [blockType, index] : textureIndices)
-        blockTypeToTex[static_cast<int>(blockType)] = index;
-
     // Cache solidity with padding
-    bool solid[W + 2][H + 2][D + 2] = {};
+    thread_local bool solid[W + 2][H + 2][D + 2] = {};
     uint8_t blockTypes[W][H][D] = {};
 
     for (int x = 0; x < W; ++x)
         for (int y = 0; y < H; ++y)
             for (int z = 0; z < D; ++z) {
-                solid[x][y][z] = chunk.isBlockActive(x, y, z);
+                solid[x + 1][y + 1][z + 1] = chunk.isBlockActive(x, y, z);
                 blockTypes[x][y][z] = getBlockType(chunk.getVoxel(x, y, z));
             }
 
-    // Neighbor-aware solid/blockType check
-    auto getBlock = [&](int x, int y, int z) -> std::pair<bool, uint8_t> {
-        if (y < 0 || y >= H) return {false, 0};
-
-        int cx = x, cz = z;
-        glm::ivec2 chunkOffset(0);
-
-        if (x < 0) { chunkOffset.x = -1; cx += W; } else if (x >= W) { chunkOffset.x = 1; cx -= W; }
-        if (z < 0) { chunkOffset.y = -1; cz += D; } else if (z >= D) { chunkOffset.y = 1; cz -= D; }
-
-        if (chunkOffset == glm::ivec2(0)) return {solid[cx][y][cz], blockTypes[cx][y][cz]};
-
-        const auto it = chunks.find(coord + chunkOffset);
-        if (it == chunks.end()) return {false, 0};
-
-        const Chunk& neighbor = it->second;
-        bool isActive = neighbor.isBlockActive(cx, y, cz);
-        uint8_t type = isActive ? getBlockType(neighbor.getVoxel(cx, y, cz)) : 0;
-        return {isActive, type};
-    };
-
-    auto normalToIndex = [](const glm::ivec3& n) -> uint8_t {
-        if (n.x ==  1) return 0; // +X
-        if (n.x == -1) return 1; // -X
-        if (n.y ==  1) return 2; // +Y
-        if (n.y == -1) return 3; // -Y
-        if (n.z ==  1) return 4; // +Z
-        return 5;               // -Z
+    // Normal direction to index
+    auto normalToIndex = [](const int q[3]) -> uint8_t {
+        if (q[0] ==  1) return 0; // +X
+        if (q[0] == -1) return 1; // -X
+        if (q[1] ==  1) return 2; // +Y
+        if (q[1] == -1) return 3; // -Y
+        if (q[2] ==  1) return 4; // +Z
+        return 5;                 // -Z
     };
 
     // Greedy meshing
@@ -239,16 +214,23 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
             const int u = (axis + 1) % 3;
             const int v = (axis + 2) % 3;
 
-            int dims[3] = { W, H, D };
-            int x[3] = {};
-            int q[3] = {};
+            const int dims[3] = { W, H, D };
+            int x[3] = { 0, 0, 0 };
+            int q[3] = { 0, 0, 0 };
             q[axis] = dir;
 
-            struct Mask { uint8_t solid; uint8_t blockType; };
-            int maxDim = std::max({W, H, D});
-            std::vector<Mask> mask(maxDim * maxDim);
+            struct MaskEntry {
+                bool solid;
+                uint8_t blockType;
+            };
 
-            for (x[axis] = 0; x[axis] < dims[axis]; ++x[axis]) {
+            // Pre-allocate once instead of on stack
+            static thread_local std::vector<MaskEntry> maskBuffer;
+            maskBuffer.clear();
+            maskBuffer.resize(std::max({ W, H, D }) * std::max({ W, H, D }));
+            MaskEntry* mask = maskBuffer.data();
+
+            for (x[axis] = -1; x[axis] < dims[axis]; ++x[axis]) {
                 int n = 0;
 
                 // Build mask
@@ -257,90 +239,97 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
                         int cx = x[0], cy = x[1], cz = x[2];
                         int nx = cx + q[0], ny = cy + q[1], nz = cz + q[2];
 
-                        auto [curSolid, curType] = getBlock(cx, cy, cz);
-                        auto [neiSolid, neiType] = getBlock(nx, ny, nz);
+                        bool currentValid = cx >= 0 && cx < W && cy >= 0 && cy < H && cz >= 0 && cz < D;
+                        bool neighborValid = nx >= 0 && nx < W && ny >= 0 && ny < H && nz >= 0 && nz < D;
+                        bool currentSolid = currentValid && solid[cx + 1][cy + 1][cz + 1];
+                        bool neighborSolid = neighborValid && solid[nx + 1][ny + 1][nz + 1];
 
-                        bool isFace = curSolid && !neiSolid;
-                        mask[n].solid = isFace;
-                        mask[n].blockType = curType;
+                        uint8_t bt = currentValid ? blockTypes[cx][cy][cz] : 0;
+
+                        mask[n].solid = currentValid && currentSolid && !neighborSolid && bt != 0;
+                        mask[n].blockType = bt;
                         ++n;
                     }
                 }
 
-                // Greedy merge
                 n = 0;
+                uint32_t base = vertices.size();
+
+                // Greedy merge
                 for (int j = 0; j < dims[v]; ++j) {
-                    for (int i = 0; i < dims[u]; ) {
-                        if (!mask[n].solid) {
+                    for (int i = 0; i < dims[u];) {
+                        if (mask[n].solid) {
+                            int w = 1;
+                            const uint8_t blockType = mask[n].blockType;
+
+                            // Fast width merge
+                            while (i + w < dims[u] &&
+                                   mask[n + w].solid &&
+                                   mask[n + w].blockType == blockType)
+                                ++w;
+
+                            int h = 1;
+                            bool done = false;
+
+                            // Fast height merge
+                            for (; j + h < dims[v]; ++h) {
+                                for (int k = 0; k < w; ++k) {
+                                    const int idx = n + k + h * dims[u];
+                                    if (!mask[idx].solid || mask[idx].blockType != blockType) {
+                                        done = true;
+                                        break;
+                                    }
+                                }
+                                if (done) break;
+                            }
+
+                            x[u] = i;
+                            x[v] = j;
+
+                            float verts[4][3];
+                            for (auto& vert : verts) {
+                                vert[0] = static_cast<float>(x[0]);
+                                vert[1] = static_cast<float>(x[1]);
+                                vert[2] = static_cast<float>(x[2]);
+                            }
+
+                            verts[1][u] += w;
+                            verts[2][u] += w; verts[2][v] += h;
+                            verts[3][v] += h;
+
+                            if (dir > 0)
+                                for (auto& vert : verts)
+                                    vert[axis] += 1.0f;
+
+                            const uint16_t tex = textureIndices[blockType];
+                            const uint8_t normalIndex = normalToIndex(q);
+                            constexpr uint8_t AO_MAX = 3;
+
+                            // Batch push vertices (4 at once instead of individually)
+                            vertices.push_back({{verts[0][0], verts[0][1], verts[0][2]}, {0, 0}, tex, normalIndex, AO_MAX});
+                            vertices.push_back({{verts[1][0], verts[1][1], verts[1][2]}, {float(w), 0}, tex, normalIndex, AO_MAX});
+                            vertices.push_back({{verts[2][0], verts[2][1], verts[2][2]}, {float(w), float(h)}, tex, normalIndex, AO_MAX});
+                            vertices.push_back({{verts[3][0], verts[3][1], verts[3][2]}, {0, float(h)}, tex, normalIndex, AO_MAX});
+
+                            if (dir > 0)
+                                indices.insert(indices.end(),
+                                    { base, base + 1, base + 2, base, base + 2, base + 3 });
+                            else
+                                indices.insert(indices.end(),
+                                    { base, base + 3, base + 2, base, base + 2, base + 1 });
+
+                            // Mark merged quads as processed
+                            for (int l = 0; l < h; ++l)
+                                for (int k = 0; k < w; ++k)
+                                    mask[n + k + l * dims[u]].solid = false;
+
+                            base += 4;
+                            i += w;
+                            n += w;
+                        } else {
                             ++i;
                             ++n;
-                            continue;
                         }
-
-                        int w = 1;
-                        while (i + w < dims[u] &&
-                               mask[n + w].solid &&
-                               mask[n + w].blockType == mask[n].blockType) ++w;
-
-                        int h = 1;
-                        bool canExtend = true;
-                        for (; j + h < dims[v] && canExtend; ++h) {
-                            for (int k = 0; k < w; ++k) {
-                                int idx = n + k + h * dims[u];
-                                if (!mask[idx].solid || mask[idx].blockType != mask[n].blockType) {
-                                    canExtend = false;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!canExtend) --h; // Undo the last increment
-
-                        x[u] = i;
-                        x[v] = j;
-
-                        float verts[4][3] = {};
-                        for (auto & vert : verts)
-                            vert[0] = float(x[0]), vert[1] = float(x[1]), vert[2] = float(x[2]);
-
-                        verts[1][u] += w;
-                        verts[2][u] += w; verts[2][v] += h;
-                        verts[3][v] += h;
-
-                        if (dir > 0) for (auto& vtx : verts) vtx[axis] += 1.0f;
-
-                        constexpr uint8_t AO_BYTE = 3; // max AO
-
-                        const uint16_t tex = blockTypeToTex[mask[n].blockType];
-                        const uint8_t normalIndex = normalToIndex({q[0], q[1], q[2]});
-                        const uint32_t base = vertices.size();
-
-                        // if (dir > 0) {
-                            vertices.push_back({ {verts[0][0],verts[0][1],verts[0][2]}, {0,         0}, tex, normalIndex, AO_BYTE});
-                            vertices.push_back({ {verts[1][0],verts[1][1],verts[1][2]}, {float(w),       0}, tex, normalIndex, AO_BYTE});
-                            vertices.push_back({ {verts[2][0],verts[2][1],verts[2][2]}, {float(w), float(h)}, tex, normalIndex, AO_BYTE});
-                            vertices.push_back({ {verts[3][0],verts[3][1],verts[3][2]}, {0,       float(h)}, tex, normalIndex, AO_BYTE});
-                        // } else {
-                        //     // flip U to match flipped winding
-                        //     vertices.push_back({ {verts[0][0],verts[0][1],verts[0][2]}, {1,       0}, tex, normalIndex, AO_BYTE});
-                        //     vertices.push_back({ {verts[1][0],verts[1][1],verts[1][2]}, {0,         0}, tex, normalIndex, AO_BYTE});
-                        //     vertices.push_back({ {verts[2][0],verts[2][1],verts[2][2]}, {0,       1}, tex, normalIndex, AO_BYTE});
-                        //     vertices.push_back({ {verts[3][0],verts[3][1],verts[3][2]}, {1, 1}, tex, normalIndex, AO_BYTE});
-                        // }
-
-
-                        if (dir > 0)
-                            chunk.cachedIndices.insert(chunk.cachedIndices.end(),
-                                { base, base + 1, base + 2, base, base + 2, base + 3 });
-                        else
-                            chunk.cachedIndices.insert(chunk.cachedIndices.end(),
-                                { base, base + 3, base + 2, base, base + 2, base + 1 });
-
-                        for (int l = 0; l < h; ++l)
-                            for (int k = 0; k < w; ++k)
-                                mask[n + k + l * dims[u]].solid = false;
-
-                        i += w;
-                        n += w;
                     }
                 }
             }
@@ -349,7 +338,7 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord) const
 
     // Apply chunk offset
     const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
-    for (auto& v : chunk.cachedVertices) v.position += offset;
+    for (auto& v : vertices) v.position += offset;
 
     chunk.isMeshDirty = false;
 }

@@ -17,13 +17,15 @@ class App : public Engine
 
 		bool	_showWireframe;
 		GLuint textureArray;
-		std::unordered_map<BlockType, GLuint> textureIndices;
+		std::array<GLuint, 256> textureIndices;
 
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();
 		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) const;
 
+		static void	queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::ivec2, Chunk*>>& chunksToCalcAO, ThreadPool& threadPool);
+		static void calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world);
 		static void	uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data);
 };
 
