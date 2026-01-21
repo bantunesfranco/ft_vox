@@ -37,7 +37,6 @@ int main()
 		return (EXIT_FAILURE);
 	
 	app->run();
-	app->terminate();
 
 	return (EXIT_SUCCESS);
 }

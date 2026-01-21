@@ -83,7 +83,7 @@ struct WorldUBO {
 // Define the world as a collection of chunks
 class World {
 	public:
-		constexpr static int CHUNK_RADIUS = 12;
+		constexpr static int CHUNK_RADIUS = 16;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		Frustum frustum{};

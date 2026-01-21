@@ -91,7 +91,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
     // -------- enqueue chunk generation --------
     int spawned = 0;
     for (auto& c : loadQueue) {
-        if (constexpr int MAX_CHUNKS_PER_UPDATE = 16; spawned++ >= MAX_CHUNKS_PER_UPDATE)
+        if (constexpr int MAX_CHUNKS_PER_UPDATE = 8; spawned++ >= MAX_CHUNKS_PER_UPDATE)
             break;
 
         threadPool.enqueue([this, c]
@@ -195,23 +195,20 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
 
     // Cache solidity with padding
     thread_local bool solid[W + 2][H + 2][D + 2] = {};
-    uint8_t blockTypes[W][H][D] = {};
+    thread_local uint8_t blockTypes[W][H][D] = {};
 
-    for (int x = 0; x < W; ++x)
-        for (int y = 0; y < H; ++y)
+    for (int x = 0; x < W; ++x) {
+        for (int y = 0; y < H; ++y) {
             for (int z = 0; z < D; ++z) {
                 solid[x + 1][y + 1][z + 1] = chunk.isBlockActive(x, y, z);
                 blockTypes[x][y][z] = getBlockType(chunk.getVoxel(x, y, z));
             }
+        }
+    }
 
     // Normal direction to index
-    auto normalToIndex = [](const int q[3]) -> uint8_t {
-        if (q[0] ==  1) return 0; // +X
-        if (q[0] == -1) return 1; // -X
-        if (q[1] ==  1) return 2; // +Y
-        if (q[1] == -1) return 3; // -Y
-        if (q[2] ==  1) return 4; // +Z
-        return 5;                 // -Z
+    auto normalToIndex = [](int axis, int dir) -> uint8_t {
+        return axis * 2 + (dir < 0 ? 1 : 0);
     };
 
     // Greedy meshing
@@ -275,19 +272,16 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
                                 ++w;
 
                             int h = 1;
-                            bool done = false;
 
                             // Fast height merge
                             for (; j + h < dims[v]; ++h) {
                                 for (int k = 0; k < w; ++k) {
                                     const int idx = n + k + h * dims[u];
-                                    if (!mask[idx].solid || mask[idx].blockType != blockType) {
-                                        done = true;
-                                        break;
-                                    }
+                                    if (!mask[idx].solid || mask[idx].blockType != blockType)
+                                        goto done_merging;
                                 }
-                                if (done) break;
                             }
+                            done_merging:
 
                             x[u] = i;
                             x[v] = j;
@@ -308,7 +302,7 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
                                     vert[axis] += 1.0f;
 
                             const uint16_t tex = textureIndices[blockType];
-                            const uint8_t normalIndex = normalToIndex(q);
+                            const uint8_t normalIndex = normalToIndex(axis, dir);
                             constexpr uint8_t AO_MAX = 3;
 
                             // Batch push vertices (4 at once instead of individually)

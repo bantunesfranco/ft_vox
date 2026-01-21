@@ -102,7 +102,7 @@ void TerrainGenerator::generateChunk(Chunk& chunk, const glm::ivec2& coord) {
                 if (temp < 0.2f) {
                     surfaceBlock = SNOW;
                     subsurfaceBlock = DIRT;
-                } else if (temp > 0.65f && humid < 0.4f) {
+                } else if (temp > 0.65f && humid < 0.5f) {
                     surfaceBlock = SAND;
                     subsurfaceBlock = SAND;
                 } else {
@@ -119,7 +119,7 @@ void TerrainGenerator::generateChunk(Chunk& chunk, const glm::ivec2& coord) {
 
             // Place top block
             if (surfaceY < Chunk::HEIGHT) {
-                if (isMountain && surfaceY > SNOW_HEIGHT + 20) {
+                if (isMountain && surfaceY > SNOW_HEIGHT) {
                     chunk.setVoxelSilent(x, surfaceY, z, SNOW);
                 } else {
                     chunk.setVoxelSilent(x, surfaceY, z, surfaceBlock);

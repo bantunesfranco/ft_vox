@@ -8,7 +8,7 @@ class App : public Engine
 {
 	public:
 		App(int32_t width, int32_t height, const char *title, std::map<settings_t, bool>& settings);
-		~App() override = default;
+		~App();
 		App(const App&) = delete;
 		App& operator=(const App&) = delete;
 
@@ -18,6 +18,7 @@ class App : public Engine
 		bool	_showWireframe;
 		GLuint textureArray;
 		std::array<GLuint, 256> textureIndices;
+		std::unique_ptr<ThreadPool> threadPool;
 
 	private:
 		void	setCallbackFunctions() const;

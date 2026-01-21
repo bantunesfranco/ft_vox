@@ -72,10 +72,13 @@ App::App(const int32_t width, const int32_t height, const char *title, std::map<
 	: Engine(width, height, title, settings) {
 
 	_showWireframe = false;
-	setCallbackFunctions();
 	setupImGui(window);
+	setCallbackFunctions();
     loadTextures();
+	threadPool = std::make_unique<ThreadPool>(8);
 }
+
+App::~App() { App::terminate(); }
 
 void App::setCallbackFunctions() const
 {
@@ -87,7 +90,6 @@ void App::setCallbackFunctions() const
 void App::run()
 {
     World world(textureIndices);
-    ThreadPool threadPool(10);
 
     float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
@@ -101,7 +103,7 @@ void App::run()
         Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
         world.updateFrustum(camera->proj, camera->view);
 
-        world.updateChunks(camera->pos, threadPool);
+        world.updateChunks(camera->pos, *threadPool);
 
         std::vector<Chunk*> visibleChunks;
         // std::vector<std::pair<glm::ivec2, Chunk*>> chunksToCalcAO;
@@ -150,20 +152,21 @@ void App::run()
         renderImGui(camera, _showWireframe, rgba, world.getChunks().size());
         glfwSwapBuffers(window);
 
-        // chunksToCalcAO.clear();
-    }
+		// chunksToCalcAO.clear();
+	}
+
+	threadPool->wait();
 }
 
 void App::terminate()
 {
-
+	threadPool.reset();
 	if (ImGui::GetCurrentContext())
 	{
 		ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
     }
-    Engine::terminate();
 }
 
 void App::loadTextures() {
