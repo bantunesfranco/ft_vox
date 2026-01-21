@@ -120,56 +120,62 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
 /* ===================== Terrain ===================== */
 
+// void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
+// {
+//     constexpr int MIN_Y = 1;
+//     constexpr int MAX_Y = Chunk::HEIGHT - 1;
+//     constexpr int BASE_HEIGHT = Chunk::HEIGHT / 8;
+//     constexpr int SNOW_HEIGHT = Chunk::HEIGHT / 4; // above this, snow
+//
+//     const int seed = 1337; // deterministic seed
+//
+//     // Precompute 2D noise for height & biome
+//     int heightMap[Chunk::WIDTH][Chunk::DEPTH];
+//     const int baseWX = coord.x * Chunk::WIDTH;
+//     const int baseWZ = coord.y * Chunk::DEPTH;
+//     for (int x = 0; x < Chunk::WIDTH; ++x) {
+//         for (int z = 0; z < Chunk::DEPTH; ++z) {
+//             const int wx = baseWX + x;
+//             const int wz = baseWZ + z;
+//
+//             const float largeHill = stb_perlin_noise3_seed(wx * 0.005f, 0.0f, wz * 0.005f, 0,0,0, seed) * 96.0f; // mountains
+//             const float smallBump = stb_perlin_noise3_seed(wx * 0.05f, 0.0f, wz * 0.05f, 0,0,0, seed) * 16.0f;   // hills & bumps
+//
+//             int height = BASE_HEIGHT + static_cast<int>(largeHill + smallBump);
+//             heightMap[x][z] = std::clamp(height, MIN_Y, MAX_Y);
+//         }
+//     }
+//
+//     static const uint32_t STONE = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Stone));
+//     static const uint32_t DIRT  = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Dirt));
+//     static const uint32_t GRASS = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Grass));
+//     static const uint32_t SNOW  = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Snow));
+//
+//     for (int x = 0; x < Chunk::WIDTH; ++x) {
+//         for (int z = 0; z < Chunk::DEPTH; ++z) {
+//             const int height = heightMap[x][z];
+//
+//             // stone
+//             int y = MIN_Y;
+//             for (; y < height - 4; ++y)
+//                 chunk.setVoxel(x, y, z, STONE);
+//
+//             // dirt
+//             for (; y < height; ++y)
+//                 chunk.setVoxel(x, y, z, DIRT);
+//
+//             // top block
+//             chunk.setVoxel(x, height, z, (height >= SNOW_HEIGHT) ? SNOW : GRASS);
+//         }
+//     }
+//
+//     chunk.isMeshDirty = true;
+// }
+
 void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
 {
-    constexpr int MIN_Y = 1;
-    constexpr int MAX_Y = Chunk::HEIGHT - 1;
-    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 8;
-    constexpr int SNOW_HEIGHT = Chunk::HEIGHT / 4; // above this, snow
-
-    const int seed = 1337; // deterministic seed
-
-    // Precompute 2D noise for height & biome
-    int heightMap[Chunk::WIDTH][Chunk::DEPTH];
-    const int baseWX = coord.x * Chunk::WIDTH;
-    const int baseWZ = coord.y * Chunk::DEPTH;
-    for (int x = 0; x < Chunk::WIDTH; ++x) {
-        for (int z = 0; z < Chunk::DEPTH; ++z) {
-            const int wx = baseWX + x;
-            const int wz = baseWZ + z;
-
-            const float largeHill = stb_perlin_noise3_seed(wx * 0.005f, 0.0f, wz * 0.005f, 0,0,0, seed) * 96.0f; // mountains
-            const float smallBump = stb_perlin_noise3_seed(wx * 0.05f, 0.0f, wz * 0.05f, 0,0,0, seed) * 16.0f;   // hills & bumps
-
-            int height = BASE_HEIGHT + static_cast<int>(largeHill + smallBump);
-            heightMap[x][z] = std::clamp(height, MIN_Y, MAX_Y);
-        }
-    }
-
-    static const uint32_t STONE = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Stone));
-    static const uint32_t DIRT  = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Dirt));
-    static const uint32_t GRASS = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Grass));
-    static const uint32_t SNOW  = packVoxelData(1,255,255,255,static_cast<uint8_t>(BlockType::Snow));
-
-    for (int x = 0; x < Chunk::WIDTH; ++x) {
-        for (int z = 0; z < Chunk::DEPTH; ++z) {
-            const int height = heightMap[x][z];
-
-            // stone
-            int y = MIN_Y;
-            for (; y < height - 4; ++y)
-                chunk.setVoxel(x, y, z, STONE);
-
-            // dirt
-            for (; y < height; ++y)
-                chunk.setVoxel(x, y, z, DIRT);
-
-            // top block
-            chunk.setVoxel(x, height, z, (height >= SNOW_HEIGHT) ? SNOW : GRASS);
-        }
-    }
-
-    chunk.isMeshDirty = true;
+    static TerrainGenerator generator;
+    generator.generateChunk(chunk, coord);
 }
 
 

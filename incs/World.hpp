@@ -4,7 +4,7 @@
 #include "defines.hpp"
 #include "ThreadPool.hpp"
 #include "Camera.hpp"
-#include "Chunk.hpp"
+#include "Terrain.hpp"
 
 #include <vector>
 #include <unordered_map>
@@ -24,15 +24,6 @@ struct std::hash<glm::ivec2>{
 typedef enum class Direction {
     Front, Back, Left, Right, Top, Bottom
 } Direction;
-
-typedef enum class BlockType {
-	Air, Grass, Dirt , Stone, Sand, Water, Snow, IronOre,
-} BlockType;
-
-typedef struct Face {
-	Vertex vertices[4]; // Four vertices for a face
-	uint32_t indices[6]; // Two triangles per face
-} Face;
 
 inline int floorDiv(const int x, const int d) {
 	int q = x / d;
@@ -92,7 +83,7 @@ struct WorldUBO {
 // Define the world as a collection of chunks
 class World {
 	public:
-		constexpr static int CHUNK_RADIUS = 16;
+		constexpr static int CHUNK_RADIUS = 12;
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		Frustum frustum{};

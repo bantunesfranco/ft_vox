@@ -31,7 +31,7 @@ void setupImGui(GLFWwindow* window)
     ImGui::StyleColorsDark();
 }
 
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4])
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], size_t chunkCount)
 {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -42,6 +42,7 @@ void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, floa
     ImGui::Begin("Debug Window");
     ImGui::Text("FPS: %i", FPSCounter::getFPS());
     ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)", camera->pos[0], camera->pos[1], camera->pos[2]);
+    ImGui::Text("Chunk count: %zu", chunkCount);
     ImGui::Checkbox("Wireframe", &showWireframe);
     ImGui::ColorEdit4("Color", rgba);
     ImGui::End();

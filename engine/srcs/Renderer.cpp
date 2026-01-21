@@ -162,7 +162,7 @@ void Renderer::initProjectionMatrix(const GLFWwindow* window, const std::unique_
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     camera->view = glm::lookAt(camera->pos, camera->pos + camera->dir, camera->up);
-    camera->proj = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 256.0f);
+    camera->proj = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 512.0f);
     mvp = camera->proj * camera->view * glm::mat4(1.0f);
 }
 

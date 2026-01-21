@@ -35,7 +35,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 
 void setupImGui(GLFWwindow* window);
 // void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe);
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4]);
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], size_t chunkCount);
 
 
 

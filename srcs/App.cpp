@@ -86,8 +86,8 @@ void App::setCallbackFunctions() const
 
 void App::run()
 {
-    ThreadPool threadPool(10);
     World world(textureIndices);
+    ThreadPool threadPool(10);
 
     float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
@@ -147,7 +147,7 @@ void App::run()
             renderChunk(*chunk, world.worldUBO, world.ubo);
         }
 
-        renderImGui(camera, _showWireframe, rgba);
+        renderImGui(camera, _showWireframe, rgba, world.getChunks().size());
         glfwSwapBuffers(window);
 
         // chunksToCalcAO.clear();
@@ -186,6 +186,7 @@ void App::loadTextures() {
         textureIndices[static_cast<int>(BlockType::Grass)] = 0;
         textureIndices[static_cast<int>(BlockType::Dirt)] = 1;
         textureIndices[static_cast<int>(BlockType::Stone)] = 2;
+    	textureIndices[static_cast<int>(BlockType::Sand)] = 3;
     	textureIndices[static_cast<int>(BlockType::IronOre)] = 4;
     	textureIndices[static_cast<int>(BlockType::Snow)] = 5;
 

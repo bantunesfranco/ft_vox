@@ -4,6 +4,8 @@
 #include "defines.hpp"
 #include "Voxel.hpp"
 
+#include <atomic>
+
 // Define a chunk as a 1D vector of voxels
 class Chunk {
 public:
@@ -19,11 +21,19 @@ public:
     Chunk(const Chunk&);
     Chunk& operator=(const Chunk&);
 
+    void markMeshDirty() { isMeshDirty = true; }
+
     void setVoxel(const int x, const int y, const int z, const Voxel voxel) {
         if (static_cast<unsigned>(x) >= WIDTH || static_cast<unsigned>(y) >= HEIGHT || static_cast<unsigned>(z) >= DEPTH)
             return;
         voxels[x + y * WIDTH + z * WIDTH * HEIGHT] = voxel;
         isMeshDirty = true;
+    }
+
+    void setVoxelSilent(const int x, const int y, const int z, const Voxel voxel) {
+        if (static_cast<unsigned>(x) >= WIDTH || static_cast<unsigned>(y) >= HEIGHT || static_cast<unsigned>(z) >= DEPTH)
+            return;
+        voxels[x + y * WIDTH + z * WIDTH * HEIGHT] = voxel;
     }
 
     [[nodiscard]] Voxel getVoxel(const int x, const int y, const int z) const {
@@ -40,7 +50,7 @@ public:
 
     // Define the dimensions of a chunk
     static constexpr uint8_t WIDTH = 16;
-    static constexpr uint16_t HEIGHT = 128;
+    static constexpr uint16_t HEIGHT = 256;
     static constexpr uint8_t DEPTH = 16;
     static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
