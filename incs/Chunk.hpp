@@ -56,7 +56,7 @@ public:
 
     std::vector<Vertex> cachedVertices;
     std::vector<uint32_t> cachedIndices;
-    bool isMeshDirty = true;
+    bool isMeshDirty = false;
     std::atomic<bool> aoCalculated = false;
     glm::vec3 worldMax{};
     glm::vec3 worldMin{};

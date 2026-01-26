@@ -31,7 +31,7 @@ void setupImGui(GLFWwindow* window)
     ImGui::StyleColorsDark();
 }
 
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], size_t chunkCount)
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], const size_t chunkCount)
 {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -41,7 +41,18 @@ void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, floa
     ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::Begin("Debug Window");
     ImGui::Text("FPS: %i", FPSCounter::getFPS());
-    ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)", camera->pos[0], camera->pos[1], camera->pos[2]);
+    ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)", camera->pos.x, camera->pos.y, camera->pos.z);
+    ImGui::Text("Current Camera Direction: (%.2f, %.2f, %.2f)", camera->dir.x, camera->dir.y, camera->dir.z);
+
+    // Draw crosshair at screen center
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    const ImVec2 center = ImGui::GetIO().DisplaySize * 0.5f;
+    constexpr float crosshairSize = 10.0f;
+    const ImU32 whiteColor = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+    drawList->AddLine(ImVec2(center.x - crosshairSize, center.y), ImVec2(center.x + crosshairSize, center.y), whiteColor, 2.0f);
+    drawList->AddLine(ImVec2(center.x, center.y - crosshairSize), ImVec2(center.x, center.y + crosshairSize), whiteColor, 2.0f);
+
     ImGui::Text("Chunk count: %zu", chunkCount);
     ImGui::Checkbox("Wireframe", &showWireframe);
     ImGui::ColorEdit4("Color", rgba);

@@ -13,6 +13,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+inline bool operator<(const glm::ivec2& a, const glm::ivec2& b) noexcept {
+	if (a.x != b.x) return a.x < b.x;
+	return a.y < b.y;
+}
+
 template <>
 struct std::hash<glm::ivec2>{
 	std::size_t operator()(const glm::ivec2& coord) const noexcept
@@ -88,10 +93,10 @@ class World {
 
 		Frustum frustum{};
 		std::mutex chunk_mutex;
-		WorldUBO worldUBO;
+		WorldUBO worldUBO{};
 		GLuint ubo;
 
-		World(std::array<GLuint, 256>& indices);
+		World(std::array<uint32_t, 256>& indices);
 		~World() = default;
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
@@ -109,7 +114,7 @@ class World {
 
 	private:
 		glm::ivec2 playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
-		std::array<GLuint, 256>& textureIndices;
+		std::array<uint32_t, 256>& textureIndices;
 		std::unordered_map<glm::ivec2, Chunk> chunks;
 
 };

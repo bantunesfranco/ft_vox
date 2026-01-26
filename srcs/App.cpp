@@ -69,28 +69,31 @@ static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& ca
 }
 
 App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings)
-	: Engine(width, height, title, settings) {
-
+	: Engine(width, height, title, settings), textureIndices(), world(textureIndices)
+{
 	_showWireframe = false;
 	setupImGui(window);
 	setCallbackFunctions();
-    loadTextures();
+	loadTextures();
 	threadPool = std::make_unique<ThreadPool>(8);
 }
 
-App::~App() { App::terminate(); }
+App::~App()
+{
+	cleanupHighlightCube();
+	App::terminate();
+}
 
 void App::setCallbackFunctions() const
 {
 	setErrorCallback(error_callback);
 	setKeyCallback(key_callback);
-	setCursorPosCallback(mouse_callback);
+	setCursorPosCallback(cursor_callback);
+	setMouseButtonCallback(mouse_bttn_callback);
 }
 
 void App::run()
 {
-    World world(textureIndices);
-
     float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
 
     while (windowIsOpen(window))
@@ -105,34 +108,28 @@ void App::run()
 
         world.updateChunks(camera->pos, *threadPool);
 
-        std::vector<Chunk*> visibleChunks;
-        // std::vector<std::pair<glm::ivec2, Chunk*>> chunksToCalcAO;
+    	updateBlockHighlight();
 
+        std::vector<Chunk*> visibleChunks;
         {
             std::lock_guard lock(world.chunk_mutex);
             auto& chunks = world.getChunks();
             visibleChunks.reserve(chunks.size());
 
             for (auto& [coord, chunk] : chunks) {
-                if (chunk.cachedVertices.empty())
-                    continue;
                 if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
                     continue;
 
-                // Queue AO calculation if not already done
-                // if (!chunk.aoCalculated) {
-                //     chunksToCalcAO.emplace_back(coord, &chunk);
-                //     chunk.aoCalculated = true;
-                // }
+                if (!chunk.cachedVertices.empty())
+                    uploadChunk(chunk, chunk.renderData);
+;
+            	if (!chunk.aoCalculated) {
+            		calcChunkAO(coord, chunk, world);  // Direct call, no threading
+            		chunk.aoCalculated = true;
+            	}
 
-            	// for (auto& [coord, chunk] : chunks) {
-            		if (!chunk.aoCalculated) {
-            			calcChunkAO(coord, chunk, world);  // Direct call, no threading
-            			chunk.aoCalculated = true;
-            		}
-            	// }
-
-                visibleChunks.push_back(&chunk);
+            	if (chunk.renderData.vao != 0)
+            		visibleChunks.push_back(&chunk);
             }
         }
 
@@ -145,14 +142,13 @@ void App::run()
             });
 
         for (const auto& chunk : visibleChunks) {
-            uploadChunk(*chunk, chunk->renderData);
             renderChunk(*chunk, world.worldUBO, world.ubo);
         }
 
+    	renderBlockHighlight();
         renderImGui(camera, _showWireframe, rgba, world.getChunks().size());
         glfwSwapBuffers(window);
 
-		// chunksToCalcAO.clear();
 	}
 
 	threadPool->wait();
@@ -217,11 +213,11 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 
 	glBindBuffer(GL_ARRAY_BUFFER, data.vbo);
 	glBufferData(GL_ARRAY_BUFFER, chunk.cachedVertices.size() * sizeof(Vertex),
-				 chunk.cachedVertices.data(), GL_STATIC_DRAW);
+				 chunk.cachedVertices.data(), GL_DYNAMIC_DRAW );
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data.ibo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indexCount * sizeof(uint32_t),
-				 chunk.cachedIndices.data(), GL_STATIC_DRAW);
+				 chunk.cachedIndices.data(), GL_DYNAMIC_DRAW );
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
@@ -241,13 +237,15 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 
 	glEnableVertexAttribArray(4);
 	glVertexAttribIPointer(4, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
-		(void*)offsetof(Vertex, ao));
+		reinterpret_cast<void*>(offsetof(Vertex, ao)));
 
 	glBindVertexArray(0);
 }
 
 void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo) const
 {
+	if (chunk.renderData.vao == 0 || chunk.renderData.indexCount == 0) return;
+
 	glUseProgram(renderer->getShaderProgram());
 	glBindVertexArray(chunk.renderData.vao);
 
@@ -257,6 +255,35 @@ void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint
 
 	glBindTextureUnit(0, renderer->getTextureArray());
 	glDrawElements(GL_TRIANGLES, chunk.renderData.indexCount, GL_UNSIGNED_INT, nullptr);
+}
+
+void App::destroyBlock()
+{
+	if (!camera) return;
+
+	// Get camera position and direction
+	const glm::vec3 rayOrigin = camera->pos;
+	const glm::vec3 rayDirection = camera->dir;
+
+	// Attempt to destroy block
+	blockSystem.destroyBlock(rayOrigin, rayDirection, world);
+
+}
+
+void App::placeBlock()
+{
+	if (!camera) return;
+
+	// Get camera position and direction
+	const glm::vec3 rayOrigin = camera->pos;
+	const glm::vec3 rayDirection = camera->dir;
+
+	// Attempt to place stone block (change voxel value as needed)
+	constexpr Voxel STONE_BLOCK = 1; // Adjust to match your block types
+
+	if (blockSystem.placeBlock(rayOrigin, rayDirection, world, STONE_BLOCK)) {
+		std::cout << "Block placed!" << std::endl;
+	}
 }
 
 void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
@@ -367,4 +394,110 @@ void App::queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::iv
 				calcChunkAO(coord, it->second, world);
 		});
 	}
+}
+
+void App::setupHighlightCube()
+{
+	// Define cube vertices (1x1x1)
+	float vertices[] = {
+		// Bottom face
+		0.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 0.0f,
+		1.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+
+		// Top face
+		0.0f, 1.0f, 0.0f,
+		1.0f, 1.0f, 0.0f,
+		1.0f, 1.0f, 1.0f,
+		0.0f, 1.0f, 1.0f,
+	};
+
+	// Only wireframe edges for top, bottom, and front faces
+	uint32_t indices[] = {
+		0, 1, 1, 2, 2, 3, 3, 0,  // Bottom face edges
+		4, 5, 5, 6, 6, 7, 7, 4,  // Top face edges
+		0, 4, 1, 5               // Front face vertical edges
+	};
+
+	highlightedBlock = {glm::vec3(0.f), 0, 0, 0, false};
+
+	glGenVertexArrays(1, &highlightedBlock.highlightVAO);
+	glGenBuffers(1, &highlightedBlock.highlightVBO);
+	glGenBuffers(1, &highlightedBlock.highlightIBO);
+
+	glBindVertexArray(highlightedBlock.highlightVAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, highlightedBlock.highlightVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, highlightedBlock.highlightIBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+	// Position attribute ONLY
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+	glEnableVertexAttribArray(0);
+
+	// Disable other attributes for this VAO
+	glDisableVertexAttribArray(1);
+	glDisableVertexAttribArray(2);
+	glDisableVertexAttribArray(3);
+	glDisableVertexAttribArray(4);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
+}
+
+void App::cleanupHighlightCube()
+{
+    if (highlightedBlock.highlightVAO) {
+        glDeleteVertexArrays(1, &highlightedBlock.highlightVAO);
+        glDeleteBuffers(1, &highlightedBlock.highlightVBO);
+        glDeleteBuffers(1, &highlightedBlock.highlightIBO);
+        highlightedBlock.highlightVAO = 0;
+    }
+}
+
+void App::updateBlockHighlight()
+{
+    if (!camera) return;
+
+	RaycastHit hit = blockSystem.raycastBlocks(camera->pos, camera->dir, world);
+    if (hit.isValid) {
+        highlightedBlock.highlightedBlockPos = hit.blockPos;
+        highlightedBlock.isHighlighted = true;
+    } else {
+        highlightedBlock.isHighlighted = false;
+    }
+}
+
+void App::renderBlockHighlight()
+{
+    if (!highlightedBlock.isHighlighted || highlightedBlock.highlightVAO == 0)
+        return;
+
+    // Set up model matrix
+    const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(highlightedBlock.highlightedBlockPos));
+	world.worldUBO.MVP = camera->proj * camera->view * model;
+
+    // Bind VAO
+    glBindVertexArray(highlightedBlock.highlightVAO);
+
+    // Draw wireframe edges only
+    glLineWidth(5.0f);
+
+	glUseProgram(renderer->getShaderProgram());
+
+	glBindBuffer(GL_UNIFORM_BUFFER, world.ubo);
+	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &world.worldUBO);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	glBindTextureUnit(0, renderer->getTextureArray());
+
+	glDisable(GL_DEPTH_TEST);
+	glDrawElements(GL_LINES, 20, GL_UNSIGNED_INT, nullptr);
+	glEnable(GL_DEPTH_TEST);
+
+    glLineWidth(1.0f);
+    glBindVertexArray(0);
 }

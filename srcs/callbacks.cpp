@@ -11,7 +11,7 @@ void error_callback(int error, const char* description)
     fprintf(stderr, "Error: %s\n", description);
 }
 
-void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+void cursor_callback(GLFWwindow* window, double xpos, double ypos)
 {
     static double lastX = 0.0f;
     static double lastY = 0.0f;
@@ -64,5 +64,23 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         static bool mouseMode = false;
         glfwSetInputMode(window, GLFW_CURSOR, mouseMode? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
         mouseMode = !mouseMode;
+    }
+}
+
+void mouse_bttn_callback(GLFWwindow* window, int button, int action, int mods)
+{
+    (void)mods;
+
+    const auto app = static_cast<App*>(glfwGetWindowUserPointer(window));
+
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        if (button == GLFW_MOUSE_BUTTON_LEFT) {
+            // Destroy block
+            app->destroyBlock();
+        }
+        else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+            // Place block
+            app->placeBlock();
+        }
     }
 }
