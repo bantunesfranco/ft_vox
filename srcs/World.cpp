@@ -52,61 +52,33 @@ void World::updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat)
 }
 
 /* ===================== Chunk Streaming ===================== */
-void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
-    const glm::ivec2 newChunk(
+void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
+{
+    playerChunk = {
         floorDiv(static_cast<int>(playerPos.x), Chunk::WIDTH),
         floorDiv(static_cast<int>(playerPos.z), Chunk::DEPTH)
-    );
+    };
 
-    playerChunk = newChunk;
-
-    std::vector<glm::ivec2> loadQueue;
-    std::vector<glm::ivec2> unloadQueue;
-    std::vector<glm::ivec2> regenQueue;
-    loadQueue.reserve(CHUNK_DIAMETER * CHUNK_DIAMETER);
-    unloadQueue.reserve(chunks.size());
-    regenQueue.reserve(chunks.size());
-
-    // -------- generate spiral load order --------
-    for (int r = 0; r <= CHUNK_RADIUS; ++r) {
-        for (int dx = -r; dx <= r; ++dx) {
-            for (int dz = -r; dz <= r; ++dz) {
-                if (std::abs(dx) != r && std::abs(dz) != r)
-                    continue;
-
-                {
-                    std::lock_guard lock(chunk_mutex);
-                    if (glm::ivec2 c = playerChunk + glm::ivec2(dx, dz); !chunks.contains(c))
-                        loadQueue.push_back(c);
-                }
-            }
-        }
-    }
-
-    // -------- unload far chunks / enqueue chunk regen --------
+    // =========================================================
+    // LOAD CHUNKS
+    // =========================================================
+    forEachChunkSpiral(playerChunk, CHUNK_RADIUS, [&](ChunkCoord c)
     {
-        std::lock_guard lock(chunk_mutex);
-        for (const auto& [coord, chunk] : chunks) {
-            if (glm::distance(glm::vec2(coord), glm::vec2(playerChunk)) > CHUNK_RADIUS + 1)
-                unloadQueue.push_back(coord);
-            if (chunk.isMeshDirty) {
-                std::cout << "Adding to regen queue: " << coord.x << ", " << coord.y << std::endl;
-                regenQueue.push_back(coord);
-            }
-        }
-    }
+        {
+            std::lock_guard lock(state_mutex);
+            auto& state = chunkStates[c];
+            if (state != ChunkState::Unloaded)
+                return;
 
-    // -------- enqueue chunk generation --------
-    int spawned = 0;
-    for (auto& c : loadQueue) {
-        if (constexpr int MAX_CHUNKS_PER_UPDATE = 8; spawned++ >= MAX_CHUNKS_PER_UPDATE)
-            break;
+            state = ChunkState::Loading;
+        }
 
         threadPool.enqueue([this, c]
         {
             Chunk chunk;
             chunk.worldMin = {c.x * Chunk::WIDTH, 0.0f, c.y * Chunk::DEPTH};
-            chunk.worldMax = chunk.worldMin + glm::vec3(Chunk::WIDTH,Chunk::HEIGHT,Chunk::DEPTH);
+            chunk.worldMax = chunk.worldMin +
+                glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
 
             generateTerrain(chunk, c);
             generateChunkGreedyMesh(chunk, c);
@@ -115,56 +87,100 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                 std::lock_guard lock(chunk_mutex);
                 chunks.emplace(c, std::move(chunk));
             }
-        });
-    }
-
-    // -------- enqueue chunk regeneration --------
-    spawned = 0;
-    for (auto& c : regenQueue) {
-        if (constexpr int MAX_CHUNKS_PER_UPDATE = 8; spawned++ >= MAX_CHUNKS_PER_UPDATE)
-            break;
-
-        {
-            std::lock_guard lock(chunk_mutex);
-            chunks.at(c).isMeshDirty = false;
-        }
-
-        threadPool.enqueue([this, c]
-        {
-            Chunk chunk;
             {
-                std::lock_guard lock(chunk_mutex);
-                chunk = chunks.at(c); // copy existing chunk
-            }
-
-            generateChunkGreedyMesh(chunk, c);
-
-            {
-                std::lock_guard lock(chunk_mutex);
-                auto& existingChunk = chunks.at(c);
-                existingChunk.cachedIndices = std::move(chunk.cachedIndices);
-                existingChunk.cachedVertices = std::move(chunk.cachedVertices);
+                std::lock_guard lock(state_mutex);
+                chunkStates[c] = ChunkState::Loaded;
             }
         });
-    }
+    });
 
-    // -------- erase unloaded chunks --------
+    // =========================================================
+    // REGENERATE DIRTY CHUNKS
+    // =========================================================
     {
-        std::lock_guard lock(chunk_mutex);
-        for (auto& c : unloadQueue)
-            chunks.erase(c);
+        std::lock_guard stateLock(state_mutex);
+
+        for (auto& [c, state] : chunkStates) {
+            if (state != ChunkState::Loaded)
+                continue;
+
+            bool dirty = false;
+            {
+                std::lock_guard chunkLock(chunk_mutex);
+                dirty = chunks.at(c).isMeshDirty;
+            }
+
+            if (!dirty)
+                continue;
+
+            state = ChunkState::Meshing;
+
+            threadPool.enqueue([this, c]
+            {
+                Chunk copy;
+                {
+                    std::lock_guard lock(chunk_mutex);
+                    copy = chunks.at(c);
+                }
+
+                generateChunkGreedyMesh(copy, c);
+
+                {
+                    std::lock_guard lock(chunk_mutex);
+                    auto& dst = chunks.at(c);
+                    dst.cachedVertices = std::move(copy.cachedVertices);
+                    dst.cachedIndices  = std::move(copy.cachedIndices);
+                    dst.isMeshDirty = false;
+                }
+                {
+                    std::lock_guard lock(state_mutex);
+                    chunkStates[c] = ChunkState::Loaded;
+                }
+            });
+        }
+    }
+
+    // =========================================================
+    // UNLOAD FAR CHUNKS
+    // =========================================================
+    {
+        std::lock_guard stateLock(state_mutex);
+
+        for (auto& [c, state] : chunkStates) {
+            if (state != ChunkState::Loaded)
+                continue;
+
+            if (glm::distance(glm::vec2(c), glm::vec2(playerChunk))
+                <= CHUNK_RADIUS + 1)
+                continue;
+
+            state = ChunkState::Unloading;
+
+            threadPool.enqueue([this, c]
+            {
+                {
+                    std::lock_guard lock(chunk_mutex);
+                    chunks.erase(c);
+                }
+                {
+                    std::lock_guard lock(state_mutex);
+                    chunkStates[c] = ChunkState::Unloaded;
+                }
+            });
+        }
     }
 }
 
+
 /* ===================== Terrain ===================== */
-void World::generateTerrain(Chunk& chunk, const glm::ivec2& coord)
+void World::generateTerrain(Chunk& chunk, const ChunkCoord& coord)
 {
     static TerrainGenerator generator;
     generator.generateChunk(chunk, coord);
 }
 
 /* ===================== Greedy Meshing ===================== */
-void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
+void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
 {
     std::cout << "REGENERATING MESH for chunk (" << coord.x << ", " << coord.y << ")" << std::endl;
 
@@ -334,7 +350,7 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord)
         for (int dz = -1; dz <= 1; ++dz) {
             for (int dx = -1; dx <= 1; ++dx) {
                 if (dx == 0 && dz == 0) continue;
-                if (auto it = chunks.find(coord + glm::ivec2(dx, dz)); it != chunks.end())
+                if (auto it = chunks.find(coord + ChunkCoord(dx, dz)); it != chunks.end())
                     it->second.aoCalculated = false;
             }
         }

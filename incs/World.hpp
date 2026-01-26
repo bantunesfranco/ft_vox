@@ -13,14 +13,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-inline bool operator<(const glm::ivec2& a, const glm::ivec2& b) noexcept {
+using ChunkCoord = glm::ivec2;
+
+inline bool operator<(const ChunkCoord& a, const ChunkCoord& b) noexcept {
 	if (a.x != b.x) return a.x < b.x;
 	return a.y < b.y;
 }
 
 template <>
-struct std::hash<glm::ivec2>{
-	std::size_t operator()(const glm::ivec2& coord) const noexcept
+struct std::hash<ChunkCoord>{
+	std::size_t operator()(const ChunkCoord& coord) const noexcept
 	{
 		return hash<int>()(coord.x) ^ (hash<int>()(coord.y) << 1);
 	}
@@ -79,6 +81,14 @@ class Frustum {
 
 constexpr int MAX_FACES = Chunk::WIDTH * Chunk::HEIGHT * Chunk::DEPTH * 6;
 
+enum class ChunkState : uint8_t {
+	Unloaded,
+	Loading,
+	Loaded,
+	Meshing,
+	Unloading
+};
+
 struct WorldUBO {
 	glm::mat4 MVP;
 	glm::vec4 light;       // xyz = pos, w = radius
@@ -92,9 +102,11 @@ class World {
 		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 
 		Frustum frustum{};
-		std::mutex chunk_mutex;
 		WorldUBO worldUBO{};
 		GLuint ubo;
+
+		std::mutex chunk_mutex;
+		std::mutex state_mutex;
 
 		World(std::array<uint32_t, 256>& indices);
 		~World() = default;
@@ -102,21 +114,39 @@ class World {
 		World& operator=(const World&) = delete;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		// void generateChunkMesh(Chunk& chunk, const glm::ivec2& coord) const;
-		void generateChunkGreedyMesh(Chunk& chunk, const glm::ivec2& coord);
+		// void generateChunkMesh(Chunk& chunk, const ChunkCoord& coord) const;
+		void generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord);
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
 		bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const;
 		void updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat);
-		std::unordered_map<glm::ivec2, Chunk>& getChunks() { return chunks; }
-		const std::unordered_map<glm::ivec2, Chunk>& getChunks() const { return chunks; }
+		std::unordered_map<ChunkCoord, Chunk>& getChunks() { return chunks; }
+		const std::unordered_map<ChunkCoord, Chunk>& getChunks() const { return chunks; }
 
-		static void generateTerrain(Chunk& chunk, const glm::ivec2& coord);
+		static void generateTerrain(Chunk& chunk, const ChunkCoord& coord);
 
 	private:
-		glm::ivec2 playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
+		ChunkCoord playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
 		std::array<uint32_t, 256>& textureIndices;
-		std::unordered_map<glm::ivec2, Chunk> chunks;
+		std::unordered_map<ChunkCoord, Chunk> chunks;
+		std::unordered_map<ChunkCoord, std::atomic<ChunkState>> chunkStates;
 
 };
+
+template<typename F>
+void forEachChunkSpiral(const ChunkCoord& center, const int radius, F&& fn)
+{
+	for (int r = 0; r <= radius; ++r) {
+		for (int dx = -r; dx <= r; ++dx) {
+			for (int dz = -r; dz <= r; ++dz) {
+				if (std::abs(dx) != r && std::abs(dz) != r)
+					continue;
+				if (glm::length(glm::vec2(dx, dz)) > radius + 1)
+					continue;
+				fn(center + ChunkCoord(dx, dz));
+			}
+		}
+	}
+}
+
 
 #endif
