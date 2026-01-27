@@ -8,7 +8,15 @@
 #include <unordered_map>
 
 typedef enum class BlockType {
-	Air, Grass, Dirt , Stone, Sand, Water, Snow, IronOre,
+	Air,
+	Grass,
+	Dirt ,
+	Stone,
+	Sand,
+	Water,
+	Snow,
+	IronOre,
+	Amethyst,
 } BlockType;
 
 struct NoiseCache {

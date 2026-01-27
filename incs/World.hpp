@@ -121,6 +121,8 @@ class World {
 		void updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat);
 		std::unordered_map<ChunkCoord, Chunk>& getChunks() { return chunks; }
 		const std::unordered_map<ChunkCoord, Chunk>& getChunks() const { return chunks; }
+		std::unordered_map<ChunkCoord, std::atomic<ChunkState>>& getChunkStates() { return chunkStates; }
+		const std::unordered_map<ChunkCoord, std::atomic<ChunkState>>& getChunkStates() const { return chunkStates; }
 
 		static void generateTerrain(Chunk& chunk, const ChunkCoord& coord);
 

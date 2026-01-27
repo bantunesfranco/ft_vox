@@ -55,7 +55,7 @@ void BlockSystem::setVoxelInWorld(const glm::ivec3& worldPos, const Voxel voxel,
 {
     const int chunkX = floorDiv(worldPos.x, Chunk::WIDTH);
     const int chunkZ = floorDiv(worldPos.z, Chunk::DEPTH);
-    const glm::ivec2 key(chunkX, chunkZ);
+    const ChunkCoord key(chunkX, chunkZ);
 
     const int localX = ((worldPos.x % Chunk::WIDTH) + Chunk::WIDTH) % Chunk::WIDTH;
     const int localZ = ((worldPos.z % Chunk::DEPTH) + Chunk::DEPTH) % Chunk::DEPTH;
@@ -71,15 +71,15 @@ void BlockSystem::setVoxelInWorld(const glm::ivec3& worldPos, const Voxel voxel,
     it->second.markMeshDirty();
 
     // Mark adjacent chunks dirty if boundary block
-    auto markDirty = [&chunks](const glm::ivec2& coord) {
+    auto markDirty = [&chunks](const ChunkCoord& coord) {
         if (const auto iter = chunks.find(coord); iter != chunks.end())
             iter->second.markMeshDirty();
     };
 
-    if (localX == 0) markDirty(glm::ivec2(chunkX - 1, chunkZ));
-    if (localX == Chunk::WIDTH - 1) markDirty(glm::ivec2(chunkX + 1, chunkZ));
-    if (localZ == 0) markDirty(glm::ivec2(chunkX, chunkZ - 1));
-    if (localZ == Chunk::DEPTH - 1) markDirty(glm::ivec2(chunkX, chunkZ + 1));
+    if (localX == 0) markDirty(ChunkCoord(chunkX - 1, chunkZ));
+    if (localX == Chunk::WIDTH - 1) markDirty(ChunkCoord(chunkX + 1, chunkZ));
+    if (localZ == 0) markDirty(ChunkCoord(chunkX, chunkZ - 1));
+    if (localZ == Chunk::DEPTH - 1) markDirty(ChunkCoord(chunkX, chunkZ + 1));
 }
 
 inline glm::ivec3 BlockSystem::getAdjacentBlockPos(const glm::ivec3& hitPos, const BlockFace face)
@@ -138,42 +138,22 @@ RaycastHit BlockSystem::raycastBlocks(const glm::vec3& rayOrigin, const glm::vec
 bool BlockSystem::placeBlock(const glm::vec3& rayOrigin, const glm::vec3& rayDirection, World& world, const Voxel blockType)
 {
     const RaycastHit hit = raycastBlocks(rayOrigin, rayDirection, world);
-    if (!hit.isValid) {
-        std::cout << "Place failed: No valid hit" << std::endl;
+    if (!hit.isValid)
         return false;
-    }
 
     const glm::ivec3 placePos = hit.adjacentPos;
 
-    std::cout << "=== PLACE BLOCK ===" << std::endl;
-    std::cout << "Hit block: (" << hit.blockPos.x << ", " << hit.blockPos.y << ", " << hit.blockPos.z << ")" << std::endl;
-    std::cout << "Hit face: " << static_cast<int>(hit.face) << std::endl;
-    std::cout << "Place position: (" << placePos.x << ", " << placePos.y << ", " << placePos.z << ")" << std::endl;
-
     // Early exits for invalid positions
-    if (placePos.y < 0 || placePos.y >= Chunk::HEIGHT) {
-        std::cout << "Place failed: Y out of bounds (" << placePos.y << ")" << std::endl;
+    if (placePos.y < 0 || placePos.y >= Chunk::HEIGHT)
         return false;
-    }
 
-    if (getVoxelFromWorld(placePos, world) != 0) {
-        std::cout << "Place failed: Block already exists at position" << std::endl;
+    if (getVoxelFromWorld(placePos, world) != 0)
         return false;
-    }
 
     // Check collision with player (use squared distance to avoid sqrt)
-    constexpr float minDistSq = 1.5f;
-    const float distSq = glm::distance2(glm::vec3(placePos), rayOrigin);
-    if (distSq < minDistSq) {
-        std::cout << "Place failed: Too close to player (distance²: " << distSq << " < " << minDistSq << ")" << std::endl;
+    if (glm::distance2(glm::vec3(placePos), rayOrigin) < 1.5f)
         return false;
-    }
 
-    const int chunkX = floorDiv(placePos.x, Chunk::WIDTH);
-    const int chunkZ = floorDiv(placePos.z, Chunk::DEPTH);
-    const glm::ivec2 chunkKey(chunkX, chunkZ);
-
-    std::cout << "Block placed at world pos, chunk: (" << chunkKey.x << ", " << chunkKey.y << ")" << std::endl;
     setVoxelInWorld(placePos, blockType, world);
     return true;
 }

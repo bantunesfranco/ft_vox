@@ -76,6 +76,7 @@ App::App(const int32_t width, const int32_t height, const char *title, std::map<
 	setCallbackFunctions();
 	loadTextures();
 	threadPool = std::make_unique<ThreadPool>(8);
+	setupHighlightCube();
 }
 
 App::~App()
@@ -124,7 +125,7 @@ void App::run()
                     uploadChunk(chunk, chunk.renderData);
 ;
             	if (!chunk.aoCalculated) {
-            		calcChunkAO(coord, chunk, world);  // Direct call, no threading
+            		calcChunkAO(coord, chunk, world);
             		chunk.aoCalculated = true;
             	}
 
@@ -175,7 +176,7 @@ void App::loadTextures() {
     		"./textures/sand.png",
     		"./textures/iron_ore.png",
     		"./textures/snow.png",
-			// "./textures/amethyst.png",
+			"./textures/amethyst.png",
 		};
 
     	int texWidth, texHeight;
@@ -188,6 +189,7 @@ void App::loadTextures() {
     	textureIndices[static_cast<int>(BlockType::Sand)] = 3;
     	textureIndices[static_cast<int>(BlockType::IronOre)] = 4;
     	textureIndices[static_cast<int>(BlockType::Snow)] = 5;
+    	textureIndices[static_cast<int>(BlockType::Amethyst)] = 6;
 
     	renderer->setTexArray(textureArray);
     }
@@ -267,7 +269,6 @@ void App::destroyBlock()
 
 	// Attempt to destroy block
 	blockSystem.destroyBlock(rayOrigin, rayDirection, world);
-
 }
 
 void App::placeBlock()
@@ -279,11 +280,8 @@ void App::placeBlock()
 	const glm::vec3 rayDirection = camera->dir;
 
 	// Attempt to place stone block (change voxel value as needed)
-	constexpr Voxel STONE_BLOCK = 1; // Adjust to match your block types
-
-	if (blockSystem.placeBlock(rayOrigin, rayDirection, world, STONE_BLOCK)) {
-		std::cout << "Block placed!" << std::endl;
-	}
+	const Voxel amethyst = packVoxelData(true, 255, 255, 255, static_cast<uint8_t>(BlockType::Amethyst));
+	blockSystem.placeBlock(rayOrigin, rayDirection, world, amethyst);
 }
 
 void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
@@ -398,29 +396,24 @@ void App::queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::iv
 
 void App::setupHighlightCube()
 {
-	// Define cube vertices (1x1x1)
-	float vertices[] = {
-		// Bottom face
-		0.0f, 0.0f, 0.0f,
-		1.0f, 0.0f, 0.0f,
-		1.0f, 0.0f, 1.0f,
-		0.0f, 0.0f, 1.0f,
-
-		// Top face
-		0.0f, 1.0f, 0.0f,
-		1.0f, 1.0f, 0.0f,
-		1.0f, 1.0f, 1.0f,
-		0.0f, 1.0f, 1.0f,
+	// 1x1x1 cube
+	static constexpr float vertices[] = {
+		// bottom
+		0,0,0,  1,0,0,  1,0,1,  0,0,1,
+		// top
+		0,1,0,  1,1,0,  1,1,1,  0,1,1
 	};
 
-	// Only wireframe edges for top, bottom, and front faces
-	uint32_t indices[] = {
-		0, 1, 1, 2, 2, 3, 3, 0,  // Bottom face edges
-		4, 5, 5, 6, 6, 7, 7, 4,  // Top face edges
-		0, 4, 1, 5               // Front face vertical edges
+	static constexpr uint32_t indices[] = {
+		// bottom
+		0,1, 1,2, 2,3, 3,0,
+		// top
+		4,5, 5,6, 6,7, 7,4,
+		// verticals
+		0,4, 1,5, 2,6, 3,7
 	};
 
-	highlightedBlock = {glm::vec3(0.f), 0, 0, 0, false};
+	highlightedBlock = { glm::vec3(0.f), 0, 0, 0, false };
 
 	glGenVertexArrays(1, &highlightedBlock.highlightVAO);
 	glGenBuffers(1, &highlightedBlock.highlightVBO);
@@ -428,25 +421,39 @@ void App::setupHighlightCube()
 
 	glBindVertexArray(highlightedBlock.highlightVAO);
 
+	// Position VBO
 	glBindBuffer(GL_ARRAY_BUFFER, highlightedBlock.highlightVBO);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, highlightedBlock.highlightIBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-	// Position attribute ONLY
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
 	glEnableVertexAttribArray(0);
 
-	// Disable other attributes for this VAO
-	glDisableVertexAttribArray(1);
-	glDisableVertexAttribArray(2);
-	glDisableVertexAttribArray(3);
-	glDisableVertexAttribArray(4);
+	// Index buffer
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, highlightedBlock.highlightIBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	// ===== CONSTANT ATTRIBUTES (IMPORTANT PART) =====
+
+	// UV (location = 1)
+	glDisableVertexAttribArray(1);
+	glVertexAttrib2f(1, 0.0f, 0.0f);
+
+	// Texture index (location = 2)
+	glDisableVertexAttribArray(2);
+	glVertexAttribI1ui(2, 0); // MUST be a valid opaque texture layer
+
+	// Normal (location = 3) → +Y
+	glDisableVertexAttribArray(3);
+	glVertexAttribI1ui(3, 2); // normals[2] = (0,1,0)
+
+	// AO (location = 4) → max
+	glDisableVertexAttribArray(4);
+	glVertexAttribI1ui(4, 0);
+
 	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
+
 
 void App::cleanupHighlightCube()
 {
@@ -462,7 +469,7 @@ void App::updateBlockHighlight()
 {
     if (!camera) return;
 
-	RaycastHit hit = blockSystem.raycastBlocks(camera->pos, camera->dir, world);
+	const RaycastHit hit = blockSystem.raycastBlocks(camera->pos, camera->dir, world);
     if (hit.isValid) {
         highlightedBlock.highlightedBlockPos = hit.blockPos;
         highlightedBlock.isHighlighted = true;
@@ -473,31 +480,40 @@ void App::updateBlockHighlight()
 
 void App::renderBlockHighlight()
 {
-    if (!highlightedBlock.isHighlighted || highlightedBlock.highlightVAO == 0)
-        return;
+	if (!highlightedBlock.isHighlighted || highlightedBlock.highlightVAO == 0)
+		return;
 
-    // Set up model matrix
-    const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(highlightedBlock.highlightedBlockPos));
+	// Model matrix (inflate slightly to avoid z-fighting)
+	glm::mat4 model = glm::translate(
+		glm::mat4(1.0f),
+		highlightedBlock.highlightedBlockPos
+	);
+	model = glm::scale(model, glm::vec3(1.005f));
+
 	world.worldUBO.MVP = camera->proj * camera->view * model;
-
-    // Bind VAO
-    glBindVertexArray(highlightedBlock.highlightVAO);
-
-    // Draw wireframe edges only
-    glLineWidth(5.0f);
 
 	glUseProgram(renderer->getShaderProgram());
 
+	// Update UBO
 	glBindBuffer(GL_UNIFORM_BUFFER, world.ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &world.worldUBO);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	glBindTextureUnit(0, renderer->getTextureArray());
 
-	glDisable(GL_DEPTH_TEST);
-	glDrawElements(GL_LINES, 20, GL_UNSIGNED_INT, nullptr);
-	glEnable(GL_DEPTH_TEST);
+	glBindVertexArray(highlightedBlock.highlightVAO);
 
-    glLineWidth(1.0f);
-    glBindVertexArray(0);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+
+	// glDisable(GL_DEPTH_TEST);
+
+	glLineWidth(5.0f);
+	glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
+	glLineWidth(1.0f);
+
+	// glEnable(GL_DEPTH_TEST);
+
+	glDepthMask(GL_TRUE);
+	glBindVertexArray(0);
 }

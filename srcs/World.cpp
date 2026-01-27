@@ -182,8 +182,6 @@ void World::generateTerrain(Chunk& chunk, const ChunkCoord& coord)
 /* ===================== Greedy Meshing ===================== */
 void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
 {
-    std::cout << "REGENERATING MESH for chunk (" << coord.x << ", " << coord.y << ")" << std::endl;
-
     constexpr int W = Chunk::WIDTH;
     constexpr int H = Chunk::HEIGHT;
     constexpr int D = Chunk::DEPTH;
