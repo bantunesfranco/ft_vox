@@ -38,9 +38,10 @@ class TerrainGenerator {
 		TerrainGenerator& operator=(const TerrainGenerator&) = delete;
 
 		void generateChunk(Chunk& chunk, const glm::ivec2& coord);
+		static Voxel sampleVoxel(int wx, int y, int wz);
 
 	private:
-		int seed;
+		inline static int seed = 1337;
 		std::unordered_map<uint64_t, NoiseCache> noiseCache; // key = chunk coord hash
 		std::mutex noiseCacheMutex;
 };

@@ -5,7 +5,7 @@
 #include <iostream>
 #include <mutex>
 
-TerrainGenerator::TerrainGenerator(const int seed): seed(seed) {}
+TerrainGenerator::TerrainGenerator(const int _seed) { seed = _seed; }
 
 void TerrainGenerator::generateChunk(Chunk& chunk, const glm::ivec2& coord) {
     constexpr int MIN_Y = 1;
@@ -129,4 +129,67 @@ void TerrainGenerator::generateChunk(Chunk& chunk, const glm::ivec2& coord) {
     }
 
     chunk.markMeshDirty();
+}
+
+Voxel TerrainGenerator::sampleVoxel(const int wx, const int y, const int wz)
+{
+    constexpr int MIN_Y = 1;
+    constexpr int MAX_Y = Chunk::HEIGHT - 1;
+    constexpr int BASE_HEIGHT = Chunk::HEIGHT / 8;
+    constexpr int SNOW_HEIGHT = Chunk::HEIGHT / 2;
+
+    if (y < MIN_Y || y > MAX_Y)
+        return 0;
+
+    // --- Noise ---
+    float mountainVal = stb_perlin_fbm_noise3(wx*0.003f, 0, wz*0.003f, 2.0f, 0.5f, 4);
+    mountainVal = (mountainVal + 1.0f) * 0.5f;
+
+    float large = stb_perlin_fbm_noise3(wx*0.005f, 0, wz*0.005f, 2.0f, 0.5f, 6);
+    float detail = stb_perlin_fbm_noise3(wx*0.05f, 0, wz*0.05f, 2.0f, 0.5f, 2);
+
+    float heightNorm = (large + 1.0f) * 0.5f;
+    float detailNorm = (detail + 1.0f) * 0.5f;
+
+    int surfaceY =
+        BASE_HEIGHT +
+        int(heightNorm * 16 + detailNorm * 4) +
+        int(mountainVal * mountainVal * 150);
+
+    surfaceY = std::clamp(surfaceY, MIN_Y, MAX_Y);
+
+    if (y > surfaceY)
+        return 0;
+
+    // --- Biome ---
+    float temp =
+        (stb_perlin_noise3_seed(wx*0.008f, 0, wz*0.008f, 0, 0, 0, seed+1) + 1.0f) * 0.5f;
+    float humid =
+        (stb_perlin_noise3_seed(wx*0.005f, 0, wz*0.005f, 0, 0, 0, seed+2) + 1.0f) * 0.5f;
+
+    const bool isMountain = mountainVal > 0.65f;
+
+    static const Voxel STONE = packVoxelData(1,255,255,255,(uint8_t)BlockType::Stone);
+    static const Voxel DIRT  = packVoxelData(1,255,255,255,(uint8_t)BlockType::Dirt);
+    static const Voxel GRASS = packVoxelData(1,255,255,255,(uint8_t)BlockType::Grass);
+    static const Voxel SNOW  = packVoxelData(1,255,255,255,(uint8_t)BlockType::Snow);
+    static const Voxel SAND  = packVoxelData(1,255,255,255,(uint8_t)BlockType::Sand);
+
+    if (y < surfaceY - 4)
+        return STONE;
+
+    if (y < surfaceY)
+        return isMountain ? STONE : DIRT;
+
+    // y == surface
+    if (isMountain && surfaceY > SNOW_HEIGHT)
+        return SNOW;
+
+    if (temp < 0.2f)
+        return SNOW;
+
+    if (temp > 0.65f && humid < 0.5f)
+        return SAND;
+
+    return GRASS;
 }
