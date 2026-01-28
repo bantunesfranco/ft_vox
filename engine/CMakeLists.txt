@@ -47,7 +47,7 @@ add_library(engine STATIC ${SOURCES} ${HEADERS} incs/Voxel.hpp)
 # Apply compiler flags ONLY to engine, not dependencies
 if(MSVC)
     target_compile_options(engine PRIVATE /W4 /WX)
-    target_compile_options(engine PRIVATE $<$<CONFIG:Release>:/O2 /Zi>)
+    target_compile_options(engine PRIVATE $<$<CONFIG:Release>:/O2 /Z7>)
 else()
     target_compile_options(engine PRIVATE -Wall -Wextra -Werror)
     target_compile_options(engine PRIVATE $<$<CONFIG:Release>:-O2 -g>)

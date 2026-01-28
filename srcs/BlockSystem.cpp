@@ -45,10 +45,9 @@ Voxel BlockSystem::getVoxelFromWorld(const glm::ivec3& worldPos, World& world)
         return 0;
 
     const int localX = ((worldPos.x % Chunk::WIDTH) + Chunk::WIDTH) % Chunk::WIDTH;
-    const int localY = ((worldPos.y % Chunk::HEIGHT) + Chunk::HEIGHT) % Chunk::HEIGHT;
     const int localZ = ((worldPos.z % Chunk::DEPTH) + Chunk::DEPTH) % Chunk::DEPTH;
 
-    return it->second.getVoxel(localX, localY, localZ);
+    return it->second.getVoxel(localX, worldPos.y, localZ);
 }
 
 void BlockSystem::setVoxelInWorld(const glm::ivec3& worldPos, const Voxel voxel, World& world)
@@ -103,7 +102,7 @@ inline BlockFace BlockSystem::detectFace(const glm::ivec3& blockPos, const glm::
     const float absZ = std::abs(offset.z);
 
     if (absX > absY && absX > absZ)
-        return (offset.x > 0) ? BlockFace::RIGHT : BlockFace::LEFT;
+        return (offset.x > 0) ? BlockFace::LEFT : BlockFace::RIGHT;
     if (absY > absZ)
         return (offset.y > 0) ? BlockFace::TOP : BlockFace::BOTTOM;
     return (offset.z > 0) ? BlockFace::FRONT : BlockFace::BACK;

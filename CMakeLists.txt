@@ -57,7 +57,7 @@ target_include_directories(ft_vox PRIVATE
 # Apply compiler flags ONLY AFTER creating executable
 if(MSVC)
     target_compile_options(ft_vox PRIVATE /W4 /WX)
-    target_compile_options(ft_vox PRIVATE $<$<CONFIG:Release>:/O2 /Zi>)
+    target_compile_options(ft_vox PRIVATE $<$<CONFIG:Release>:/O2 /Z7>)
 else()
     target_compile_options(ft_vox PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ft_vox PRIVATE $<$<CONFIG:Release>:-O2 -g>)

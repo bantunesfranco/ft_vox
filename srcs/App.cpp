@@ -111,40 +111,40 @@ void App::run()
 
     	updateBlockHighlight();
 
-        std::vector<Chunk*> visibleChunks;
         {
-            std::lock_guard lock(world.chunk_mutex);
-            auto& chunks = world.getChunks();
-            visibleChunks.reserve(chunks.size());
+	        std::vector<Chunk*> visibleChunks;
+	        std::lock_guard lock(world.chunk_mutex);
+        	auto& chunks = world.getChunks();
+        	visibleChunks.reserve(chunks.size());
 
-            for (auto& [coord, chunk] : chunks) {
-                if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
-                    continue;
+        	for (auto& [coord, chunk] : chunks) {
+        		if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
+        			continue;
 
-                if (!chunk.cachedVertices.empty())
-                    uploadChunk(chunk, chunk.renderData);
-;
-            	if (!chunk.aoCalculated) {
-            		calcChunkAO(coord, chunk, world);
-            		chunk.aoCalculated = true;
-            	}
+        		if (!chunk.cachedVertices.empty())
+        			uploadChunk(chunk, chunk.renderData);
 
-            	if (chunk.renderData.vao != 0)
-            		visibleChunks.push_back(&chunk);
-            }
-        }
+        		if (!chunk.aoCalculated) {
+        			calcChunkAO(coord, chunk, world);
+        			chunk.aoCalculated = true;
+        		}
 
-        glm::vec3 camPos = camera->pos;
-        std::sort(visibleChunks.begin(), visibleChunks.end(),
-            [&camPos](const Chunk* a, const Chunk* b) {
-                const auto worldCenterA = (a->worldMin + a->worldMax) * 0.5f;
-                const auto worldCenterB = (b->worldMin + b->worldMax) * 0.5f;
-                return glm::distance2(worldCenterA, camPos) < glm::distance2(worldCenterB, camPos);
-            });
+        		if (chunk.renderData.vao != 0)
+        			visibleChunks.push_back(&chunk);
+        	}
 
-        for (const auto& chunk : visibleChunks) {
-            renderChunk(*chunk, world.worldUBO, world.ubo);
-        }
+        	glm::vec3 camPos = camera->pos;
+        	std::sort(visibleChunks.begin(), visibleChunks.end(),
+				[&camPos](const Chunk* a, const Chunk* b) {
+					const auto worldCenterA = (a->worldMin + a->worldMax) * 0.5f;
+					const auto worldCenterB = (b->worldMin + b->worldMax) * 0.5f;
+					return glm::distance2(worldCenterA, camPos) < glm::distance2(worldCenterB, camPos);
+				});
+
+        	for (const auto& chunk : visibleChunks) {
+        		renderChunk(*chunk, world.worldUBO, world.ubo);
+        	}
+	    }
 
     	renderBlockHighlight();
         renderImGui(camera, _showWireframe, rgba, world.getChunks().size());
@@ -174,6 +174,7 @@ void App::loadTextures() {
     		"./textures/dirt.png",		// texIndex 1
     		"./textures/stone.png",
     		"./textures/sand.png",
+			"./textures/water.png",
     		"./textures/iron_ore.png",
     		"./textures/snow.png",
 			"./textures/amethyst.png",
@@ -187,9 +188,10 @@ void App::loadTextures() {
         textureIndices[static_cast<int>(BlockType::Dirt)] = 1;
         textureIndices[static_cast<int>(BlockType::Stone)] = 2;
     	textureIndices[static_cast<int>(BlockType::Sand)] = 3;
-    	textureIndices[static_cast<int>(BlockType::IronOre)] = 4;
-    	textureIndices[static_cast<int>(BlockType::Snow)] = 5;
-    	textureIndices[static_cast<int>(BlockType::Amethyst)] = 6;
+    	textureIndices[static_cast<int>(BlockType::Water)] = 4;
+    	textureIndices[static_cast<int>(BlockType::IronOre)] = 5;
+    	textureIndices[static_cast<int>(BlockType::Snow)] = 6;
+    	textureIndices[static_cast<int>(BlockType::Amethyst)] = 7;
 
     	renderer->setTexArray(textureArray);
     }
