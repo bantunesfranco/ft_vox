@@ -305,54 +305,45 @@ Voxel TerrainGenerator::sampleVoxel(const int wx, const int y, const int wz) {
     // Calculate surface height
     const int surfaceY = calculateHeight(terrainVal, continentalVal, erosionVal);
 
-    // Below sea level and above surface = water
-    if (y > surfaceY && y <= SEA_LEVEL)
-        return WATER;
-
-    // Above surface = air
-    if (y > surfaceY)
-        return 0;
-
     // Determine biome
     const BlockType biome = determineBiome(tempVal, humidVal, continentalVal);
 
-    // Cave carving
-    const float cave = sampleCaveNoise(wx, y, wz);
-
-    const bool isSurface      = (y == surfaceY);
-    const bool isBelowSurface = (y < surfaceY);
-
-    const float entranceWeight = calculateCaveEntranceWeight(continentalVal, tempVal, humidVal);
-    const float entranceNoise = sampleCaveEntranceNoise(wx, wz);
-    const bool allowEntrance = isSurface && entranceNoise < entranceWeight;
-
-    const float depth = static_cast<float>(surfaceY - y);
-    const float caveFade = glm::clamp(depth / 20.0f, 0.0f, 1.0f);
-
-    const float threshold = CAVE_THRESHOLD + (1.0f - caveFade) * 0.4f;
-
-    //      underground caves                       surface entrances
-    if ((isBelowSurface && cave > threshold) || (allowEntrance && cave > 0.6f))
-        return 0;
-
-    // Deep underground = stone
-    if (y < surfaceY - 4)
-        return STONE;
-
-    // Subsurface = biome-dependent dirt/sand
-    if (y < surfaceY) {
-        return (biome == BlockType::Stone) ? STONE :
-               (biome == BlockType::Sand) ? SAND : DIRT;
+    uint32_t surfaceBlock, subsurfaceBlock;
+    switch (biome) {
+        case BlockType::Stone: surfaceBlock = STONE; subsurfaceBlock = STONE; break; // Mountain
+        case BlockType::Snow:  surfaceBlock = SNOW;  subsurfaceBlock = DIRT;  break; // Cold/snowy
+        case BlockType::Sand:  surfaceBlock = SAND;  subsurfaceBlock = SAND;  break; // Desert
+        default:               surfaceBlock = GRASS; subsurfaceBlock = DIRT;  break; // Plains (default)
     }
 
-    // Surface block
-    if (biome == BlockType::Stone) return STONE;
-    if (biome == BlockType::Sand)  return SAND;
-    if (biome == BlockType::Snow)  return SNOW;
+    if (y <= surfaceY)
+    {
+        // Cave carving
+        const float cave = sampleCaveNoise(wx, y, wz);
 
-    // Snow cap for high mountains
-    if (surfaceY > SNOW_HEIGHT && continentalVal > MOUNTAIN_THRESHOLD)
-        return SNOW;
+        const bool isSurface      = (y == surfaceY);
+        const bool isBelowSurface = (y < surfaceY);
 
-    return GRASS; // Default
+        const float entranceWeight = calculateCaveEntranceWeight(continentalVal, tempVal, humidVal);
+        const float entranceNoise = sampleCaveEntranceNoise(wx, wz);
+        const bool allowEntrance = isSurface && entranceNoise < entranceWeight;
+
+        const float depth = static_cast<float>(surfaceY - y);
+        const float caveFade = glm::clamp(depth / 20.0f, 0.0f, 1.0f);
+        const float threshold = CAVE_THRESHOLD + (1.0f - caveFade) * 0.4f;
+
+        if (y != MIN_Y && ((isBelowSurface && cave > threshold) || (allowEntrance && cave > 0.6f))) return 0;
+
+        if (y < surfaceY - 4) return STONE;
+        if (y < surfaceY)     return subsurfaceBlock;
+
+        if (biome != BlockType::Snow && surfaceY > SNOW_HEIGHT) return SNOW;
+
+        return surfaceBlock;
+    }
+
+    // Below sea level and above surface = water
+    if (y <= SEA_LEVEL) return WATER;
+
+    return 0;
 }

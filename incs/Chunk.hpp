@@ -9,11 +9,16 @@
 // Define a chunk as a 1D vector of voxels
 class Chunk {
 public:
-    struct ChunkRenderData {
+    struct RenderBatch {
         GLuint vao = 0;
         GLuint vbo = 0;
         GLuint ibo = 0;
         uint32_t indexCount = 0;
+    };
+
+    struct ChunkRenderData {
+        RenderBatch opaque;
+        RenderBatch transparent;
     } renderData;
 
     Chunk() = default;
@@ -54,8 +59,11 @@ public:
     static constexpr uint8_t DEPTH = 16;
     static constexpr uint32_t SIZE = WIDTH * HEIGHT * DEPTH;
 
-    std::vector<Vertex> cachedVertices;
-    std::vector<uint32_t> cachedIndices;
+    std::vector<Vertex>   cachedOpaqueVertices;
+    std::vector<Vertex>   cachedTransparentVertices;
+    std::vector<uint32_t> cachedOpaqueIndices;
+    std::vector<uint32_t> cachedTransparentIndices;
+
     bool isMeshDirty = false;
     std::atomic<bool> aoCalculated = false;
     glm::vec3 worldMax{};
@@ -67,8 +75,10 @@ private:
 
 inline Chunk::Chunk(const Chunk& other)
     : renderData(other.renderData),
-      cachedVertices(other.cachedVertices),
-      cachedIndices(other.cachedIndices),
+      cachedOpaqueVertices(other.cachedOpaqueVertices),
+      cachedTransparentVertices(other.cachedTransparentVertices),
+      cachedOpaqueIndices(other.cachedOpaqueIndices),
+      cachedTransparentIndices(other.cachedTransparentIndices),
       isMeshDirty(other.isMeshDirty),
       aoCalculated(other.aoCalculated.load()),
       worldMax(other.worldMax),
@@ -83,8 +93,10 @@ inline Chunk& Chunk::operator=(const Chunk& other)
         return *this;
 
     renderData = other.renderData;
-    cachedVertices = other.cachedVertices;
-    cachedIndices = other.cachedIndices;
+    cachedOpaqueVertices = other.cachedOpaqueVertices;
+    cachedTransparentVertices = other.cachedTransparentVertices;
+    cachedOpaqueIndices = other.cachedOpaqueIndices;
+    cachedTransparentIndices = other.cachedTransparentIndices;
     isMeshDirty = other.isMeshDirty;
     aoCalculated.store(other.aoCalculated.load());
     worldMax = other.worldMax;

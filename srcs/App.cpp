@@ -121,7 +121,7 @@ void App::run()
         		if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
         			continue;
 
-        		if (!chunk.cachedVertices.empty())
+        		if (!chunk.cachedOpaqueVertices.empty())
         			uploadChunk(chunk, chunk.renderData);
 
         		if (!chunk.aoCalculated) {
@@ -129,7 +129,7 @@ void App::run()
         			chunk.aoCalculated = true;
         		}
 
-        		if (chunk.renderData.vao != 0)
+        		if (chunk.renderData.opaque.vao)
         			visibleChunks.push_back(&chunk);
         	}
 
@@ -203,63 +203,115 @@ void App::loadTextures() {
     }
 }
 
-void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
+static void uploadBatch(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, Chunk::RenderBatch& batch)
 {
-	if (chunk.cachedIndices.empty()) return;
+	if (indices.empty()) return;
 
-	if (data.vao == 0) glGenVertexArrays(1, &data.vao);
-	if (data.vbo == 0) data.vbo = VBOManager::get().getVBO();
-	if (data.ibo == 0) data.ibo = VBOManager::get().getVBO();
+	if (batch.vao == 0) glGenVertexArrays(1, &batch.vao);
+	if (batch.vbo == 0) batch.vbo = VBOManager::get().getVBO();
+	if (batch.ibo == 0) batch.ibo = VBOManager::get().getVBO();
 
-	data.indexCount = chunk.cachedIndices.size();
+	batch.indexCount = indices.size();
 
-	glBindVertexArray(data.vao);
+	glBindVertexArray(batch.vao);
 
-	glBindBuffer(GL_ARRAY_BUFFER, data.vbo);
-	glBufferData(GL_ARRAY_BUFFER, chunk.cachedVertices.size() * sizeof(Vertex),
-				 chunk.cachedVertices.data(), GL_DYNAMIC_DRAW );
+	glBindBuffer(GL_ARRAY_BUFFER, batch.vbo);
+	glBufferData(
+		GL_ARRAY_BUFFER,
+		vertices.size() * sizeof(Vertex),
+		vertices.data(),
+		GL_DYNAMIC_DRAW
+	);
 
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data.ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indexCount * sizeof(uint32_t),
-				 chunk.cachedIndices.data(), GL_DYNAMIC_DRAW );
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, batch.ibo);
+	glBufferData(
+		GL_ELEMENT_ARRAY_BUFFER,
+		indices.size() * sizeof(uint32_t),
+		indices.data(),
+		GL_DYNAMIC_DRAW
+	);
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-		reinterpret_cast<void*>(offsetof(Vertex, position)));
+		(void*)offsetof(Vertex, position));
 
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-		reinterpret_cast<void*>(offsetof(Vertex, uv)));
+		(void*)offsetof(Vertex, uv));
 
 	glEnableVertexAttribArray(2);
 	glVertexAttribIPointer(2, 1, GL_UNSIGNED_SHORT, sizeof(Vertex),
-		reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
+		(void*)offsetof(Vertex, texIndex));
 
 	glEnableVertexAttribArray(3);
 	glVertexAttribIPointer(3, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
-		reinterpret_cast<void*>(offsetof(Vertex, normal)));
+		(void*)offsetof(Vertex, normal));
 
 	glEnableVertexAttribArray(4);
 	glVertexAttribIPointer(4, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
-		reinterpret_cast<void*>(offsetof(Vertex, ao)));
+		(void*)offsetof(Vertex, ao));
 
 	glBindVertexArray(0);
 }
 
-void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo) const
+void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 {
-	if (chunk.renderData.vao == 0 || chunk.renderData.indexCount == 0) return;
+	uploadBatch(chunk.cachedOpaqueVertices, chunk.cachedOpaqueIndices, data.opaque);
+	uploadBatch(chunk.cachedTransparentVertices, chunk.cachedTransparentIndices, data.transparent);
+}
 
+void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) const
+{
 	glUseProgram(renderer->getShaderProgram());
-	glBindVertexArray(chunk.renderData.vao);
 
 	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &worldUbo);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	glBindTextureUnit(0, renderer->getTextureArray());
-	glDrawElements(GL_TRIANGLES, chunk.renderData.indexCount, GL_UNSIGNED_INT, nullptr);
+
+	// ==========================
+	// OPAQUE PASS
+	// ==========================
+	if (chunk.renderData.opaque.vao && chunk.renderData.opaque.indexCount)
+	{
+		glDisable(GL_BLEND);
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_TRUE);
+
+		glBindVertexArray(chunk.renderData.opaque.vao);
+		glDrawElements(
+			GL_TRIANGLES,
+			chunk.renderData.opaque.indexCount,
+			GL_UNSIGNED_INT,
+			nullptr
+		);
+	}
+
+	// ==========================
+	// TRANSPARENT PASS (WATER)
+	// ==========================
+	if (chunk.renderData.transparent.vao && chunk.renderData.transparent.indexCount)
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		glEnable(GL_DEPTH_TEST);
+
+		glBindVertexArray(chunk.renderData.transparent.vao);
+		glDrawElements(
+			GL_TRIANGLES,
+			chunk.renderData.transparent.indexCount,
+			GL_UNSIGNED_INT,
+			nullptr
+		);
+
+		glDisable(GL_BLEND);
+	}
+
+	glBindVertexArray(0);
 }
+
 
 void App::destroyBlock()
 {
@@ -324,11 +376,11 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
 		return std::max(1, 3 - darkness);  // Never go below 1 (never fully dark)
 	};
 
-    const size_t vertexCount = chunk.cachedVertices.size();
+    const size_t vertexCount = chunk.cachedOpaqueVertices.size();
     const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
 
     for (size_t i = 0; i < vertexCount; ++i) {
-        auto& v = chunk.cachedVertices[i];
+        auto& v = chunk.cachedOpaqueVertices[i];
 
         // Remove offset to get local chunk coordinates
         glm::vec3 localPos = v.position - offset;

@@ -89,10 +89,28 @@ enum class ChunkState : uint8_t {
 	Unloading
 };
 
+enum class RenderType : uint8_t {
+	Air,
+	Opaque,
+	Transparent
+};
+
 struct WorldUBO {
 	glm::mat4 MVP;
 	glm::vec4 light;       // xyz = pos, w = radius
 	glm::vec4 ambientData; // x = ambient, yzw = padding
+};
+
+struct MaskEntry
+{
+	bool visible;
+	uint8_t blockType;
+};
+
+struct MeshTarget
+{
+	std::vector<Vertex>& vertices;
+	std::vector<uint32_t>& indices;
 };
 
 // Define the world as a collection of chunks
@@ -123,6 +141,23 @@ class World {
 		const std::unordered_map<ChunkCoord, Chunk>& getChunks() const { return chunks; }
 		std::unordered_map<ChunkCoord, std::atomic<ChunkState>>& getChunkStates() { return chunkStates; }
 		const std::unordered_map<ChunkCoord, std::atomic<ChunkState>>& getChunkStates() const { return chunkStates; }
+
+		void runGreedyPass(
+			RenderType targetType,
+			RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
+			uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
+			MeshTarget target
+		) const;
+
+		static void buildMask(
+			RenderType targetType,
+			int axis,
+			RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
+			uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
+			int dims[3],
+			int x[3], int q[3],
+			std::vector<MaskEntry>& mask
+		);
 
 		static void generateTerrain(Chunk& chunk, const ChunkCoord& coord);
 
