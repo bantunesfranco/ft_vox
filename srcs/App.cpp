@@ -71,12 +71,13 @@ static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& ca
 App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings)
 	: Engine(width, height, title, settings), textureIndices(), world(textureIndices)
 {
-	_showWireframe = false;
-	setupImGui(window);
+	showWireframe = false;
+	focused = true;
 	setCallbackFunctions();
 	loadTextures();
 	threadPool = std::make_unique<ThreadPool>(8);
 	setupHighlightCube();
+	setupImGui(window);
 }
 
 App::~App()
@@ -89,13 +90,14 @@ void App::setCallbackFunctions() const
 {
 	setErrorCallback(error_callback);
 	setKeyCallback(key_callback);
-	setCursorPosCallback(cursor_callback);
 	setMouseButtonCallback(mouse_bttn_callback);
+	setCursorPosCallback(cursor_callback);
 }
 
 void App::run()
 {
-    float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
+    // float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
+    float rgba[4] = {};
 
     while (windowIsOpen(window))
     {
@@ -121,7 +123,7 @@ void App::run()
         		if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
         			continue;
 
-        		if (!chunk.cachedOpaqueVertices.empty())
+        		if (!chunk.cachedOpaqueVertices.empty() || !chunk.cachedTransparentVertices.empty())
         			uploadChunk(chunk, chunk.renderData);
 
         		if (!chunk.aoCalculated) {
@@ -129,7 +131,7 @@ void App::run()
         			chunk.aoCalculated = true;
         		}
 
-        		if (chunk.renderData.opaque.vao)
+        		if (chunk.renderData.opaque.vao || chunk.renderData.transparent.vao)
         			visibleChunks.push_back(&chunk);
         	}
 
@@ -142,12 +144,16 @@ void App::run()
 				});
 
         	for (const auto& chunk : visibleChunks) {
-        		renderChunk(*chunk, world.worldUBO, world.ubo);
+        		renderChunk(*chunk, world.worldUBO, world.ubo, RenderType::Opaque);
+        	}
+
+        	for (const auto& chunk : visibleChunks) {
+        		renderChunk(*chunk, world.worldUBO, world.ubo, RenderType::Transparent);
         	}
 	    }
 
     	renderBlockHighlight();
-        renderImGui(camera, _showWireframe, rgba, world.getChunks().size());
+        renderImGui(camera, showWireframe, rgba, world.getChunks().size());
         glfwSwapBuffers(window);
 
 	}
@@ -260,11 +266,11 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 	uploadBatch(chunk.cachedTransparentVertices, chunk.cachedTransparentIndices, data.transparent);
 }
 
-void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) const
+void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo, const RenderType type) const
 {
 	glUseProgram(renderer->getShaderProgram());
 
-	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &worldUbo);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
@@ -273,7 +279,7 @@ void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) 
 	// ==========================
 	// OPAQUE PASS
 	// ==========================
-	if (chunk.renderData.opaque.vao && chunk.renderData.opaque.indexCount)
+	if (type == RenderType::Opaque && chunk.renderData.opaque.indexCount)
 	{
 		glDisable(GL_BLEND);
 		glEnable(GL_DEPTH_TEST);
@@ -291,12 +297,13 @@ void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) 
 	// ==========================
 	// TRANSPARENT PASS (WATER)
 	// ==========================
-	if (chunk.renderData.transparent.vao && chunk.renderData.transparent.indexCount)
+	if (type == RenderType::Transparent && chunk.renderData.transparent.indexCount)
 	{
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
 
 		glBindVertexArray(chunk.renderData.transparent.vao);
 		glDrawElements(
@@ -306,12 +313,12 @@ void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) 
 			nullptr
 		);
 
+		glDepthMask(GL_TRUE);
 		glDisable(GL_BLEND);
 	}
 
 	glBindVertexArray(0);
 }
-
 
 void App::destroyBlock()
 {
@@ -371,35 +378,32 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
         return neighbor ? neighbor->isBlockActive(cx, y, cz) : false;
     };
 
-	constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
-		int darkness = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0);
-		return std::max(1, 3 - darkness);  // Never go below 1 (never fully dark)
-	};
+    constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
+       int darkness = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0);
+       return std::max(1, 3 - darkness);  // Never go below 1 (never fully dark)
+    };
 
-    const size_t vertexCount = chunk.cachedOpaqueVertices.size();
     const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
+    constexpr uint8_t cornerLUT[4] = {0, 1, 3, 2};
 
-    for (size_t i = 0; i < vertexCount; ++i) {
-        auto& v = chunk.cachedOpaqueVertices[i];
-
-        // Remove offset to get local chunk coordinates
+    // =====================================================================
+    // Helper lambda to calculate AO for a single vertex
+    // =====================================================================
+    auto calcVertexAO = [&](const Vertex& v, size_t vertexIndex) -> uint8_t {
         glm::vec3 localPos = v.position - offset;
         int vx = static_cast<int>(localPos.x);
         int vy = static_cast<int>(localPos.y);
         int vz = static_cast<int>(localPos.z);
 
         uint8_t normalIdx = v.normal;
-
-        // Use lookup table for corner detection
-        constexpr uint8_t cornerLUT[4] = {0, 1, 3, 2};
-        uint8_t corner = cornerLUT[i % 4];
+        uint8_t corner = cornerLUT[vertexIndex % 4];
 
         bool cornerX = corner & 1;
         bool cornerY = corner & 2;
 
         uint8_t ao = 3;
 
-        if (normalIdx < 2) { // X faces
+        if (normalIdx < 2) { // X faces (perpendicular to X axis)
             int axq = vx + (normalIdx == 0 ? 1 : 0);
             int py = cornerY ? vy + 1 : vy - 1;
             int pz = cornerX ? vz + 1 : vz - 1;
@@ -410,10 +414,10 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
                 getBlock(axq, py, pz)
             );
         }
-        else if (normalIdx < 4) { // Y faces
+        else if (normalIdx < 4) { // Y faces (perpendicular to Y axis)
             int ayq = vy + (normalIdx == 2 ? 1 : 0);
             int px = cornerX ? vx + 1 : vx - 1;
-            int pz = cornerX ? vz + 1 : vz - 1;
+            int pz = cornerY ? vz + 1 : vz - 1;  // FIXED: was cornerX, should be cornerY
 
             ao = calcAO(
                 getBlock(px, ayq, vz),
@@ -421,7 +425,7 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
                 getBlock(px, ayq, pz)
             );
         }
-        else { // Z faces
+        else { // Z faces (perpendicular to Z axis)
             int azq = vz + (normalIdx == 4 ? 1 : 0);
             int px = cornerX ? vx + 1 : vx - 1;
             int py = cornerY ? vy + 1 : vy - 1;
@@ -433,7 +437,23 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
             );
         }
 
-        v.ao = ao;
+        return ao;
+    };
+
+    // =====================================================================
+    // Calculate AO for opaque blocks
+    // =====================================================================
+    for (size_t i = 0; i < chunk.cachedOpaqueVertices.size(); ++i) {
+        auto& v = chunk.cachedOpaqueVertices[i];
+        v.ao = calcVertexAO(v, i);
+    }
+
+    // =====================================================================
+    // Calculate AO for transparent blocks (WATER)
+    // =====================================================================
+    for (size_t i = 0; i < chunk.cachedTransparentVertices.size(); ++i) {
+        auto& v = chunk.cachedTransparentVertices[i];
+        v.ao = calcVertexAO(v, i);
     }
 }
 
@@ -560,13 +580,9 @@ void App::renderBlockHighlight()
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
 
-	// glDisable(GL_DEPTH_TEST);
-
 	glLineWidth(5.0f);
 	glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
 	glLineWidth(1.0f);
-
-	// glEnable(GL_DEPTH_TEST);
 
 	glDepthMask(GL_TRUE);
 	glBindVertexArray(0);

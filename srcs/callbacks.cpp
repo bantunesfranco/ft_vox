@@ -55,8 +55,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     }
     else if (key == VOX_KEY_X && action == VOX_PRESS)
     {
-        app->_showWireframe = !app->_showWireframe;
-        App::toggleWireframe(app->_showWireframe);
+        app->showWireframe = !app->showWireframe;
+        App::toggleWireframe(app->showWireframe);
         std::cout << "Toggle wireframe" << std::endl;
     }
     else if (key == VOX_KEY_Z && action == VOX_PRESS)
@@ -64,6 +64,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         static bool mouseMode = false;
         glfwSetInputMode(window, GLFW_CURSOR, mouseMode? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
         mouseMode = !mouseMode;
+        app->focused = mouseMode;
     }
 }
 
@@ -72,6 +73,8 @@ void mouse_bttn_callback(GLFWwindow* window, int button, int action, int mods)
     (void)mods;
 
     const auto app = static_cast<App*>(glfwGetWindowUserPointer(window));
+
+    if (!app->focused) return;
 
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
         if (button == GLFW_MOUSE_BUTTON_LEFT) {

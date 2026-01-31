@@ -26,7 +26,8 @@ class App : public Engine
 		void	destroyBlock();
 		void	placeBlock();
 
-		bool	_showWireframe;
+		bool	showWireframe;
+		bool	focused;
 		GLuint textureArray;
 		std::array<GLuint, 256> textureIndices;
 		World world;
@@ -39,7 +40,7 @@ class App : public Engine
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();
-		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) const;
+		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo, RenderType type) const;
 
 		static void	queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::ivec2, Chunk*>>& chunksToCalcAO, ThreadPool& threadPool);
 		void setupHighlightCube();

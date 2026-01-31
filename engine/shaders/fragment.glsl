@@ -21,18 +21,20 @@ out vec4 FragColor;
 
 void main()
 {
-    vec2 uv = fract(vUV);
+    vec3 uWorldPos = vWorldPos;
+    vec2 uv = vUV;//fract(vUV);
     vec4 tex = texture(uTextures, vec3(uv, float(vTexIndex)));
     if (tex.a < 0.1) discard;
 
     float alpha = tex.a;
     if (vTexIndex == WATER_TEXTURE_INDEX) // Assuming WATER_TEXTURE_INDEX is defined elsewhere
     {
+        uWorldPos += vNormal * 0.01;
         alpha *= 0.5;
         if (alpha < 0.1) discard;
     }
 
-    float dist = distance(vWorldPos, light.xyz);
+    float dist = distance(uWorldPos, light.xyz);
     float lightFactor = clamp(1.0 - dist / light.w, 0.0, 1.0);
 
     float ambient = ambientData.x;

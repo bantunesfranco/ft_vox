@@ -22,13 +22,9 @@ inline RenderType blockRenderType(const BlockType t)
 
 inline bool shouldRenderFace(const RenderType self, const RenderType neighbor)
 {
-    if (self == RenderType::Opaque)
-        return neighbor != RenderType::Opaque;
-
-    if (self == RenderType::Transparent)
-        return neighbor == RenderType::Air || neighbor == RenderType::Opaque;
-
-    return false;
+    if (self == RenderType::Air) return false;      // Never render air
+    if (neighbor == RenderType::Air) return true;   // Always render into air
+    return self != neighbor;                        // Render if types differ
 }
 
 World::World(std::array<uint32_t, 256>& indices) : ubo(0), textureIndices(indices)
@@ -231,7 +227,14 @@ void World::buildMask(
             const RenderType neighbor = renderType[nx+1][ny+1][nz+1];
 
             const uint8_t bt = blockTypes[cx + 1][cy + 1][cz + 1];
-            mask[n].visible = bt != 0 && self == targetType && shouldRenderFace(self, neighbor);
+            const uint8_t btNeighbor = blockTypes[nx + 1][ny + 1][nz + 1];
+            bool visible = bt != 0 && self == targetType && shouldRenderFace(self, neighbor);
+
+            if (visible && targetType == RenderType::Transparent && btNeighbor != 0) {
+                visible = false;
+            }
+
+            mask[n].visible = visible;
             mask[n].blockType = bt;
             ++n;
         }
@@ -268,8 +271,11 @@ void World::runGreedyPass(
         {
             q[axis] = dir;
 
-            for (x[axis] = -1; x[axis] < dims[axis]; ++x[axis])
+            for (x[axis] = 0; x[axis] < dims[axis]; ++x[axis])
             {
+                const int maskSize = dims[u] * dims[v];
+                std::fill_n(mask.begin(), maskSize, MaskEntry{false, 0});
+
                 buildMask(targetType, axis, renderType, blockTypes , const_cast<int*>(dims), x, q, mask);
 
                 int n = 0;
@@ -284,12 +290,13 @@ void World::runGreedyPass(
                         const uint8_t bt = mask[n].blockType;
 
                         int w = 1;
+                        int h = 1;
+
                         while (i + w < dims[u] &&
                                mask[n + w].visible &&
                                mask[n + w].blockType == bt)
                             ++w;
 
-                        int h = 1;
                         for (; j + h < dims[v]; ++h)
                         {
                             for (int k = 0; k < w; ++k)
@@ -318,14 +325,6 @@ void World::runGreedyPass(
                             for (auto& vtx : verts) vtx[axis] += 1.0f;
 
                         float uv[4][2] = {{0, 0},{(float)w, 0},{(float)w, (float)h},{0, (float)h}};
-
-                        if (axis == 2)
-                        {
-                            uv[0][1] = h;
-                            uv[1][1] = h;
-                            uv[2][1] = 0;
-                            uv[3][1] = 0;
-                        }
 
                         const uint16_t tex = textureIndices[bt];
                         const uint8_t normal = normalToIndex(axis, dir);
@@ -359,7 +358,6 @@ void World::runGreedyPass(
     }
 }
 
-
 void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
 {
     constexpr int W = Chunk::WIDTH;
@@ -380,30 +378,37 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
                 const Voxel v = chunk.getVoxel(x, y, z);
                 uint8_t bt = getBlockType(v);
 
-                renderType[x+1][y+1][z+1] =
-                    bt ? blockRenderType((BlockType)bt) : RenderType::Air;
+                renderType[x+1][y+1][z+1] = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
                 blockTypes[x+1][y+1][z+1] = bt;
             }
 
-    auto sampleRT = [&](int wx, int y, int wz)
-    {
+    auto sampleBT = [&](const int wx, const int y, const int wz) -> uint8_t {
         const Voxel v = TerrainGenerator::sampleVoxel(wx, y, wz);
-        uint8_t bt = getBlockType(v);
-        return bt ? blockRenderType((BlockType)bt) : RenderType::Air;
+        return getBlockType(v);
     };
 
     for (int y = 0; y < H; ++y)
         for (int z = 0; z < D; ++z)
         {
-            renderType[0][y+1][z+1]     = sampleRT(baseWX-1, y, baseWZ+z);
-            renderType[W+1][y+1][z+1]   = sampleRT(baseWX+W, y, baseWZ+z);
+            auto bt = sampleBT(baseWX-1, y, baseWZ+z);
+            blockTypes[0][y+1][z+1]     = bt;
+            renderType[0][y+1][z+1]     = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
+
+            bt = sampleBT(baseWX+W, y, baseWZ+z);
+            blockTypes[W+1][y+1][z+1]   = bt;
+            renderType[W+1][y+1][z+1]   = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
         }
 
     for (int x = 0; x < W; ++x)
         for (int y = 0; y < H; ++y)
         {
-            renderType[x+1][y+1][0]     = sampleRT(baseWX+x, y, baseWZ-1);
-            renderType[x+1][y+1][D+1]   = sampleRT(baseWX+x, y, baseWZ+D);
+            auto bt = sampleBT(baseWX+x, y, baseWZ-1);
+            blockTypes[x+1][y+1][0]     = bt;
+            renderType[x+1][y+1][0]     = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
+
+            bt = sampleBT(baseWX+x, y, baseWZ+D);
+            blockTypes[x+1][y+1][D+1]   = bt;
+            renderType[x+1][y+1][D+1]   = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
         }
 
     chunk.cachedOpaqueVertices.clear();
@@ -426,7 +431,6 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
 
     chunk.isMeshDirty = false;
 }
-
 
 // void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
 // {
