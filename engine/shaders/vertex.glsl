@@ -10,7 +10,7 @@ layout(std140, binding = 0) uniform WorldUBO
 {
     mat4 MVP;
     vec4 light;
-    vec4 ambientData;
+    vec4 cameraPos;
 };
 
 const vec3 normals[6] = vec3[](

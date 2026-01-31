@@ -26,6 +26,9 @@ class App : public Engine
 		void	destroyBlock();
 		void	placeBlock();
 
+		void	toggleFullscreen();
+		void	toggleSpeedBoost();
+
 		bool	showWireframe;
 		bool	focused;
 		GLuint textureArray;
@@ -55,6 +58,7 @@ void error_callback(int error, const char* description);
 void cursor_callback(GLFWwindow* window, double xpos, double ypos);
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 void mouse_bttn_callback(GLFWwindow* window, int button, int action, int mods);
+void resize_callback(GLFWwindow* window, int width, int height);
 
 void setupImGui(GLFWwindow* window);
 // void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe);

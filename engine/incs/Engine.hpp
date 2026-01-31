@@ -45,7 +45,9 @@ class FPSCounter {
 
 class Engine
 {
-	private:
+	protected:
+		int32_t	_oldWidth{};
+		int32_t	_oldHeight{};
 		int32_t	_width{};
 		int32_t	_height{};
 		double	_lastFrameTime{};
@@ -71,12 +73,19 @@ class Engine
 		std::unique_ptr<Camera>		camera;
 		FPSCounter*					fpsCounter;
 		int32_t						settings[VOX_SETTINGS_MAX];
-	
-		static const char*	vox_strerror(vox_errno_t val);
-		void				setSetting(int32_t setting, bool value);
 
+		void				setSetting(int32_t setting, bool value);
+		void				setWidth(const int32_t width) { _width = width; }
+		void				setHeight(const int32_t height) { _height = height; }
+		void				toggleFullscreen(GLFWwindow* window);
 		static bool			windowIsOpen(GLFWwindow* window);
 		virtual void		terminate();
+		virtual void 		run() = 0;
+		void				closeWindow() const;
+		[[nodiscard]] bool	getSetting(int32_t setting) const;
+		[[nodiscard]] bool	isKeyDown(keys_t key) const;
+		[[nodiscard]] int32_t	getWidth() const { return _width; }
+		[[nodiscard]] int32_t	getHeight() const { return _height; }
 
 		void				setKeyCallback(GLFWkeyfun callback) const;
 		void				setMouseButtonCallback(GLFWmousebuttonfun callback) const;
@@ -87,12 +96,10 @@ class Engine
 		void				setWindowCloseCallback(GLFWwindowclosefun callback) const;
 		void				setErrorCallback(GLFWerrorfun callback) const;
 
-		virtual void 		run() = 0;
-		void				closeWindow() const;
-		[[nodiscard]] bool	isKeyDown(keys_t key) const;
 		static GLuint		loadTexture(const char* path);
 		static GLuint		loadTextureArray(const std::vector<std::string>& paths, int& outWidth, int& outHeight);
 		static void			toggleWireframe(bool showWireframe);
+		static const char*	vox_strerror(vox_errno_t val);
 };
 
 #endif

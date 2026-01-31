@@ -51,7 +51,7 @@ public:
         return isActive(getVoxel(x, y, z));
     }
 
-    [[nodiscard]] auto 		getVoxels() const { return voxels; }
+    [[nodiscard]] auto& 		getVoxels() const { return voxels; }
 
     // Define the dimensions of a chunk
     static constexpr uint8_t WIDTH = 16;

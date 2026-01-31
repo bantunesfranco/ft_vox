@@ -4,6 +4,13 @@
 #include <algorithm>
 #include <mutex>
 
+static constexpr uint32_t STONE = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Stone);
+static constexpr uint32_t DIRT = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Dirt);
+static constexpr uint32_t GRASS = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Grass);
+static constexpr uint32_t SNOW = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Snow);
+static constexpr uint32_t SAND = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Sand);
+static constexpr uint32_t WATER = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Water);
+
 TerrainGenerator::TerrainGenerator(const int _seed)  { seed = _seed; }
 
 // ============================================================================
@@ -181,14 +188,6 @@ void TerrainGenerator::generateChunk(Chunk& chunk, const glm::ivec2& coord) {
     const auto& humidity = cached.humidity;
     const auto& mountain = cached.mountain;
 
-    // Pre-pack common voxel types
-    static const uint32_t STONE = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Stone);
-    static const uint32_t DIRT = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Dirt);
-    static const uint32_t GRASS = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Grass);
-    static const uint32_t SNOW = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Snow);
-    static const uint32_t SAND = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Sand);
-    static const uint32_t WATER = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Water);
-
     // Fill voxels column by column
     for (int x = 0; x < Chunk::WIDTH; ++x) {
         for (int z = 0; z < Chunk::DEPTH; ++z) {
@@ -293,14 +292,6 @@ Voxel TerrainGenerator::sampleVoxel(const int wx, const int y, const int wz) {
     const float erosionVal = sampleErosionNoise(wx, wz);
     const float tempVal = sampleTemperatureNoise(wx, wz);
     const float humidVal = sampleHumidityNoise(wx, wz);
-
-    // Pre-pack voxels
-    static const Voxel STONE = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Stone);
-    static const Voxel DIRT = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Dirt);
-    static const Voxel GRASS = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Grass);
-    static const Voxel SNOW = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Snow);
-    static const Voxel SAND = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Sand);
-    static const Voxel WATER = packVoxelData(1, 255, 255, 255, (uint8_t)BlockType::Water);
 
     // Calculate surface height
     const int surfaceY = calculateHeight(terrainVal, continentalVal, erosionVal);

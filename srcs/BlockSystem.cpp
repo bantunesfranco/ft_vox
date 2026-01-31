@@ -13,7 +13,7 @@ BlockSystem::BlockSystem(const float maxReachDistance)
 {
 }
 
-inline glm::ivec3 BlockSystem::getChunkCoords(const glm::ivec3& worldPos)
+glm::ivec3 BlockSystem::getChunkCoords(const glm::ivec3& worldPos)
 {
     return {
         floorDiv(worldPos.x, Chunk::WIDTH),
@@ -22,7 +22,7 @@ inline glm::ivec3 BlockSystem::getChunkCoords(const glm::ivec3& worldPos)
     };
 }
 
-inline glm::ivec3 BlockSystem::getLocalCoords(const glm::ivec3& worldPos)
+glm::ivec3 BlockSystem::getLocalCoords(const glm::ivec3& worldPos)
 {
     return {
         ((worldPos.x % Chunk::WIDTH) + Chunk::WIDTH) % Chunk::WIDTH,
@@ -67,12 +67,14 @@ void BlockSystem::setVoxelInWorld(const glm::ivec3& worldPos, const Voxel voxel,
         return;
 
     it->second.setVoxel(localX, ((worldPos.y % Chunk::HEIGHT) + Chunk::HEIGHT) % Chunk::HEIGHT, localZ, voxel);
-    it->second.markMeshDirty();
+    it->second.aoCalculated = false;
 
     // Mark adjacent chunks dirty if boundary block
     auto markDirty = [&chunks](const ChunkCoord& coord) {
-        if (const auto iter = chunks.find(coord); iter != chunks.end())
+        if (const auto iter = chunks.find(coord); iter != chunks.end()) {
             iter->second.markMeshDirty();
+            iter->second.aoCalculated = false;
+        }
     };
 
     if (localX == 0) markDirty(ChunkCoord(chunkX - 1, chunkZ));

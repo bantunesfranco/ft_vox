@@ -28,7 +28,7 @@ inline uint8_t isActive(const Voxel data)   { return (data >> 31) & 0x1; }
 inline uint32_t getColor(const Voxel data)  { return data & 0xFFFFFF; }
 
 // Pack voxel
-inline Voxel packVoxelData(const uint8_t isActive, const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t blockType) {
+constexpr Voxel packVoxelData(const uint8_t isActive, const uint8_t r, const uint8_t g, const uint8_t b, const uint8_t blockType) {
     Voxel data = 0;
     data |= (isActive & 0x1) << 31;     // Store isActive in the highest bits
     data |= (blockType & 0x7F) << 24;   // Store blockType in the next 7 bits

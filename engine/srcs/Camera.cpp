@@ -2,8 +2,10 @@
 
 Camera::Camera(GLFWwindow *window) : pos{0.f, 25.f, 0.f}, dir {0.f, 0.f, 1.f}, up{0.f, 1.f, 0.f}, pitch(0), yaw(0), fov(80.0f)
 {
-	moveSpeed = 100.f;
-	rotSpeed = 360.f;
+	baseMoveSpeed = 10.0f;
+	baseRotSpeed = 180.f;
+	moveSpeed = baseMoveSpeed;
+	rotSpeed = baseRotSpeed;
 	lastPosition = pos;
 	lastDirection = dir;
 	rotationThreshold = 0.1f;

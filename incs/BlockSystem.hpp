@@ -52,7 +52,10 @@ public:
     // Getters
     [[nodiscard]] const RaycastHit& getLastRaycastHit() const { return lastHit; }
     [[nodiscard]] float getMaxReachDistance() const { return maxReachDistance; }
-    
+
+    static glm::ivec3 getChunkCoords(const glm::ivec3& worldPos);
+    static glm::ivec3 getLocalCoords(const glm::ivec3& worldPos);
+
 private:
     float maxReachDistance;
     RaycastHit lastHit;
@@ -69,8 +72,6 @@ private:
         World& world
     );
 
-    static glm::ivec3 getChunkCoords(const glm::ivec3& worldPos);
-    static glm::ivec3 getLocalCoords(const glm::ivec3& worldPos);
     static glm::ivec3 getAdjacentBlockPos(const glm::ivec3& hitPos, BlockFace face);
     static BlockFace detectFace(const glm::ivec3& blockPos, const glm::vec3& hitPoint);
 };

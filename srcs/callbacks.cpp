@@ -11,6 +11,15 @@ void error_callback(int error, const char* description)
     fprintf(stderr, "Error: %s\n", description);
 }
 
+void resize_callback(GLFWwindow* window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+
+    const auto app = static_cast<App*>(glfwGetWindowUserPointer(window));
+    app->setWidth(width);
+    app->setHeight(height);
+}
+
 void cursor_callback(GLFWwindow* window, double xpos, double ypos)
 {
     static double lastX = 0.0f;
@@ -52,6 +61,14 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
     {
         app->closeWindow();
+    }
+    else if (key == VOX_KEY_F11 && action == VOX_PRESS)
+    {
+        app->toggleFullscreen();
+    }
+    else if (key == VOX_KEY_SPACE && action == VOX_PRESS)
+    {
+        app->toggleSpeedBoost();
     }
     else if (key == VOX_KEY_X && action == VOX_PRESS)
     {

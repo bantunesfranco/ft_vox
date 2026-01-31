@@ -92,12 +92,14 @@ void App::setCallbackFunctions() const
 	setKeyCallback(key_callback);
 	setMouseButtonCallback(mouse_bttn_callback);
 	setCursorPosCallback(cursor_callback);
+	if (getSetting(VOX_RESIZE))
+		setResizeCallback(resize_callback);
 }
 
 void App::run()
 {
-    // float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
-    float rgba[4] = {};
+    float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
+    // float rgba[4] = {};
 
     while (windowIsOpen(window))
     {
@@ -107,8 +109,9 @@ void App::run()
         handleMovement(window, camera);
 
         Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
-        world.updateFrustum(camera->proj, camera->view);
 
+    	world.worldUBO.cameraPos = glm::vec4(camera->pos, world.worldUBO.cameraPos.w);
+        world.updateFrustum(camera->proj, camera->view);
         world.updateChunks(camera->pos, *threadPool);
 
     	updateBlockHighlight();
@@ -123,13 +126,11 @@ void App::run()
         		if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
         			continue;
 
+        		if (!chunk.aoCalculated)
+        			calcChunkAO(coord, chunk, world);
+
         		if (!chunk.cachedOpaqueVertices.empty() || !chunk.cachedTransparentVertices.empty())
         			uploadChunk(chunk, chunk.renderData);
-
-        		if (!chunk.aoCalculated) {
-        			calcChunkAO(coord, chunk, world);
-        			chunk.aoCalculated = true;
-        		}
 
         		if (chunk.renderData.opaque.vao || chunk.renderData.transparent.vao)
         			visibleChunks.push_back(&chunk);
@@ -155,7 +156,6 @@ void App::run()
     	renderBlockHighlight();
         renderImGui(camera, showWireframe, rgba, world.getChunks().size());
         glfwSwapBuffers(window);
-
 	}
 
 	threadPool->wait();
@@ -341,8 +341,21 @@ void App::placeBlock()
 	const glm::vec3 rayDirection = camera->dir;
 
 	// Attempt to place stone block (change voxel value as needed)
-	const Voxel amethyst = packVoxelData(true, 255, 255, 255, static_cast<uint8_t>(BlockType::Amethyst));
+	static constexpr Voxel amethyst = packVoxelData(true, 255, 255, 255, static_cast<uint8_t>(BlockType::Amethyst));
 	blockSystem.placeBlock(rayOrigin, rayDirection, world, amethyst);
+}
+
+void App::toggleFullscreen()
+{
+	Engine::toggleFullscreen(window);
+}
+
+void App::toggleSpeedBoost()
+{
+	if (!camera) return;
+
+	camera->moveSpeed = (camera->moveSpeed == camera->baseMoveSpeed) ? camera->baseMoveSpeed * 10.0f : camera->baseMoveSpeed;
+	camera->rotSpeed = (camera->rotSpeed == camera->baseRotSpeed) ? camera->baseRotSpeed * 2.0f : camera->baseRotSpeed;
 }
 
 void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
@@ -362,20 +375,26 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
         }
     }
 
-    auto getBlock = [&](int x, int y, int z) -> bool {
-        if (y < 0 || y >= H) return false;
+	auto getBlock = [&](int x, int y, int z) -> bool {
+		if (y < 0 || y >= H) return false;
 
-        int cx = x, cz = z;
-        int nidx_x = 1, nidx_z = 1;
+		int cx = x, cz = z;
+		int nidx_x = 1, nidx_z = 1;
 
-        if (x < 0) { nidx_x = 0; cx += W; }
-        else if (x >= W) { nidx_x = 2; cx -= W; }
+		if (x < 0) { nidx_x = 0; cx += W; }
+		else if (x >= W) { nidx_x = 2; cx -= W; }
 
-        if (z < 0) { nidx_z = 0; cz += D; }
-        else if (z >= D) { nidx_z = 2; cz -= D; }
+		if (z < 0) { nidx_z = 0; cz += D; }
+		else if (z >= D) { nidx_z = 2; cz -= D; }
 
-        const Chunk* neighbor = neighbors[nidx_z * 3 + nidx_x];
-        return neighbor ? neighbor->isBlockActive(cx, y, cz) : false;
+		const Chunk* neighbor = neighbors[nidx_z * 3 + nidx_x];
+		if (!neighbor) return false;
+
+		const Voxel v = neighbor->getVoxel(cx, y, cz);
+		uint8_t bt = getBlockType(v);
+
+		// Only count solid blocks for AO, not water or air
+		return bt != 0 && static_cast<BlockType>(bt) != BlockType::Water;
     };
 
     constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
@@ -448,13 +467,7 @@ void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
         v.ao = calcVertexAO(v, i);
     }
 
-    // =====================================================================
-    // Calculate AO for transparent blocks (WATER)
-    // =====================================================================
-    for (size_t i = 0; i < chunk.cachedTransparentVertices.size(); ++i) {
-        auto& v = chunk.cachedTransparentVertices[i];
-        v.ao = calcVertexAO(v, i);
-    }
+	chunk.aoCalculated = true;
 }
 
 void App::queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::ivec2, Chunk*>>& chunksToCalcAO, ThreadPool& threadPool)

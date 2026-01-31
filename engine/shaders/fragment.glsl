@@ -1,5 +1,4 @@
 #version 450 core
-//layout(early_fragment_tests) in;
 
 in vec2 vUV;
 in vec3 vNormal;
@@ -12,12 +11,26 @@ layout(std140, binding = 0) uniform WorldUBO
 {
     mat4 MVP;
     vec4 light;
-    vec4 ambientData;
+    vec4 cameraPos;
 };
 
 out vec4 FragColor;
 
 #define WATER_TEXTURE_INDEX 4 // see App.cpp -> loadTextures()
+#define FOG_START 175.0
+#define FOG_END 512.0
+#define FOG_COLOR vec3(0.7, 0.7, 0.7)  // Light grey
+
+float calculateFogFactor(vec3 uWorldPos, vec4 cameraPos)
+{
+    float cameraDistXZ = length(uWorldPos.xz - cameraPos.xz);
+
+    // Exponential fog: gets denser faster the farther out you go
+    float fogDensity = 0.015;  // Adjust this to control how fast fog builds up
+    float fogFactor = 1.0 - exp(-fogDensity * (cameraDistXZ - FOG_START));
+
+    return clamp(fogFactor, 0.0, 1.0);
+}
 
 void main()
 {
@@ -37,8 +50,13 @@ void main()
     float dist = distance(uWorldPos, light.xyz);
     float lightFactor = clamp(1.0 - dist / light.w, 0.0, 1.0);
 
-    float ambient = ambientData.x;
-    float brightness = (ambient + lightFactor) * vAO * 1.25;
+    float ambient = cameraPos.w;
+    float brightness = (ambient + lightFactor) * vAO;
 
-    FragColor = vec4(tex.rgb * brightness, alpha);
+    vec3 color = tex.rgb * brightness;
+    float fogFactor = calculateFogFactor(uWorldPos, cameraPos);
+
+    color = mix(color, FOG_COLOR, fogFactor);
+
+    FragColor = vec4(color, alpha);
 }

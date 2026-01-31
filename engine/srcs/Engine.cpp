@@ -65,6 +65,12 @@ void	Engine::setSetting(const int32_t setting, const bool value)
 	settings[setting] = value;
 }
 
+bool	Engine::getSetting(const int32_t setting) const
+{
+	VOX_ASSERT(setting >= 0 && setting < VOX_SETTINGS_MAX, "Invalid setting");
+	return settings[setting];
+}
+
 void Engine::initWindow(const int32_t width, const int32_t height, const char* title)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -226,6 +232,27 @@ void	Engine::toggleWireframe(const bool showWireframe)
     } else {
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);  // Switch to solid fill mode
     }
+}
+
+void Engine::toggleFullscreen(GLFWwindow* _window)
+{
+	if (!getSetting(VOX_FULLSCREEN)) {
+		// Enter fullscreen
+		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+		const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+		glfwSetWindowMonitor(_window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+		setSetting(VOX_FULLSCREEN, true);
+		_oldHeight = _height;
+		_oldWidth = _width;
+		_height = mode->height;
+		_width = mode->width;
+	} else {
+		// Exit fullscreen (return to windowed mode)
+		glfwSetWindowMonitor(_window, nullptr, 100, 100, _oldWidth, _oldHeight, GLFW_DONT_CARE);
+		setSetting(VOX_FULLSCREEN, false);
+		_height = _oldHeight;
+		_width = _oldWidth;
+	}
 }
 
 bool Engine::isKeyDown(const keys_t key) const

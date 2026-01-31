@@ -1,5 +1,6 @@
 #include "World.hpp"
 #include "App.hpp"
+#include "BlockSystem.hpp"
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
@@ -35,8 +36,8 @@ World::World(std::array<uint32_t, 256>& indices) : ubo(0), textureIndices(indice
 
     worldUBO = {
         .MVP = glm::mat4(1.f),
-        .light = {69.0f, 420.0f, 69.0f, 30.f},
-        .ambientData = {0.5f, 0.0f, 0.0f, 0.0f},
+        .light = {0.0f, 200.0f, 0.0f, 500.f},
+        .cameraPos = {0.0f, 0.0f, 0.0f, 0.4f},
     };
 }
 
@@ -148,7 +149,8 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
                     dst.cachedOpaqueIndices = std::move(copy.cachedOpaqueIndices);
                     dst.cachedTransparentIndices = std::move(copy.cachedTransparentIndices);
                     dst.cachedTransparentVertices = std::move(copy.cachedTransparentVertices);
-                    dst.isMeshDirty = false;
+                    dst.isMeshDirty = copy.isMeshDirty;
+                    dst.aoCalculated.store(copy.aoCalculated);
                 }
                 {
                     std::lock_guard lock(state_mutex);
@@ -198,12 +200,12 @@ void World::generateTerrain(Chunk& chunk, const ChunkCoord& coord)
 
 /* ===================== Greedy Meshing ===================== */
 void World::buildMask(
-    RenderType targetType,
+    const RenderType targetType,
     const int axis,
     RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
     uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-    int dims[3],
-    int x[3], int q[3],
+    const int dims[3],
+    int x[3], const int q[3],
     std::vector<MaskEntry>& mask
 )
 {
@@ -241,7 +243,7 @@ void World::buildMask(
 }
 
 void World::runGreedyPass(
-    RenderType targetType,
+    const RenderType targetType,
     RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
     uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
     const MeshTarget target
@@ -382,19 +384,55 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
                 blockTypes[x+1][y+1][z+1] = bt;
             }
 
-    auto sampleBT = [&](const int wx, const int y, const int wz) -> uint8_t {
-        const Voxel v = TerrainGenerator::sampleVoxel(wx, y, wz);
+    auto sampleBT = [&](const std::vector<Voxel>& voxels, const glm::ivec3& WorldPos) -> uint8_t {
+        const auto localPos = BlockSystem::getLocalCoords(WorldPos);
+
+        Voxel v;
+        if (!voxels.empty())
+            v = voxels[localPos.x + localPos.y * Chunk::WIDTH + localPos.z * Chunk::WIDTH * Chunk::HEIGHT];
+        else
+            v = TerrainGenerator::sampleVoxel(WorldPos.x, WorldPos.y, WorldPos.z);
+
         return getBlockType(v);
     };
+
+
+    std::vector<Voxel> leftVoxels;
+    std::vector<Voxel> rightVoxels;
+    std::vector<Voxel> backVoxels;
+    std::vector<Voxel> frontVoxels;
+
+    {
+        std::lock_guard lock(chunk_mutex);
+
+        if (const auto leftChunk = chunks.find({coord.x - 1, coord.y}); leftChunk != chunks.end()) {
+            leftVoxels.resize(Chunk::SIZE);
+            std::ranges::copy(leftChunk->second.getVoxels(),leftVoxels.begin());
+        }
+
+        if (const auto rightChunk = chunks.find({coord.x + 1, coord.y}); rightChunk != chunks.end()) {
+            rightVoxels.resize(Chunk::SIZE);
+            std::ranges::copy(rightChunk->second.getVoxels(),rightVoxels.begin());
+        }
+
+        if (const auto backChunk = chunks.find({coord.x, coord.y - 1}); backChunk != chunks.end()) {
+            backVoxels.resize(Chunk::SIZE);
+            std::ranges::copy(backChunk->second.getVoxels(),backVoxels.begin());
+        }
+        if (const auto frontChunk = chunks.find({coord.x, coord.y + 1}); frontChunk != chunks.end()) {
+            frontVoxels.resize(Chunk::SIZE);
+            std::ranges::copy(frontChunk->second.getVoxels(),frontVoxels.begin());
+        }
+    }
 
     for (int y = 0; y < H; ++y)
         for (int z = 0; z < D; ++z)
         {
-            auto bt = sampleBT(baseWX-1, y, baseWZ+z);
+            auto bt = sampleBT(leftVoxels, {baseWX-1, y, baseWZ+z});
             blockTypes[0][y+1][z+1]     = bt;
             renderType[0][y+1][z+1]     = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
 
-            bt = sampleBT(baseWX+W, y, baseWZ+z);
+            bt = sampleBT(rightVoxels, {baseWX+W, y, baseWZ+z});
             blockTypes[W+1][y+1][z+1]   = bt;
             renderType[W+1][y+1][z+1]   = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
         }
@@ -402,11 +440,11 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
     for (int x = 0; x < W; ++x)
         for (int y = 0; y < H; ++y)
         {
-            auto bt = sampleBT(baseWX+x, y, baseWZ-1);
+            auto bt = sampleBT(backVoxels, {baseWX+x, y, baseWZ-1});
             blockTypes[x+1][y+1][0]     = bt;
             renderType[x+1][y+1][0]     = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
 
-            bt = sampleBT(baseWX+x, y, baseWZ+D);
+            bt = sampleBT(frontVoxels, {baseWX+x, y, baseWZ+D});
             blockTypes[x+1][y+1][D+1]   = bt;
             renderType[x+1][y+1][D+1]   = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
         }
@@ -430,6 +468,7 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
     for (auto& v : chunk.cachedTransparentVertices) v.position += offset;
 
     chunk.isMeshDirty = false;
+    chunk.aoCalculated = false;
 }
 
 // void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)

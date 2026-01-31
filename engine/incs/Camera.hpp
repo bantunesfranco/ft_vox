@@ -22,6 +22,8 @@ class Camera
 		glm::mat4	view{};
 		glm::mat4	proj{};
 
+		float baseMoveSpeed;
+		float baseRotSpeed;
 		float moveSpeed;
 		float rotSpeed;
 

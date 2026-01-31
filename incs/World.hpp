@@ -98,7 +98,7 @@ enum class RenderType : uint8_t {
 struct WorldUBO {
 	glm::mat4 MVP;
 	glm::vec4 light;       // xyz = pos, w = radius
-	glm::vec4 ambientData; // x = ambient, yzw = padding
+	glm::vec4 cameraPos;   // xyz = pos, w = ambient
 };
 
 struct MaskEntry
@@ -154,8 +154,8 @@ class World {
 			int axis,
 			RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
 			uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-			int dims[3],
-			int x[3], int q[3],
+			const int dims[3],
+			int x[3], const int q[3],
 			std::vector<MaskEntry>& mask
 		);
 
