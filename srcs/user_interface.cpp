@@ -31,7 +31,7 @@ void setupImGui(GLFWwindow* window)
     ImGui::StyleColorsDark();
 }
 
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], const size_t chunkCount)
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], const size_t chunkCount, const size_t chunkRadius)
 {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -54,6 +54,8 @@ void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, floa
     drawList->AddLine(ImVec2(center.x, center.y - crosshairSize), ImVec2(center.x, center.y + crosshairSize), whiteColor, 2.0f);
 
     ImGui::Text("Chunk count: %zu", chunkCount);
+    ImGui::SameLine(150.0f);
+    ImGui::Text("Chunk radius: %zu", chunkRadius);
     ImGui::Checkbox("Wireframe", &showWireframe);
     ImGui::ColorEdit4("Color", rgba);
     ImGui::End();

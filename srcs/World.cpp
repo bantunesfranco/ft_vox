@@ -28,7 +28,9 @@ inline bool shouldRenderFace(const RenderType self, const RenderType neighbor)
     return self != neighbor;                        // Render if types differ
 }
 
-World::World(std::array<uint32_t, 256>& indices) : ubo(0), textureIndices(indices)
+
+World::World(std::array<uint32_t, 256>& indices)
+    : ubo(0), renderDistanceManager(CHUNK_RADIUS_MIN, CHUNK_RADIUS_MAX, 60, 100), textureIndices(indices)
 {
     glCreateBuffers(1, &ubo);
     glNamedBufferData(ubo, sizeof(WorldUBO), nullptr, GL_DYNAMIC_DRAW);
@@ -68,6 +70,11 @@ void World::updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat)
     return frustum.updateFrustum(proj_mat, view_mat);
 }
 
+void World::updateRenderDistance(const float currentFPS)
+{
+    renderDistanceManager.update(currentFPS);
+}
+
 /* ===================== Chunk Streaming ===================== */
 void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
 {
@@ -76,11 +83,19 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
         floorDiv(static_cast<int>(playerPos.z), Chunk::DEPTH)
     };
 
+    // ===== USE DYNAMIC RADIUS INSTEAD OF STATIC CHUNK_RADIUS =====
+    const int CHUNK_RADIUS = getChunkRadius();
+
     // =========================================================
     // LOAD CHUNKS
     // =========================================================
+    constexpr int MAX_CHUNKS_PER_UPDATE = 12;
+    int spawned = 0;
     forEachChunkSpiral(playerChunk, CHUNK_RADIUS, [&](ChunkCoord c)
     {
+        if (spawned >= MAX_CHUNKS_PER_UPDATE)
+            return;
+
         {
             std::lock_guard lock(state_mutex);
             auto& state = chunkStates[c];
@@ -108,16 +123,23 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
                 std::lock_guard lock(state_mutex);
                 chunkStates[c] = ChunkState::Loaded;
             }
+
         });
+
+        ++spawned;
     });
 
     // =========================================================
     // REGENERATE DIRTY CHUNKS
     // =========================================================
+    spawned = 0;
     {
         std::lock_guard stateLock(state_mutex);
 
         for (auto& [c, state] : chunkStates) {
+            if (spawned >= MAX_CHUNKS_PER_UPDATE)
+                break;
+
             if (state != ChunkState::Loaded)
                 continue;
 
@@ -157,21 +179,26 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
                     chunkStates[c] = ChunkState::Loaded;
                 }
             });
+
+            ++spawned;
         }
     }
 
     // =========================================================
     // UNLOAD FAR CHUNKS
     // =========================================================
+    spawned = 0;
     {
         std::lock_guard stateLock(state_mutex);
 
         for (auto& [c, state] : chunkStates) {
+            if (spawned >= MAX_CHUNKS_PER_UPDATE)
+                break;
+
             if (state != ChunkState::Loaded)
                 continue;
 
-            if (glm::distance(glm::vec2(c), glm::vec2(playerChunk))
-                <= CHUNK_RADIUS + 1)
+            if (glm::distance(glm::vec2(c), glm::vec2(playerChunk)) <= CHUNK_RADIUS + 1)
                 continue;
 
             state = ChunkState::Unloading;
@@ -470,200 +497,3 @@ void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
     chunk.isMeshDirty = false;
     chunk.aoCalculated = false;
 }
-
-// void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
-// {
-//     constexpr int W = Chunk::WIDTH;
-//     constexpr int H = Chunk::HEIGHT;
-//     constexpr int D = Chunk::DEPTH;
-//
-//     auto& vertices = chunk.cachedVertices;
-//     auto& indices = chunk.cachedIndices;
-//
-//     vertices.clear();
-//     indices.clear();
-//     vertices.reserve(Chunk::SIZE * 4);
-//     indices.reserve(Chunk::SIZE * 6);
-//
-//     // Padded arrays for solid and block types
-//     thread_local RenderType renderType[W + 2][H + 2][D + 2] = {};
-//     thread_local uint8_t    blockTypes[W + 2][H + 2][D + 2] = {};
-//
-//     const int baseWX = coord.x * W;
-//     const int baseWZ = coord.y * D;
-//
-//     // --- Fill center chunk --- + 1
-//     for (int x = 0; x < W; ++x)
-//         for (int y = 0; y < H; ++y)
-//             for (int z = 0; z < D; ++z)
-//             {
-//                 Voxel v = chunk.getVoxel(x, y, z);
-//                 uint8_t bt = getBlockType(v);
-//
-//                 RenderType rt = (bt) ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
-//                 renderType[x + 1][y + 1][z + 1] = rt;
-//                 blockTypes[x + 1][y + 1][z + 1] = bt;
-//             }
-//
-//     // --- Fill neighboring voxels for padded borders ---
-//     auto sampleRT = [&](const int wx, const int y, const int wz)
-//     {
-//         const Voxel v = TerrainGenerator::sampleVoxel(wx, y, wz);
-//         uint8_t bt = getBlockType(v);
-//         if (bt == 0) return RenderType::Air;
-//         return blockRenderType(static_cast<BlockType>(bt));
-//     };
-//
-//     for (int y = 0; y < H; ++y)
-//         for (int z = 0; z < D; ++z)
-//         {
-//             renderType[0][y + 1][z + 1]     = sampleRT(baseWX - 1, y, baseWZ + z);
-//             renderType[W + 1][y + 1][z + 1] = sampleRT(baseWX + W, y, baseWZ + z);
-//         }
-//
-//     for (int x = 0; x < W; ++x)
-//         for (int y = 0; y < H; ++y)
-//         {
-//             renderType[x + 1][y + 1][0]     = sampleRT(baseWX + x, y, baseWZ - 1);
-//             renderType[x + 1][y + 1][D + 1] = sampleRT(baseWX + x, y, baseWZ + D);
-//         }
-//
-//     // --- Normal to index mapping ---
-//     auto normalToIndex = [](const int axis, const int dir) -> uint8_t {
-//         return axis * 2 + (dir < 0 ? 1 : 0);
-//     };
-//
-//     // --- Greedy meshing ---
-//     for (int axis = 0; axis < 3; ++axis)
-//     {
-//         const int u = (axis + 1) % 3;
-//         const int v = (axis + 2) % 3;
-//
-//         constexpr int dims[3] = { W, H, D };
-//
-//         int x[3] = { 0, 0, 0 };
-//         int q[3] = { 0, 0, 0 };
-//
-//         for (int dir = -1; dir <= 1; dir += 2)
-//         {
-//             q[axis] = dir;
-//
-//             struct MaskEntry { bool visible; uint8_t blockType; };
-//             thread_local std::vector<MaskEntry> mask;
-//             mask.assign(std::max({W, H, D}) * std::max({W, H, D}), {false, 0});
-//
-//             for (x[axis] = -1; x[axis] < dims[axis]; ++x[axis])
-//             {
-//                 int n = 0;
-//
-//                 // Build mask for this slice
-//                 for (x[v] = 0; x[v] < dims[v]; ++x[v])
-//                     for (x[u] = 0; x[u] < dims[u]; ++x[u])
-//                     {
-//                         int cx = x[0], cy = x[1], cz = x[2];
-//                         int nx = cx + q[0], ny = cy + q[1], nz = cz + q[2];
-//
-//                         // int nxi = std::clamp(nx + 1, 0, W + 1);
-//                         // int nyi = std::clamp(ny + 1, 0, H + 1);
-//                         // int nzi = std::clamp(nz + 1, 0, D + 1);
-//
-//                         const RenderType self     = renderType[cx][cy][cz];
-//                         const RenderType neighbor = renderType[nx][ny][nz];
-//
-//                         const uint8_t bt = blockTypes[cx + 1][cy + 1][cz + 1];
-//
-//                         mask[n].visible   = bt != 0 && shouldRenderFace(self, neighbor);
-//                         mask[n].blockType = bt;
-//
-//                         ++n;
-//                     }
-//
-//                 n = 0;
-//                 uint32_t base = vertices.size();
-//
-//                 // --- Greedy merge ---
-//                 for (int j = 0; j < dims[v]; ++j) {
-//                     for (int i = 0; i < dims[u];) {
-//                         if (!mask[n].visible) { ++i; ++n; continue; }
-//
-//                         int w = 1;
-//                         const uint8_t bt = mask[n].blockType;
-//
-//                         while (i + w < dims[u] && mask[n + w].visible && mask[n + w].blockType == bt) ++w;
-//
-//                         int h = 1;
-//                         for (; j + h < dims[v]; ++h)
-//                         {
-//                             for (int k = 0; k < w; ++k)
-//                                 if (!mask[n + k + h * dims[u]].visible || mask[n + k + h * dims[u]].blockType != bt)
-//                                     goto done_merge;
-//                         }
-//                         done_merge:
-//
-//                         x[u] = i; x[v] = j;
-//
-//                         float verts[4][3];
-//                         for (auto& vert : verts) {
-//                             vert[0] = static_cast<float>(x[0]);
-//                             vert[1] = static_cast<float>(x[1]);
-//                             vert[2] = static_cast<float>(x[2]);
-//                         }
-//
-//                         verts[1][u] += w;
-//                         verts[2][u] += w; verts[2][v] += h;
-//                         verts[3][v] += h;
-//
-//                         if (dir > 0) for (auto& vert : verts) vert[axis] += 1.0f;
-//
-//                         // X and Y
-//                         float uv[4][2] = {{0, 0}, {float(w), 0}, {float(w),float(h)}, {0,float(h)}};
-//
-//                         if (axis == 2) // Z -> swap or flip v
-//                         {
-//                             uv[0][1] = float(h);
-//                             uv[1][1] = float(h);
-//                             uv[2][1] = 0;
-//                             uv[3][1] = 0;
-//                         }
-//
-//                         const uint16_t tex = textureIndices[bt];
-//                         const uint8_t normalIndex = normalToIndex(axis, dir);
-//                         constexpr uint8_t AO_MAX = 3;
-//
-//                         vertices.push_back({ {verts[0][0], verts[0][1], verts[0][2]}, {uv[0][0],uv[0][1]}, tex, normalIndex, AO_MAX });
-//                         vertices.push_back({ {verts[1][0], verts[1][1], verts[1][2]}, {uv[1][0],uv[1][1]}, tex, normalIndex, AO_MAX });
-//                         vertices.push_back({ {verts[2][0], verts[2][1], verts[2][2]}, {uv[2][0],uv[2][1]}, tex, normalIndex, AO_MAX });
-//                         vertices.push_back({ {verts[3][0], verts[3][1], verts[3][2]}, {uv[3][0],uv[3][1]}, tex, normalIndex, AO_MAX });
-//
-//                         if (dir > 0)
-//                             indices.insert(indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
-//                         else
-//                             indices.insert(indices.end(), { base, base + 3, base + 2, base, base + 2, base + 1 });
-//
-//                         for (int l = 0; l < h; ++l)
-//                             for (int k = 0; k < w; ++k)
-//                                 mask[n + k + l * dims[u]].visible = false;
-//
-//                         base += 4;
-//                         i += w;
-//                         n += w;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-//
-//     // --- Apply chunk offset ---
-//     const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
-//     for (auto& v : vertices) v.position += offset;
-//
-//     chunk.isMeshDirty = false;
-//
-//     // // --- Mark neighbor chunks for AO recalculation ---
-//     // std::lock_guard lock(chunk_mutex);
-//     // for (int dz = -1; dz <= 1; ++dz)
-//     //     for (int dx = -1; dx <= 1; ++dx)
-//     //         if (dx != 0 || dz != 0)
-//     //             if (auto it = chunks.find(coord + ChunkCoord(dx, dz)); it != chunks.end())
-//     //                 it->second.aoCalculated = false;
-// }

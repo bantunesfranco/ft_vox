@@ -18,7 +18,7 @@ out vec4 FragColor;
 
 #define WATER_TEXTURE_INDEX 4 // see App.cpp -> loadTextures()
 #define FOG_START 175.0
-#define FOG_END 512.0
+#define FOG_END 250.0
 #define FOG_COLOR vec3(0.7, 0.7, 0.7)  // Light grey
 
 float calculateFogFactor(vec3 uWorldPos, vec4 cameraPos)

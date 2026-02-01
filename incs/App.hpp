@@ -61,8 +61,7 @@ void mouse_bttn_callback(GLFWwindow* window, int button, int action, int mods);
 void resize_callback(GLFWwindow* window, int width, int height);
 
 void setupImGui(GLFWwindow* window);
-// void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe);
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], size_t chunkCount);
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], size_t chunkCount, size_t chunkRadius);
 
 
 

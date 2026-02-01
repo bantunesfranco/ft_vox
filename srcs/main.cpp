@@ -32,7 +32,7 @@ int main()
 {
 	std::map<settings_t, bool> settings = {{VOX_FULLSCREEN, false}, {VOX_RESIZE, true}, {VOX_DECORATED, true}, {VOX_MAXIMIZED, false}};
 
-	const auto app = std::make_unique<App>(1440, 720, "PotatoCraft", settings);
+	const auto app = std::make_unique<App>(1920, 1080, "PotatoCraft", settings);
 	if (!app.get())
 		return (EXIT_FAILURE);
 	

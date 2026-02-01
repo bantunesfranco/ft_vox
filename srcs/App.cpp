@@ -99,6 +99,7 @@ void App::setCallbackFunctions() const
 void App::run()
 {
     float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
+	int currentFPS = 0;
     // float rgba[4] = {};
 
     while (windowIsOpen(window))
@@ -106,6 +107,9 @@ void App::run()
         glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
         glfwPollEvents();
         FPSCounter::update();
+    	currentFPS = FPSCounter::getFPS();
+    	world.updateRenderDistance(currentFPS);
+
         handleMovement(window, camera);
 
         Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
@@ -153,8 +157,11 @@ void App::run()
         	}
 	    }
 
+    	auto chunkCount = world.getChunks().size();
+    	auto chunkRadius = world.getChunkRadius();
+
     	renderBlockHighlight();
-        renderImGui(camera, showWireframe, rgba, world.getChunks().size());
+        renderImGui(camera, showWireframe, rgba, chunkCount, chunkRadius);
         glfwSwapBuffers(window);
 	}
 
@@ -354,7 +361,7 @@ void App::toggleSpeedBoost()
 {
 	if (!camera) return;
 
-	camera->moveSpeed = (camera->moveSpeed == camera->baseMoveSpeed) ? camera->baseMoveSpeed * 10.0f : camera->baseMoveSpeed;
+	camera->moveSpeed = (camera->moveSpeed == camera->baseMoveSpeed) ? camera->baseMoveSpeed * 20.0f : camera->baseMoveSpeed;
 	camera->rotSpeed = (camera->rotSpeed == camera->baseRotSpeed) ? camera->baseRotSpeed * 2.0f : camera->baseRotSpeed;
 }
 

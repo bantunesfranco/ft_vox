@@ -5,6 +5,7 @@
 #include "ThreadPool.hpp"
 #include "Camera.hpp"
 #include "Terrain.hpp"
+#include "DynamicRenderDistance.hpp"
 
 #include <vector>
 #include <unordered_map>
@@ -116,8 +117,8 @@ struct MeshTarget
 // Define the world as a collection of chunks
 class World {
 	public:
-		constexpr static int CHUNK_RADIUS = 16;
-		constexpr static int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
+		constexpr static int CHUNK_RADIUS_MIN = 14;
+		constexpr static int CHUNK_RADIUS_MAX = 16;
 
 		Frustum frustum{};
 		WorldUBO worldUBO{};
@@ -126,13 +127,16 @@ class World {
 		std::mutex chunk_mutex;
 		std::mutex state_mutex;
 
+		DynamicRenderDistance renderDistanceManager;
+
 		World(std::array<uint32_t, 256>& indices);
 		~World() = default;
 		World(const World&) = delete;
 		World& operator=(const World&) = delete;
 
 		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		// void generateChunkMesh(Chunk& chunk, const ChunkCoord& coord) const;
+		void updateRenderDistance(float currentFPS);
+		int	 getChunkRadius() const { return renderDistanceManager.getRadius(); }
 		void generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord);
 		bool isBlockActiveWorld(int wx, int wy, int wz) const;
 		bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const;
