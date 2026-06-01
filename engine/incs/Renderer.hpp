@@ -1,9 +1,11 @@
 
 #ifndef Renderer_HPP
 #define Renderer_HPP
+#include <optional>
 
 constexpr auto FSHADER_PATH = "./engine/shaders/fragment.glsl";
 constexpr auto VSHADER_PATH = "./engine/shaders/vertex.glsl";
+constexpr auto CSHADER_PATH = "./engine/shaders/meshgen.compute";
 
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
@@ -77,14 +79,15 @@ class Renderer
 {
 	private:
 		GLuint	_shaderprog;
+		GLuint	_computeProg = 0;  // GPU compute shader for mesh generation
 		GLuint	_vao;
 		GLuint	_vbo;
 		GLuint	_ibo;
 		GLuint	_cameraUBO;
 		GLuint	_textureArray;
 
-		static std::string* loadShaderCode(const char* path);
-		static uint32_t		compileShader(const std::string* code, int32_t type);
+		static std::optional<std::string> loadShaderCode(const char* path);
+		static uint32_t		compileShader(const std::string& code, int32_t type);
 
 	public:
 		Renderer();
@@ -98,6 +101,11 @@ class Renderer
 		void	releaseVBO();
         void	renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
 		void	setTexArray(const GLuint textureArray) { _textureArray = textureArray; }
+		
+		// GPU compute support for mesh generation
+		// bool	hasComputeSupport() const { return _computeProg != 0; }
+		// GLuint	getComputeProgram() const { return _computeProg; }
+		// void	dispatchCompute(GLuint groupsX, GLuint groupsY, GLuint groupsZ) const;
 
 		[[nodiscard]] GLuint	getShaderProgram()      const { return _shaderprog;    }
 		[[nodiscard]] GLuint	getVertexArrayObject()  const { return _vao;           }

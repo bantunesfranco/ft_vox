@@ -1,6 +1,8 @@
 #ifndef APP_HPP
 #define APP_HPP
 
+#include <array>
+#include <cstdint>
 #include "Engine.hpp"
 #include "World.hpp"
 
@@ -23,8 +25,10 @@ class App : public Engine
 		void	setCallbackFunctions() const;
 		void	loadTextures();
 		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) const;
+		void	renderWorld(const World& world) const;
 
 		static void	uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data);
+
 };
 
 void error_callback(int error, const char* description);

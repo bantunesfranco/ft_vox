@@ -14,17 +14,19 @@
 
 Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _cameraUBO(0), _textureArray(0)
 {
-    const std::string* code = loadShaderCode(VSHADER_PATH);
+    std::string code = loadShaderCode(VSHADER_PATH).value_or("");
     const GLuint vshader = compileShader(code, GL_VERTEX_SHADER);
-    delete code;
-    if (!vshader) throw Engine::EngineException(VOX_VERTFAIL);
 
-    code = loadShaderCode(FSHADER_PATH);
+    code = loadShaderCode(FSHADER_PATH).value_or("");
     const GLuint fshader = compileShader(code, GL_FRAGMENT_SHADER);
-    delete code;
-    if (!fshader)
-    {
-        glDeleteShader(vshader);
+
+    code = loadShaderCode(CSHADER_PATH).value_or("");
+    const GLuint cshader = compileShader(code, GL_COMPUTE_SHADER);
+
+    if (!vshader or !fshader or !cshader) {
+        if (vshader) glDeleteShader(vshader);
+        if (fshader) glDeleteShader(fshader);
+        if (cshader) glDeleteShader(cshader);
         throw Engine::EngineException(VOX_FRAGFAIL);
     }
 
@@ -41,7 +43,7 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _cameraUBO(0),
     if (!success)
     {
         char infolog[512];
-        glGetProgramInfoLog(_shaderprog, sizeof(infolog), nullptr, infolog);
+        glGetProgramInfoLog(_shaderprog, static_cast<GLsizei>(sizeof(infolog)), nullptr, infolog);
         std::cerr << "Shader Program Linking Failed: " << infolog << std::endl;
         glDeleteProgram(_shaderprog);
         throw Engine::EngineException(VOX_SHDRFAIL);
@@ -88,18 +90,19 @@ Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _cameraUBO(0),
 
 Renderer::~Renderer() {
     glDeleteProgram(_shaderprog);
+    if (_computeProg) glDeleteProgram(_computeProg);
     glDeleteBuffers(1, &_ibo);
     glDeleteBuffers(1, &_vbo);
     glDeleteVertexArrays(1, &_vao);
 }
 
-GLuint Renderer::compileShader(const std::string* code, int32_t type) {
-    if (!code) return 0;
+GLuint Renderer::compileShader(const std::string& code, const int32_t type) {
+    if (code.empty()) return 0;
 
     const GLuint shader = glCreateShader(type);
     if (!shader) return 0;
 
-    const char* cstr = code->c_str();
+    const char* cstr = code.c_str();
     glShaderSource(shader, 1, &cstr, nullptr);
     glCompileShader(shader);
     
@@ -107,7 +110,7 @@ GLuint Renderer::compileShader(const std::string* code, int32_t type) {
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
         char infolog[512];
-        glGetShaderInfoLog(shader, sizeof(infolog), nullptr, infolog);
+        glGetShaderInfoLog(shader, static_cast<GLsizei>(sizeof(infolog)), nullptr, infolog);
         std::cerr << infolog << std::endl;
         glDeleteShader(shader);
         return 0;
@@ -115,19 +118,27 @@ GLuint Renderer::compileShader(const std::string* code, int32_t type) {
     return shader;
 }
 
-std::string* Renderer::loadShaderCode(const char* path) {
+std::optional<std::string> Renderer::loadShaderCode(const char* path) {
     std::ifstream file(path);
     if (!file.is_open()) {
         std::cerr << "Failed to open shader file: " << path << std::endl;
-        return nullptr;
+        return std::nullopt;
     }
 
     std::stringstream shaderStream;
     shaderStream << file.rdbuf();
     file.close();
 
-    return new std::string(shaderStream.str());
+    std::string code = shaderStream.str();
+    return code;
 }
+
+// void Renderer::dispatchCompute(GLuint groupsX, GLuint groupsY, GLuint groupsZ) const {
+//     if (!_computeProg) return;
+//     glUseProgram(_computeProg);
+//     glDispatchCompute(groupsX, groupsY, groupsZ);
+//     glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
+// }
 
 void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4& mvp) const
 {
@@ -138,10 +149,10 @@ void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uin
     glBindVertexArray(_vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STREAM_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint32_t), indices.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint32_t), indices.data(), GL_STREAM_DRAW);
 
     glBindBuffer(GL_UNIFORM_BUFFER, _cameraUBO);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4),glm::value_ptr(mvp));
@@ -199,10 +210,10 @@ void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPo
         _ibo = VBOManager::get().getVBO();
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STREAM_DRAW);
 
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
 }

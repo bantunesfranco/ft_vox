@@ -2,17 +2,67 @@
 #define DEFINES_HPP
 
 #include <glm/glm.hpp>
+#include <array>
+#include <cstdint>
 
 typedef int				GLint;
 typedef unsigned int	GLuint;
 
+// Packed vertex format: 32 bytes (optimized from 40 bytes)
 typedef struct Vertex {
-    glm::vec3	position;
-	glm::vec3	normal;
-	glm::vec2	uv;
-	uint32_t	texIndex;
-	float		ao;
+    glm::vec3	position;           // 12 bytes
+	glm::vec2	uv;                 // 8 bytes
+	uint32_t	texIndex;           // 4 bytes
+	uint8_t		normal;             // 1 byte (packed: 3 bits direction + 5 spare)
+	uint8_t		ao_packed;          // 1 byte (AO: 0-255 -> 0.0-1.0)
 } Vertex;
+
+// Normal direction encoding for axis-aligned faces (voxel grids)
+enum class NormalDir : uint8_t {
+	PositiveX = 0,  // +X face
+	NegativeX = 1,  // -X face
+	PositiveY = 2,  // +Y face
+	NegativeY = 3,  // -Y face
+	PositiveZ = 4,  // +Z face
+	NegativeZ = 5,  // -Z face
+};
+
+// Pack AO (float 0.0-1.0) to uint8 (0-255)
+inline uint8_t packAO(const float ao) {
+	return static_cast<uint8_t>(glm::clamp(ao, 0.0f, 1.0f) * 255.0f);
+}
+
+// Unpack uint8 AO back to float
+inline float unpackAO(const uint8_t ao_byte) {
+	return static_cast<float>(ao_byte) / 255.0f;
+}
+
+// Pack normal direction into uint8
+inline uint8_t packNormal(NormalDir dir) {
+	return static_cast<uint8_t>(dir) & 0x07;
+}
+
+// Create a Vertex with packed values
+inline Vertex makeVertex(const glm::vec3& pos, const glm::vec3& normal, const glm::vec2& uv,
+                         const uint32_t texIdx, const float ao) {
+	// Determine which face normal this is
+	NormalDir dir;
+	if (std::abs(normal.x) > 0.5f) {
+		dir = (normal.x > 0) ? NormalDir::PositiveX : NormalDir::NegativeX;
+	} else if (std::abs(normal.y) > 0.5f) {
+		dir = (normal.y > 0) ? NormalDir::PositiveY : NormalDir::NegativeY;
+	} else {
+		dir = (normal.z > 0) ? NormalDir::PositiveZ : NormalDir::NegativeZ;
+	}
+	
+	return Vertex{
+		.position = pos,
+		.uv = uv,
+		.texIndex = texIdx,
+		.normal = packNormal(dir),
+		.ao_packed = packAO(ao)
+	};
+}
 
 typedef enum settings
 {

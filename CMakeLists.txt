@@ -19,16 +19,29 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
 # Dependencies
 include(FetchContent)
 
-# Fetch ImGui
-FetchContent_Declare(
-  imgui
-  GIT_REPOSITORY https://github.com/ocornut/imgui.git
-  GIT_TAG v1.91.0
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
-)
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui)
 
-# Fetch the dependencies into the vendor directory
-FetchContent_MakeAvailable(imgui)
+# Fetch ImGui only if not already present
+if(NOT EXISTS ${IMGUI_DIR}/imgui.cpp)
+
+    message(STATUS "ImGui not found locally. Fetching from GitHub...")
+
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.92.8
+    )
+    FetchContent_MakeAvailable(imgui)
+
+    # Copy fetched source to vendor
+    file(COPY ${imgui_SOURCE_DIR}/ DESTINATION ${IMGUI_DIR})
+
+else()
+    message(STATUS "Using local ImGui in vendor/imgui")
+endif()
+
+# Tell CMake where ImGui is
+set(imgui_SOURCE_DIR ${IMGUI_DIR})
 
 # Automatically collect all ImGui source files
 file(GLOB IMGUI_SOURCES

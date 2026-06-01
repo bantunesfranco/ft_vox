@@ -86,7 +86,7 @@ void App::setCallbackFunctions() const
 
 void App::run()
 {
-    ThreadPool threadPool(8);
+    ThreadPool threadPool(std::thread::hardware_concurrency());
     World world(textureIndices);
 
 	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
@@ -103,33 +103,37 @@ void App::run()
 
 		world.updateChunks(camera->pos, threadPool);
 
-		std::vector<Chunk*> visibleChunks;
-		{
-			std::lock_guard lock(world.chunk_mutex);
-			auto chunks = world.getChunks() | std::views::values;
-			visibleChunks.reserve(chunks.size());
-			for (auto& chunk : chunks) {
-				if (chunk.cachedVertices.empty())
-					continue;
-				if (!world.frustum.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
-					continue;
-				visibleChunks.push_back(&chunk);
-			}
-		}
-
-		glm::vec3 camPos = camera->pos;
-		std::sort(visibleChunks.begin(), visibleChunks.end(),
-			[&camPos](const Chunk* a, const Chunk* b) {
-				return glm::distance2(a->worldCenter, camPos) < glm::distance2(b->worldCenter, camPos);
-			});
-
-		for (const auto& chunk : visibleChunks) {
-			uploadChunk(*chunk, chunk->renderData);
-			renderChunk(*chunk, world.worldUBO, world.ubo);
-		}
+		renderWorld(world);
 
 		renderImGui(camera, _showWireframe, rgba);
 		glfwSwapBuffers(window);
+	}
+}
+
+void App::renderWorld(const World& world) const
+{
+	glm::vec3 camPos = camera->pos;
+
+	// Make a local copy of pointers (fast, lock-free)
+	std::vector<Chunk*> visibleChunks;
+	visibleChunks.reserve(world.renderChunks.size());
+
+	for (auto* chunk : world.renderChunks) {
+		if (chunk->cachedVertices.empty()) continue;
+		if (!world.frustum.isBoxInFrustum(chunk->worldMin, chunk->worldMax)) continue;
+		visibleChunks.push_back(chunk);
+	}
+
+	// Sort front-to-back or back-to-front
+	std::ranges::sort(visibleChunks,
+      [&camPos](const Chunk* a, const Chunk* b) {
+          return glm::distance2(a->worldCenter, camPos) < glm::distance2(b->worldCenter, camPos);
+      });
+
+	// Render
+	for (auto* chunk : visibleChunks) {
+		uploadChunk(*chunk, chunk->renderData);
+		renderChunk(*chunk, world.worldUBO, world.ubo);
 	}
 }
 
@@ -192,11 +196,11 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 
 	glBindBuffer(GL_ARRAY_BUFFER, data.vbo);
 	glBufferData(GL_ARRAY_BUFFER, chunk.cachedVertices.size() * sizeof(Vertex),
-				 chunk.cachedVertices.data(), GL_STATIC_DRAW);
+				 chunk.cachedVertices.data(), GL_DYNAMIC_DRAW);
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data.ibo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indexCount * sizeof(uint32_t),
-				 chunk.cachedIndices.data(), GL_STATIC_DRAW);
+				 chunk.cachedIndices.data(), GL_DYNAMIC_DRAW);
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3,
@@ -204,24 +208,24 @@ void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
 
 	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 3,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, normal)));
-
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 2,
+	glVertexAttribPointer(1, 2,
 		GL_FLOAT, GL_FALSE,
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
 
-	glEnableVertexAttribArray(3);
-	glVertexAttribIPointer(3, 1,
+	glEnableVertexAttribArray(2);
+	glVertexAttribIPointer(2, 1,
 		GL_UNSIGNED_INT,
 		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
 
+	glEnableVertexAttribArray(3);
+	glVertexAttribIPointer(3, 1,
+		GL_UNSIGNED_BYTE,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, normal)));
+
 	glEnableVertexAttribArray(4);
-	glVertexAttribPointer(4, 1,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, ao)));
+	glVertexAttribIPointer(4, 1,
+		GL_UNSIGNED_BYTE,
+		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, ao_packed)));
 
 	glBindVertexArray(0);
 }
