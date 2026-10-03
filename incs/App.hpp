@@ -22,6 +22,7 @@ class App : public Engine
 		void	terminate() override;
 		void	destroyBlock();
 		void	placeBlock();
+		void	toggleSpeedBoost();
 
 		bool			_showWireframe{};
 		GLuint			textureAtlas{};
@@ -31,8 +32,13 @@ class App : public Engine
 		void	loadTextures();
 		World world;
 		BlockSystem blockSystem;
+		bool speedBoostEnabled = false;
+		bool hasHighlightedBlock = false;
+		glm::ivec3 highlightedBlockPos{};
 		void	renderWorld(const World& world);
 		void	processMeshUploads(World& world);
+		void	updateBlockHighlight();
+		void	renderBlockHighlight();
 
 };
 

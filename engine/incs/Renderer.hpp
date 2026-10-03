@@ -70,6 +70,10 @@ private:
 
     GLint _chunkPositionLocation = -1;
     GLint _atlasRectsLocation = -1;
+    GLint _highlightPassLocation = -1;
+    GLuint _boundsVao = 0;
+    GLuint _boundsVbo = 0;
+    GLuint _boundsIbo = 0;
 
     std::size_t _vertexBufferCapacity = 0;
     std::size_t _indexBufferCapacity = 0;

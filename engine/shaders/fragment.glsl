@@ -10,6 +10,7 @@ flat in uint vTexIndex;
 
 layout(binding = 0) uniform sampler2D uAtlas;
 uniform vec4 uTextureRects[64];
+uniform bool uHighlightPass;
 
 layout(std140, binding = 0) uniform WorldUBO
 {
@@ -22,6 +23,11 @@ out vec4 FragColor;
 
 void main()
 {
+    if (uHighlightPass) {
+        FragColor = vec4(1.0, 0.82, 0.12, 1.0);
+        return;
+    }
+
     vec4 rect = uTextureRects[vTexIndex];
     vec2 atlasUV = rect.xy + vUV * rect.zw;
     vec4 tex = texture(uAtlas, atlasUV);

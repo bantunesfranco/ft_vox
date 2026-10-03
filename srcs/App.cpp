@@ -121,6 +121,7 @@ void App::run() {
 		for (auto& gpuMesh : world.pruneRenderStates())
 			renderer->releaseMesh(gpuMesh);
     	world.buildRenderStates();
+		updateBlockHighlight();
 
         WorldUBO worldUBO{};
     	Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
@@ -130,6 +131,7 @@ void App::run() {
     	processMeshUploads(world);
 
         renderWorld(world);
+		renderBlockHighlight();
 
         renderImGui(camera, _showWireframe, rgba);
 
@@ -150,6 +152,35 @@ void App::placeBlock() {
 			toBlockId(BlockType::Amethyst),
 			world
 		);
+}
+
+void App::toggleSpeedBoost() {
+	if (!camera)
+		return;
+
+	speedBoostEnabled = !speedBoostEnabled;
+	camera->moveSpeed = camera->baseMoveSpeed * (speedBoostEnabled ? 20.0f : 1.0f);
+	camera->rotSpeed = camera->baseRotSpeed * (speedBoostEnabled ? 2.0f : 1.0f);
+}
+
+void App::updateBlockHighlight() {
+	if (!camera) {
+		hasHighlightedBlock = false;
+		return;
+	}
+
+	const BlockRaycastHit hit = blockSystem.raycast(camera->pos, camera->dir, world);
+	hasHighlightedBlock = hit.valid;
+	if (hasHighlightedBlock)
+		highlightedBlockPos = hit.blockPos;
+}
+
+void App::renderBlockHighlight() {
+	if (!hasHighlightedBlock)
+		return;
+
+	const glm::vec3 minPos(highlightedBlockPos);
+	renderer->renderBoundingBox(minPos, minPos + glm::vec3(1.0f));
 }
 
 

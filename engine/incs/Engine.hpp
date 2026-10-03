@@ -48,6 +48,10 @@ class Engine
 	private:
 		int32_t	_width{};
 		int32_t	_height{};
+		int32_t	_windowedX = 100;
+		int32_t	_windowedY = 100;
+		int32_t	_windowedWidth{};
+		int32_t	_windowedHeight{};
 		double	_lastFrameTime{};
 
 		void	initWindow(int32_t width, int32_t height, const char* title);
@@ -74,6 +78,7 @@ class Engine
 	
 		static const char*	vox_strerror(vox_errno_t val);
 		void				setSetting(int32_t setting, bool value);
+		void				toggleFullscreen();
 
 		static bool			windowIsOpen(GLFWwindow* window);
 		virtual void		terminate();

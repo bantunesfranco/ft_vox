@@ -10,6 +10,7 @@ layout(std140, binding = 0) uniform WorldUBO
 };
 
 uniform vec3 uChunkPosition;
+uniform bool uHighlightPass;
 
 out vec2 vUV;
 out vec3 vNormal;
@@ -48,6 +49,8 @@ void main()
     uint ao = (data >> 24u) & 0x03u;
 
     vec3 localPos = vec3(x, y, z);
+    if (uHighlightPass)
+        localPos = localPos * 1.01 - vec3(0.005);
     vec3 worldPos = localPos + uChunkPosition;
 
     gl_Position = MVP * vec4(worldPos, 1.0);

@@ -65,6 +65,37 @@ void	Engine::setSetting(const int32_t setting, const bool value)
 	settings[setting] = value;
 }
 
+void Engine::toggleFullscreen()
+{
+	if (!settings[VOX_FULLSCREEN]) {
+		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+		const GLFWvidmode* mode = monitor ? glfwGetVideoMode(monitor) : nullptr;
+		if (!mode)
+			return;
+
+		glfwGetWindowPos(window, &_windowedX, &_windowedY);
+		glfwGetWindowSize(window, &_windowedWidth, &_windowedHeight);
+		glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+		settings[VOX_FULLSCREEN] = true;
+		_width = mode->width;
+		_height = mode->height;
+		return;
+	}
+
+	glfwSetWindowMonitor(
+		window,
+		nullptr,
+		_windowedX,
+		_windowedY,
+		_windowedWidth,
+		_windowedHeight,
+		GLFW_DONT_CARE
+	);
+	settings[VOX_FULLSCREEN] = false;
+	_width = _windowedWidth;
+	_height = _windowedHeight;
+}
+
 void Engine::initWindow(const int32_t width, const int32_t height, const char* title)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -81,6 +112,8 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 
 	_width = width;
 	_height = height;
+	_windowedWidth = width;
+	_windowedHeight = height;
 	window = glfwCreateWindow(width, height, title, settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : nullptr, nullptr);
 	if (!window)
 		throw EngineException(VOX_WINFAIL);

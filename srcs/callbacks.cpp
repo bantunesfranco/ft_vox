@@ -69,6 +69,14 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     {
         app->closeWindow();
     }
+    else if (key == VOX_KEY_F11 && action == VOX_PRESS)
+    {
+        app->toggleFullscreen();
+    }
+    else if (key == VOX_KEY_SPACE && action == VOX_PRESS)
+    {
+        app->toggleSpeedBoost();
+    }
     else if (key == VOX_KEY_X && action == VOX_PRESS)
     {
         app->_showWireframe = !app->_showWireframe;
