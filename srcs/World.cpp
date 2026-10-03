@@ -90,6 +90,7 @@ std::vector<ChunkRenderState>& World::getRenderStates() noexcept {
 std::vector<GpuMesh> World::pruneRenderStates() {
     std::vector<GpuMesh> retiredMeshes;
     std::lock_guard lock(chunk_mutex);
+    retiredMeshes.swap(pendingRetiredMeshes);
 
     for (auto it = renderStates.begin(); it != renderStates.end();) {
         if (chunks.contains(it->coord)) {
@@ -112,6 +113,76 @@ std::vector<GpuMesh> World::pruneRenderStates() {
     }
 
     return retiredMeshes;
+}
+
+bool World::getBlockAt(const glm::ivec3& worldPos, BlockId& block) const {
+    if (worldPos.y < 0 || worldPos.y >= ChunkColumn::HEIGHT)
+        return false;
+
+    const int chunkX = floorDiv(worldPos.x, ChunkSection::SIZE);
+    const int chunkZ = floorDiv(worldPos.z, ChunkSection::SIZE);
+    const int localX = worldPos.x - chunkX * ChunkSection::SIZE;
+    const int localZ = worldPos.z - chunkZ * ChunkSection::SIZE;
+
+    std::lock_guard lock(chunk_mutex);
+    const auto it = chunks.find({chunkX, chunkZ});
+    if (it == chunks.end() || !it->second)
+        return false;
+
+    block = it->second->getUnchecked(localX, worldPos.y, localZ);
+    return true;
+}
+
+bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
+    if (worldPos.y < 0 || worldPos.y >= ChunkColumn::HEIGHT || block >= BLOCK_TYPE_COUNT)
+        return false;
+
+    const int chunkX = floorDiv(worldPos.x, ChunkSection::SIZE);
+    const int chunkZ = floorDiv(worldPos.z, ChunkSection::SIZE);
+    const int localX = worldPos.x - chunkX * ChunkSection::SIZE;
+    const int localZ = worldPos.z - chunkZ * ChunkSection::SIZE;
+
+    std::lock_guard lock(chunk_mutex);
+    const auto columnIt = chunks.find({chunkX, chunkZ});
+    if (columnIt == chunks.end() || !columnIt->second)
+        return false;
+
+    ChunkColumn& column = *columnIt->second;
+    if (column.getUnchecked(localX, worldPos.y, localZ) == block)
+        return false;
+
+    column.setUnchecked(localX, worldPos.y, localZ, block);
+
+    static constexpr std::array<glm::ivec3, 7> affectedOffsets = {{
+        {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+        {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+    }};
+
+    for (const glm::ivec3& offset : affectedOffsets) {
+        const glm::ivec3 affected = worldPos + offset;
+        if (affected.y < 0 || affected.y >= ChunkColumn::HEIGHT)
+            continue;
+
+        const int affectedChunkX = floorDiv(affected.x, ChunkSection::SIZE);
+        const int affectedChunkZ = floorDiv(affected.z, ChunkSection::SIZE);
+        const ChunkCoord affectedCoord{affectedChunkX, affectedChunkZ};
+        const std::uint8_t sectionY = static_cast<std::uint8_t>(affected.y / ChunkSection::SIZE);
+        const auto maskIt = meshedSections.find(affectedCoord);
+        if (maskIt != meshedSections.end())
+            maskIt->second &= static_cast<std::uint16_t>(~(1u << sectionY));
+
+        for (auto stateIt = renderStates.begin(); stateIt != renderStates.end(); ++stateIt) {
+            if (stateIt->coord != affectedCoord || stateIt->sectionY != sectionY)
+                continue;
+
+            pendingRetiredMeshes.push_back(std::move(stateIt->gpuMesh));
+            pendingRetiredMeshes.push_back(std::move(stateIt->transparentGpuMesh));
+            renderStates.erase(stateIt);
+            break;
+        }
+    }
+
+    return true;
 }
 
 /* ============================================================

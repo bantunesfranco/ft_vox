@@ -79,6 +79,7 @@ void App::setCallbackFunctions() const {
 	setErrorCallback(error_callback);
 	setKeyCallback(key_callback);
 	setCursorPosCallback(mouse_callback);
+	setMouseButtonCallback(mouse_button_callback);
 }
 
 void App::run() {
@@ -90,8 +91,6 @@ void App::run() {
                 : 1u
         )
     );
-
-    World world;
 
     float rgba[4] = {
         0.075f,
@@ -136,6 +135,21 @@ void App::run() {
 
         glfwSwapBuffers(window);
     }
+}
+
+void App::destroyBlock() {
+	if (camera)
+		blockSystem.removeBlock(camera->pos, camera->dir, world);
+}
+
+void App::placeBlock() {
+	if (camera)
+		blockSystem.placeBlock(
+			camera->pos,
+			camera->dir,
+			toBlockId(BlockType::Amethyst),
+			world
+		);
 }
 
 

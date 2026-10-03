@@ -69,6 +69,8 @@ public:
 
 	void buildRenderStates();
 	std::vector<GpuMesh> pruneRenderStates();
+	[[nodiscard]] bool getBlockAt(const glm::ivec3& worldPos, BlockId& block) const;
+	bool setBlockAt(const glm::ivec3& worldPos, BlockId block);
 
 	const BlockRegistry& getBlockRegistry() const noexcept;
 
@@ -93,6 +95,7 @@ private:
 	std::unordered_map<ChunkCoord, std::uint16_t> meshedSections;
 	std::unordered_set<ChunkCoord> generatingChunks;
 	std::vector<ChunkRenderState> renderStates;
+	std::vector<GpuMesh> pendingRetiredMeshes;
 
 	mutable std::mutex chunk_mutex;
 

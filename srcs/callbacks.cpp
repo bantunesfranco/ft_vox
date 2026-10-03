@@ -42,6 +42,22 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     camera->dir = glm::normalize(dir);
 }
 
+void mouse_button_callback(GLFWwindow* window, const int button, const int action, int mods)
+{
+    (void)mods;
+    if (action != GLFW_PRESS)
+        return;
+
+    const auto app = static_cast<App*>(glfwGetWindowUserPointer(window));
+    if (!app)
+        return;
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT)
+        app->destroyBlock();
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+        app->placeBlock();
+}
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
     (void)scancode;

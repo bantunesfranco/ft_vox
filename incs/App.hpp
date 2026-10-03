@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "Block.hpp"
+#include "BlockSystem.hpp"
 #include "Engine.hpp"
 #include "World.hpp"
 
@@ -19,6 +20,8 @@ class App : public Engine
 		void	run() override;
 
 		void	terminate() override;
+		void	destroyBlock();
+		void	placeBlock();
 
 		bool			_showWireframe{};
 		GLuint			textureAtlas{};
@@ -26,6 +29,8 @@ class App : public Engine
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();
+		World world;
+		BlockSystem blockSystem;
 		void	renderWorld(const World& world);
 		void	processMeshUploads(World& world);
 
@@ -33,6 +38,7 @@ class App : public Engine
 
 void error_callback(int error, const char* description);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 void setupImGui(GLFWwindow* window);
