@@ -26,6 +26,10 @@ void main()
     vec2 atlasUV = rect.xy + vUV * rect.zw;
     vec4 tex = texture(uAtlas, atlasUV);
 
+    // The grass-top sprite is grayscale in the atlas and needs its biome tint.
+    if (vTexIndex == 0u)
+        tex.rgb *= vec3(0.65, 0.99, 0.45);
+
     if (tex.a < 0.1)
     discard;
 
