@@ -49,7 +49,7 @@ file(GLOB_RECURSE SOURCES "srcs/*.cpp")
 file(GLOB_RECURSE HEADERS "incs/*.hpp")
 
 # Define the library target
-add_library(engine STATIC ${SOURCES} ${HEADERS} incs/Voxel.hpp)
+add_library(engine STATIC ${SOURCES} ${HEADERS})
 
 # Remove unwanted files from the GLFW dependency
 file(REMOVE ${glfw_SOURCE_DIR}/deps/stb_image_write.h)

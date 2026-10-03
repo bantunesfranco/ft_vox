@@ -1,116 +1,155 @@
+#ifndef RENDERER_HPP
+#define RENDERER_HPP
 
-#ifndef Renderer_HPP
-#define Renderer_HPP
-#include <optional>
-
-constexpr auto FSHADER_PATH = "./engine/shaders/fragment.glsl";
-constexpr auto VSHADER_PATH = "./engine/shaders/vertex.glsl";
-constexpr auto CSHADER_PATH = "./engine/shaders/meshgen.compute";
-
-#include "glad/glad.h"
-#include "GLFW/glfw3.h"
-
-#include "defines.hpp"
-#include <string>
-#include <vector>
-#include <queue>
+#include <cstdint>
 #include <memory>
-#include <mutex>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
+
+#include "Mesh.hpp"
 
 class Camera;
 
-class VBOManager {
-	private:
-		std::queue<GLuint> availableVBOs;
-		std::mutex poolMutex;
-
-		static inline std::unique_ptr<VBOManager> _instance = nullptr;
-
-	public:
-		VBOManager(const size_t initialPoolSize = 128) {
-			std::lock_guard<std::mutex> lock(poolMutex);
-			for (size_t i = 0; i < initialPoolSize; ++i) {
-				GLuint vbo = 0;
-				glGenBuffers(1, &vbo);
-				if (glGetError() == GL_NO_ERROR)
-					availableVBOs.push(vbo);
-			}
-		}
-
-		~VBOManager() {
-			std::lock_guard<std::mutex> lock(poolMutex);
-			while (!availableVBOs.empty()) {
-				GLuint vbo = availableVBOs.front();
-				availableVBOs.pop();
-				glDeleteBuffers(1, &vbo);
-			}
-		}
-
-		GLuint getVBO() {
-			std::lock_guard<std::mutex> lock(poolMutex);
-			if (availableVBOs.empty()) {
-				GLuint vbo = 0;
-				glGenBuffers(1, &vbo);
-				return vbo;
-			}
-			const GLuint vbo = availableVBOs.front();
-			availableVBOs.pop();
-			return vbo;
-		}
-
-		void returnVBO(const GLuint vbo) {
-			std::lock_guard<std::mutex> lock(poolMutex);
-			availableVBOs.push(vbo);
-		}
-
-		static VBOManager& get()
-		{
-			if (!_instance) _instance = std::make_unique<VBOManager>();
-			return *_instance;
-		}
+struct WorldUBO {
+    glm::mat4 MVP{1.0f};
+    glm::vec4 light{0.0f};
+    glm::vec4 ambientData{0.5f, 0.0f, 0.0f, 0.0f};
 };
 
 
-class Renderer
+struct GpuMesh {
+    std::uint32_t vertexOffset = 0;
+    std::uint32_t vertexCount = 0;
+
+    std::uint32_t indexOffset = 0;
+    std::uint32_t indexCount = 0;
+
+    bool uploaded = false;
+};
+
+
+class GpuStorage
 {
-	private:
-		GLuint	_shaderprog;
-		GLuint	_computeProg = 0;  // GPU compute shader for mesh generation
-		GLuint	_vao;
-		GLuint	_vbo;
-		GLuint	_ibo;
-		GLuint	_cameraUBO;
-		GLuint	_textureArray;
+public:
+    GpuStorage();
+    ~GpuStorage();
 
-		static std::optional<std::string> loadShaderCode(const char* path);
-		static uint32_t		compileShader(const std::string& code, int32_t type);
+    GpuStorage(const GpuStorage&) = delete;
+    GpuStorage& operator=(const GpuStorage&) = delete;
 
-	public:
-		Renderer();
-		~Renderer();
-		Renderer(const Renderer&) = delete;
-		Renderer& operator=(const Renderer&) = default;
+    void upload(GpuMesh& gpuMesh, const MeshData& mesh);
 
-		static void	initProjectionMatrix(const GLFWwindow* window, const std::unique_ptr<Camera>& camera, glm::mat4& mvp);
+    void destroy(GpuMesh& gpuMesh);
 
-		void	render(const std::vector<Vertex>& vertices, const std::vector<unsigned>& indices, const glm::mat4& mvp) const;
-		void	releaseVBO();
-        void	renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
-		void	setTexArray(const GLuint textureArray) { _textureArray = textureArray; }
-		
-		// GPU compute support for mesh generation
-		// bool	hasComputeSupport() const { return _computeProg != 0; }
-		// GLuint	getComputeProgram() const { return _computeProg; }
-		// void	dispatchCompute(GLuint groupsX, GLuint groupsY, GLuint groupsZ) const;
+private:
+    GLuint _vao = 0;
+    GLuint _vbo = 0;
+    GLuint _ibo = 0;
+};
 
-		[[nodiscard]] GLuint	getShaderProgram()      const { return _shaderprog;    }
-		[[nodiscard]] GLuint	getVertexArrayObject()  const { return _vao;           }
-		[[nodiscard]] GLuint	getCameraUBO()			const { return _cameraUBO;     }
-		[[nodiscard]] GLuint	getTextureArray()		const { return _textureArray;  }
+
+class Renderer {
+private:
+    GLuint _shaderprog = 0;
+
+    GLuint _vao = 0;
+    GLuint _vbo = 0;
+    GLuint _ibo = 0;
+
+    GLuint _cameraUBO = 0;
+    GLuint _textureArray = 0;
+
+    GLint _chunkPositionLocation = -1;
+
+    std::size_t _vertexBufferCapacity = 0;
+    std::size_t _indexBufferCapacity = 0;
+
+    std::size_t _vertexBufferUsed = 0;
+    std::size_t _indexBufferUsed = 0;
+
+    std::vector<std::pair<std::size_t, std::size_t>> _freeVertexRanges;
+    std::vector<std::pair<std::size_t, std::size_t>> _freeIndexRanges;
+
+    static constexpr std::size_t INITIAL_VERTEX_BUFFER_SIZE = 16 * 1024 * 1024;
+
+    static constexpr std::size_t INITIAL_INDEX_BUFFER_SIZE = 8 * 1024 * 1024;
+
+    static std::optional<std::string>
+    loadShaderCode(const char* path);
+
+    static GLuint compileShader(const std::string& code, GLenum type);
+
+    void createBuffers();
+    void createVertexLayout();
+    void createCameraUBO();
+    
+    void ensureVertexCapacity(std::size_t required);
+    void ensureIndexCapacity(std::size_t required);
+    static std::size_t allocateRange(
+        std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
+        std::size_t& used,
+        std::size_t size
+    );
+    static void freeRange(
+        std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
+        std::size_t& used,
+        std::size_t offset,
+        std::size_t size
+    );
+
+public:
+    Renderer();
+    ~Renderer();
+
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
+
+    static void initProjectionMatrix(
+        const GLFWwindow* window,
+        const std::unique_ptr<Camera>& camera,
+        glm::mat4& mvp
+    );
+
+    void beginFrame(const WorldUBO& worldUbo) const;
+
+    void uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh);
+    void releaseMesh(GpuMesh& gpuMesh);
+
+    void renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPositio) const;
+
+    void setTexArray(GLuint textureArray) noexcept {
+        _textureArray = textureArray;
+    }
+
+    void renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
+
+    [[nodiscard]]
+    GLuint getShaderProgram() const noexcept {
+        return _shaderprog;
+    }
+
+    [[nodiscard]]
+    GLuint getVertexArrayObject() const noexcept {
+        return _vao;
+    }
+
+    [[nodiscard]]
+    GLuint getCameraUBO() const noexcept {
+        return _cameraUBO;
+    }
+
+    [[nodiscard]]
+    GLuint getTextureArray() const noexcept {
+        return _textureArray;
+    }
 };
 
 #endif

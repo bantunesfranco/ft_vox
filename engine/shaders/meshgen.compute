@@ -1,0 +1,126 @@
+#version 450 core
+
+// Compute shader for voxel mesh generation
+// Input: chunk voxel data (SSBO)
+// Output: generated vertices and indices (SSBOs)
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+// Packed voxel data: layout matches Voxel struct
+layout(std430, binding = 0) restrict readonly buffer VoxelBuffer {
+    uint voxels[];
+};
+
+// Output vertices with packing
+layout(std430, binding = 1) restrict buffer VertexBuffer {
+    uint vertices[];  // 8 uints per vertex (32 bytes)
+};
+
+// Output indices
+layout(std430, binding = 2) restrict buffer IndexBuffer {
+    uint indices[];
+};
+
+// Atomic counter for vertex/index allocation
+layout(binding = 3, offset = 0) uniform atomic_uint vertexCounter;
+layout(binding = 3, offset = 4) uniform atomic_uint indexCounter;
+
+// Uniforms
+layout(std140, binding = 0) uniform ChunkData {
+    ivec3 chunkMin;      // Chunk world position
+    uint chunkRadius;    // For LOD
+    ivec3 chunkDim;      // 16, 128, 16 for full chunk
+    uint lodLevel;       // 0=full, 1=half, 2=quarter
+};
+
+// Helper: Get voxel at local position
+uint getVoxel(int x, int y, int z) {
+    if (x < 0 || y < 0 || z < 0 || 
+        x >= chunkDim.x || y >= chunkDim.y || z >= chunkDim.z)
+        return 0;
+    int idx = x + y * chunkDim.x + z * chunkDim.x * chunkDim.y;
+    return voxels[idx];
+}
+
+// Helper: Check if block is active
+bool isActive(int x, int y, int z) {
+    uint voxel = getVoxel(x, y, z);
+    return (voxel & 0x80000000u) != 0;  // Bit 31 is active flag
+}
+
+// Helper: Get block type from voxel
+uint getBlockType(uint voxel) {
+    return (voxel >> 28) & 0x7u;  // Bits 30-28
+}
+
+// Helper: Emit a vertex to the output buffer
+void emitVertex(vec3 pos, uint normal, vec2 uv, uint texIdx, uint aoPacked) {
+    uint vertIdx = atomicCounterIncrement(vertexCounter);
+    
+    // Pack 32-byte vertex into 8 uints
+    // Position: 3 floats (12 bytes)
+    vertices[vertIdx * 8 + 0] = floatBitsToUint(pos.x);
+    vertices[vertIdx * 8 + 1] = floatBitsToUint(pos.y);
+    vertices[vertIdx * 8 + 2] = floatBitsToUint(pos.z);
+    
+    // UV: 2 floats (8 bytes)
+    vertices[vertIdx * 8 + 3] = packHalf2x16(uv);
+    
+    // TexIndex: 1 uint (4 bytes)
+    vertices[vertIdx * 8 + 4] = texIdx;
+    
+    // Normal + AO: packed (4 bytes)
+    vertices[vertIdx * 8 + 5] = (normal & 0xFFu) | ((aoPacked & 0xFFu) << 8);
+    
+    // Padding
+    vertices[vertIdx * 8 + 6] = 0;
+    vertices[vertIdx * 8 + 7] = 0;
+}
+
+// Helper: Emit triangle indices
+void emitIndices(uint v0, uint v1, uint v2) {
+    uint idxBase = atomicCounterIncrement(indexCounter) * 3;
+    indices[idxBase + 0] = v0;
+    indices[idxBase + 1] = v1;
+    indices[idxBase + 2] = v2;
+}
+
+void main() {
+    ivec3 pos = ivec3(gl_GlobalInvocationID);
+    
+    // Apply LOD stepping
+    int step = 1 << lodLevel;  // 1, 2, 4 for LOD0, LOD1, LOD2
+    
+    if ((pos.x % step) != 0 || (pos.y % step) != 0 || (pos.z % step) != 0)
+        return;
+    
+    if (pos.x >= chunkDim.x || pos.y >= chunkDim.y || pos.z >= chunkDim.z)
+        return;
+    
+    if (!isActive(pos.x, pos.y, pos.z))
+        return;
+    
+    uint blockType = getBlockType(getVoxel(pos.x, pos.y, pos.z));
+    if (blockType == 0)
+        return;
+    
+    vec3 fpos = vec3(pos);
+    vec3 fstep = vec3(step);
+    uint baseVertIdx = atomicCounter(vertexCounter);
+    
+    // Simplified mesh generation - emit faces per voxel
+    // (In production, would use greedy meshing which is more complex in compute)
+    
+    // +X face
+    if (!isActive(pos.x + step, pos.y, pos.z)) {
+        emitVertex(fpos + vec3(fstep.x, 0, 0), 0u, vec2(0, 0), blockType, 200u);
+        emitVertex(fpos + vec3(fstep.x, fstep.y, 0), 0u, vec2(0, 1), blockType, 200u);
+        emitVertex(fpos + vec3(fstep.x, fstep.y, fstep.z), 0u, vec2(1, 1), blockType, 200u);
+        emitVertex(fpos + vec3(fstep.x, 0, fstep.z), 0u, vec2(1, 0), blockType, 200u);
+        
+        emitIndices(baseVertIdx, baseVertIdx + 1, baseVertIdx + 2);
+        emitIndices(baseVertIdx, baseVertIdx + 2, baseVertIdx + 3);
+    }
+    
+    // Additional faces would follow similar pattern...
+}

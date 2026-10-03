@@ -8,10 +8,10 @@
 #include <backends/imgui_impl_opengl3.h>
 
 #define GLM_ENABLE_EXPERIMENTAL
+#include "ThreadPool.hpp"
 #include "glm/gtx/norm.hpp"
 
-static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& camera)
-{
+static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& camera) {
 	glm::vec3 moveDir(0.0f);
 
 	auto app = static_cast<App*>(glfwGetWindowUserPointer(const_cast<GLFWwindow*>(window)));
@@ -31,8 +31,7 @@ static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& ca
 	if (app->isKeyDown(VOX_KEY_A)) { moveDir -= right;   moved = true; }
 	if (app->isKeyDown(VOX_KEY_D)) { moveDir += right;   moved = true; }
 
-	if (moved && glm::length(moveDir) > 0.0f)
-	{
+	if (moved && glm::length(moveDir) > 0.0f) {
 		moveDir = glm::normalize(moveDir) * camera->moveSpeed * dt;
 		camera->pos += moveDir;
 	}
@@ -58,8 +57,7 @@ static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& ca
 		rotated = true;
 	}
 
-	if (rotated)
-	{
+	if (rotated) {
 		const float pitchRad = glm::radians(camera->pitch);
 		const float yawRad = glm::radians(camera->yaw);
 
@@ -77,71 +75,73 @@ App::App(const int32_t width, const int32_t height, const char *title, std::map<
     loadTextures();
 }
 
-void App::setCallbackFunctions() const
-{
+void App::setCallbackFunctions() const {
 	setErrorCallback(error_callback);
 	setKeyCallback(key_callback);
 	setCursorPosCallback(mouse_callback);
 }
 
-void App::run()
-{
-    ThreadPool threadPool(std::thread::hardware_concurrency());
-    World world(textureIndices);
+void App::run() {
+    ThreadPool threadPool(
+        std::max(
+            1u,
+            std::thread::hardware_concurrency() > 2
+                ? std::thread::hardware_concurrency() - 2
+                : 1u
+        )
+    );
 
-	float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
+    World world;
 
-	while (windowIsOpen(window))
-	{
-		glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
-		glfwPollEvents();
+    float rgba[4] = {
+        0.075f,
+        0.33f,
+        0.61f,
+        1.0f
+    };
+
+    while (windowIsOpen(window))
+    {
+        glClearColor(
+            0.075f,
+            0.33f,
+            0.61f,
+            1.0f
+        );
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glfwPollEvents();
+
         FPSCounter::update();
-		handleMovement(window, camera);
 
-        Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
-		world.frustum.updateFrustum(camera->proj, camera->view);
+        handleMovement(window, camera);
 
-		world.updateChunks(camera->pos, threadPool);
+        world.frustum.updateFrustum(camera->proj, camera->view);
+        world.updateChunks(camera->pos, threadPool);
+		for (auto& gpuMesh : world.pruneRenderStates())
+			renderer->releaseMesh(gpuMesh);
+    	world.buildRenderStates();
 
-		renderWorld(world);
+        WorldUBO worldUBO{};
+    	Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
 
-		renderImGui(camera, _showWireframe, rgba);
-		glfwSwapBuffers(window);
-	}
+        renderer->beginFrame(worldUBO);
+
+    	processMeshUploads(world);
+
+        renderWorld(world);
+
+        renderImGui(camera, _showWireframe, rgba);
+
+        glfwSwapBuffers(window);
+    }
 }
 
-void App::renderWorld(const World& world) const
-{
-	glm::vec3 camPos = camera->pos;
 
-	// Make a local copy of pointers (fast, lock-free)
-	std::vector<Chunk*> visibleChunks;
-	visibleChunks.reserve(world.renderChunks.size());
+void App::terminate() {
 
-	for (auto* chunk : world.renderChunks) {
-		if (chunk->cachedVertices.empty()) continue;
-		if (!world.frustum.isBoxInFrustum(chunk->worldMin, chunk->worldMax)) continue;
-		visibleChunks.push_back(chunk);
-	}
-
-	// Sort front-to-back or back-to-front
-	std::ranges::sort(visibleChunks,
-      [&camPos](const Chunk* a, const Chunk* b) {
-          return glm::distance2(a->worldCenter, camPos) < glm::distance2(b->worldCenter, camPos);
-      });
-
-	// Render
-	for (auto* chunk : visibleChunks) {
-		uploadChunk(*chunk, chunk->renderData);
-		renderChunk(*chunk, world.worldUBO, world.ubo);
-	}
-}
-
-void App::terminate()
-{
-
-	if (ImGui::GetCurrentContext())
-	{
+	if (ImGui::GetCurrentContext()) {
 		ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
@@ -150,95 +150,60 @@ void App::terminate()
 }
 
 void App::loadTextures() {
-    try
-    {
-    	const std::vector<std::string> paths = {
-    		"./textures/grass.png",      // texIndex 0
-    		"./textures/dirt.png",		// texIndex 1
-    		"./textures/stone.png",
-    		// "./textures/sand.png",
-			// "./textures/amethyst.png",
+	try {
+		const std::vector<std::string> paths = {
+			"./textures/grass.png",
+			"./textures/dirt.png",
+			"./textures/stone.png",
+			"./textures/sand.png",
+			"./textures/amethyst.png"
 		};
 
-    	int texWidth, texHeight;
-    	textureArray = loadTextureArray(paths, texWidth, texHeight);
+		int texWidth = 0;
+		int texHeight = 0;
 
-    	// textureIndices[BlockType::Air] = -1;
-        textureIndices[BlockType::Grass] = 0;
-        textureIndices[BlockType::Dirt] = 1;
-        textureIndices[BlockType::Stone] = 2;
+		textureArray = loadTextureArray(
+			paths,
+			texWidth,
+			texHeight
+		);
 
-    	renderer->setTexArray(textureArray);
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << std::endl;
-        terminate();
-        std::exit(Engine::vox_errno);
-    }
+		renderer->setTexArray(textureArray);
+	}
+	catch (const std::exception& e) {
+		std::cerr << e.what() << '\n';
+
+		terminate();
+
+		std::exit(vox_errno);
+	}
 }
 
-void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
-{
-	if (chunk.cachedVertices.empty() || chunk.cachedIndices.empty())
-		return;
+void App::renderWorld(const World& world) {
+	for (const auto& renderState : world.getRenderStates()) {
+		if (!renderState.gpuMesh.uploaded)
+			continue;
 
-	if (data.vao == 0)
-		glGenVertexArrays(1, &data.vao);
-	if (data.vbo == 0)
-		data.vbo = VBOManager::get().getVBO();
-	if (data.ibo == 0)
-		data.ibo = VBOManager::get().getVBO();
+		if (renderState.gpuMesh.indexCount == 0)
+			continue;
 
-	data.indexCount = chunk.cachedIndices.size();
+		if (!world.frustum.isBoxInFrustum(renderState.worldMin, renderState.worldMax))
+			continue;
 
-	glBindVertexArray(data.vao);
-
-	glBindBuffer(GL_ARRAY_BUFFER, data.vbo);
-	glBufferData(GL_ARRAY_BUFFER, chunk.cachedVertices.size() * sizeof(Vertex),
-				 chunk.cachedVertices.data(), GL_DYNAMIC_DRAW);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data.ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indexCount * sizeof(uint32_t),
-				 chunk.cachedIndices.data(), GL_DYNAMIC_DRAW);
-
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
-
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 2,
-		GL_FLOAT, GL_FALSE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
-
-	glEnableVertexAttribArray(2);
-	glVertexAttribIPointer(2, 1,
-		GL_UNSIGNED_INT,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex)));
-
-	glEnableVertexAttribArray(3);
-	glVertexAttribIPointer(3, 1,
-		GL_UNSIGNED_BYTE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, normal)));
-
-	glEnableVertexAttribArray(4);
-	glVertexAttribIPointer(4, 1,
-		GL_UNSIGNED_BYTE,
-		sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, ao_packed)));
-
-	glBindVertexArray(0);
+		renderer->renderMesh(renderState.gpuMesh, renderState.worldPosition);
+	}
 }
 
-void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo) const
-{
-	glUseProgram(renderer->getShaderProgram());
-	glBindVertexArray(chunk.renderData.vao);
+void App::processMeshUploads(World& world) {
+	for (auto& renderState : world.getRenderStates()) {
+		if (renderState.mesh.empty())
+			continue;
 
-	glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &worldUbo);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+		if (renderState.gpuMesh.uploaded)
+			continue;
 
-	glBindTextureUnit(0, renderer->getTextureArray());
-	glDrawElements(GL_TRIANGLES, chunk.renderData.indexCount, GL_UNSIGNED_INT, nullptr);
+		renderer->uploadMesh(renderState.mesh, renderState.gpuMesh);
+
+		renderState.mesh.clear();
+	}
 }

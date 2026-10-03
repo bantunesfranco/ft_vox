@@ -149,12 +149,16 @@ GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outW
 	outWidth  = width;
 	outHeight = height;
 
+	const GLsizei mipLevels = 1 + static_cast<GLsizei>(
+		std::floor(std::log2(std::max(width, height)))
+	);
+
 	GLuint texArray;
 	glCreateTextures(GL_TEXTURE_2D_ARRAY, 1, &texArray);
 
 	glTextureStorage3D(
 		texArray,
-		1,
+		mipLevels,
 		GL_RGBA8,
 		width, height,
 		static_cast<GLsizei>(paths.size())
@@ -185,7 +189,8 @@ GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outW
 		if (!data)
 			throw EngineException(VOX_TEXTFAIL);
 
-		assert(width == outWidth && height == outHeight);
+		if (width != outWidth || height != outHeight)
+			throw EngineException(VOX_TEXTFAIL); // mismatched texture dimensions
 
 		glTextureSubImage3D(
 			texArray,
@@ -201,7 +206,9 @@ GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outW
 		stbi_image_free(data);
 	}
 
-	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glGenerateTextureMipmap(texArray);
+
+	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
 	glTextureParameteri(texArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTextureParameteri(texArray, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTextureParameteri(texArray, GL_TEXTURE_WRAP_T, GL_REPEAT);

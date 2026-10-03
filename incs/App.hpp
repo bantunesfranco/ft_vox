@@ -3,6 +3,8 @@
 
 #include <array>
 #include <cstdint>
+
+#include "Block.hpp"
 #include "Engine.hpp"
 #include "World.hpp"
 
@@ -15,19 +17,17 @@ class App : public Engine
 		App& operator=(const App&) = delete;
 
 		void	run() override;
+
 		void	terminate() override;
 
-		bool	_showWireframe;
-		GLuint textureArray;
-		std::unordered_map<BlockType, GLuint> textureIndices;
+		bool			_showWireframe{};
+		GLuint			textureArray{};
 
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();
-		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo) const;
-		void	renderWorld(const World& world) const;
-
-		static void	uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data);
+		void	renderWorld(const World& world);
+		void	processMeshUploads(World& world);
 
 };
 
