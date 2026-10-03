@@ -46,6 +46,26 @@ void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, floa
     ImGui::ColorEdit4("Color", rgba);
     ImGui::End();
 
+    // Draw crosshair at screen center
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    const ImVec2 center = ImGui::GetIO().DisplaySize * 0.5f;
+    constexpr float crosshairSize = 10.0f;
+    const ImU32 whiteColor = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+    const float lineThickness = 2.0f;
+
+    drawList->AddLine(
+        ImVec2(center.x - crosshairSize, center.y),
+        ImVec2(center.x + crosshairSize, center.y),
+        whiteColor,
+        lineThickness
+    );
+    drawList->AddLine(
+        ImVec2(center.x, center.y - crosshairSize),
+        ImVec2(center.x, center.y + crosshairSize),
+        whiteColor,
+        lineThickness
+    );
+
     ImGui::Render();
     glViewport(0, 0, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
