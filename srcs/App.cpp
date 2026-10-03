@@ -151,24 +151,35 @@ void App::terminate() {
 
 void App::loadTextures() {
 	try {
-		const std::vector<std::string> paths = {
-			"./textures/grass.png",
-			"./textures/dirt.png",
-			"./textures/stone.png",
-			"./textures/sand.png",
-			"./textures/amethyst.png"
+		textureAtlas = loadTexture("./textures/minecraft_atlas.png");
+		glTextureParameteri(textureAtlas, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTextureParameteri(textureAtlas, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTextureParameteri(textureAtlas, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTextureParameteri(textureAtlas, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		constexpr float atlasSize = 2048.0f;
+		const auto spriteRect = [atlasSize](const int x, const int y) {
+			const float glY = static_cast<float>(y) + 16.0f;
+
+			return glm::vec4(
+				(static_cast<float>(x) + 15.0f) / atlasSize,
+				(glY + 0.5f) / atlasSize,
+				16.0f / atlasSize,
+				16.0f / atlasSize
+			);
 		};
 
-		int texWidth = 0;
-		int texHeight = 0;
+		std::array<glm::vec4, 64> atlasRects{};
+		atlasRects.fill(spriteRect(0, 0));
+		atlasRects[0] = spriteRect(1408, 528);  // grass_block_top
+		atlasRects[1] = spriteRect(1168, 720);  // dirt
+		atlasRects[2] = spriteRect(1408, 384);  // grass_block_side
+		atlasRects[3] = spriteRect(1680, 1312); // stone
+		atlasRects[4] = spriteRect(1440, 1216); // sand
+		atlasRects[5] = spriteRect(512, 288);   // amethyst_block
 
-		textureArray = loadTextureArray(
-			paths,
-			texWidth,
-			texHeight
-		);
-
-		renderer->setTexArray(textureArray);
+		renderer->setTextureAtlas(textureAtlas);
+		renderer->setAtlasRects(atlasRects);
 	}
 	catch (const std::exception& e) {
 		std::cerr << e.what() << '\n';

@@ -2,16 +2,17 @@
 
 BlockRegistry::BlockRegistry() noexcept {
     /*
-     * Texture indices correspond to layers in the texture array.
+     * Texture indices select sprite rectangles in the block atlas.
      *
-     * Change these numbers to match your actual texture-array order.
+     * Change these numbers to match your sprite-rectangle table.
      *
      * Example:
-     *   0 = grass
+     *   0 = grass top
      *   1 = dirt
-     *   2 = stone
-     *   3 = sand
-     *   4 = amethyst
+     *   2 = grass side
+     *   3 = stone
+     *   4 = sand
+     *   5 = amethyst
      */
 
     // Air
@@ -45,27 +46,27 @@ BlockRegistry::BlockRegistry() noexcept {
     _definitions[toBlockId(BlockType::Stone)] = {
         .opaque = true,
         .transparent = false,
-        .textureTop = 2,
-        .textureBottom = 2,
-        .textureSide = 2
+        .textureTop = 3,
+        .textureBottom = 3,
+        .textureSide = 3
     };
 
     // Sand
     _definitions[toBlockId(BlockType::Sand)] = {
         .opaque = true,
         .transparent = false,
-        .textureTop = 3,
-        .textureBottom = 3,
-        .textureSide = 3
+        .textureTop = 4,
+        .textureBottom = 4,
+        .textureSide = 4
     };
 
     // Amethyst
     _definitions[toBlockId(BlockType::Amethyst)] = {
         .opaque = true,
         .transparent = false,
-        .textureTop = 4,
-        .textureBottom = 4,
-        .textureSide = 4
+        .textureTop = 5,
+        .textureBottom = 5,
+        .textureSide = 5
     };
 }
 

@@ -77,12 +77,13 @@ Renderer::Renderer() {
 
     glUseProgram(_shaderprog);
 
-    const GLint samplerLoc = glGetUniformLocation(_shaderprog, "uTextures");
+    const GLint samplerLoc = glGetUniformLocation(_shaderprog, "uAtlas");
 
     if (samplerLoc >= 0)
         glUniform1i(samplerLoc, 0);
 
     _chunkPositionLocation = glGetUniformLocation(_shaderprog, "uChunkPosition");
+    _atlasRectsLocation = glGetUniformLocation(_shaderprog, "uTextureRects");
 
     glUseProgram(0);
 
@@ -194,7 +195,7 @@ void Renderer::createCameraUBO() {
     );
 }
 
-void Renderer::ensureVertexCapacity(const std::size_t required) {
+void Renderer::ensureVertexCapacity(const std::size_t required, const std::size_t bytesToPreserve) {
     if (required <= _vertexBufferCapacity)
         return;
 
@@ -217,13 +218,13 @@ void Renderer::ensureVertexCapacity(const std::size_t required) {
 
     glBindBuffer(GL_COPY_READ_BUFFER, _vbo);
 
-    if (_vertexBufferUsed > 0) {
+    if (bytesToPreserve > 0) {
         glCopyBufferSubData(
             GL_COPY_READ_BUFFER,
             GL_COPY_WRITE_BUFFER,
             0,
             0,
-            static_cast<GLsizeiptr>(_vertexBufferUsed)
+            static_cast<GLsizeiptr>(bytesToPreserve)
         );
     }
 
@@ -239,7 +240,7 @@ void Renderer::ensureVertexCapacity(const std::size_t required) {
     createVertexLayout();
 }
 
-void Renderer::ensureIndexCapacity(const std::size_t required) {
+void Renderer::ensureIndexCapacity(const std::size_t required, const std::size_t bytesToPreserve) {
     if (required <= _indexBufferCapacity)
         return;
 
@@ -262,13 +263,13 @@ void Renderer::ensureIndexCapacity(const std::size_t required) {
 
     glBindBuffer(GL_COPY_READ_BUFFER, _ibo);
 
-    if (_indexBufferUsed > 0) {
+    if (bytesToPreserve > 0) {
         glCopyBufferSubData(
             GL_COPY_READ_BUFFER,
             GL_COPY_WRITE_BUFFER,
             0,
             0,
-            static_cast<GLsizeiptr>(_indexBufferUsed)
+            static_cast<GLsizeiptr>(bytesToPreserve)
         );
     }
 
@@ -277,12 +278,7 @@ void Renderer::ensureIndexCapacity(const std::size_t required) {
     _ibo = newBuffer;
     _indexBufferCapacity = newCapacity;
 
-    /*
-     * The VAO stores the element-buffer binding too.
-     */
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBindVertexArray(0);
+    createVertexLayout();
 }
 
 GLuint Renderer::compileShader(const std::string& code, const GLenum type) {
@@ -355,6 +351,19 @@ void Renderer::beginFrame(const WorldUBO& worldUbo) const
     );
 }
 
+void Renderer::setTextureAtlas(const GLuint textureAtlas) noexcept {
+    _textureAtlas = textureAtlas;
+}
+
+void Renderer::setAtlasRects(const std::array<glm::vec4, 64>& rects) {
+    if (_atlasRectsLocation < 0)
+        return;
+
+    glUseProgram(_shaderprog);
+    glUniform4fv(_atlasRectsLocation, static_cast<GLsizei>(rects.size()), glm::value_ptr(rects[0]));
+    glUseProgram(0);
+}
+
 std::size_t Renderer::allocateRange(
     std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
     std::size_t& used,
@@ -422,12 +431,14 @@ void Renderer::uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh) {
 
     const std::size_t vertexBytes = mesh.vertices.size() * sizeof(PackedVertex);
     const std::size_t indexBytes = mesh.indices.size() * sizeof(std::uint32_t);
+    const std::size_t vertexBytesToPreserve = _vertexBufferUsed;
+    const std::size_t indexBytesToPreserve = _indexBufferUsed;
 
     const std::size_t vertexOffsetBytes = allocateRange(_freeVertexRanges, _vertexBufferUsed, vertexBytes);
     const std::size_t indexOffsetBytes = allocateRange(_freeIndexRanges, _indexBufferUsed, indexBytes);
 
-    ensureVertexCapacity(vertexOffsetBytes + vertexBytes);
-    ensureIndexCapacity(indexOffsetBytes + indexBytes);
+    ensureVertexCapacity(vertexOffsetBytes + vertexBytes, vertexBytesToPreserve);
+    ensureIndexCapacity(indexOffsetBytes + indexBytes, indexBytesToPreserve);
 
     /* Upload vertices */
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
@@ -490,7 +501,7 @@ void Renderer::renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPosition
     if (_chunkPositionLocation >= 0)
         glUniform3fv(_chunkPositionLocation, 1, glm::value_ptr(worldPosition));
 
-    glBindTextureUnit(0, _textureArray);
+    glBindTextureUnit(0, _textureAtlas);
 
     const auto indexOffset = static_cast<std::uintptr_t>(gpuMesh.indexOffset * sizeof(std::uint32_t));
 

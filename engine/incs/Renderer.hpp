@@ -2,6 +2,7 @@
 #define RENDERER_HPP
 
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -65,9 +66,10 @@ private:
     GLuint _ibo = 0;
 
     GLuint _cameraUBO = 0;
-    GLuint _textureArray = 0;
+    GLuint _textureAtlas = 0;
 
     GLint _chunkPositionLocation = -1;
+    GLint _atlasRectsLocation = -1;
 
     std::size_t _vertexBufferCapacity = 0;
     std::size_t _indexBufferCapacity = 0;
@@ -91,8 +93,8 @@ private:
     void createVertexLayout();
     void createCameraUBO();
     
-    void ensureVertexCapacity(std::size_t required);
-    void ensureIndexCapacity(std::size_t required);
+    void ensureVertexCapacity(std::size_t required, std::size_t bytesToPreserve);
+    void ensureIndexCapacity(std::size_t required, std::size_t bytesToPreserve);
     static std::size_t allocateRange(
         std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
         std::size_t& used,
@@ -125,9 +127,8 @@ public:
 
     void renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPositio) const;
 
-    void setTexArray(GLuint textureArray) noexcept {
-        _textureArray = textureArray;
-    }
+    void setTextureAtlas(GLuint textureAtlas) noexcept;
+    void setAtlasRects(const std::array<glm::vec4, 64>& rects);
 
     void renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos);
 
@@ -147,8 +148,8 @@ public:
     }
 
     [[nodiscard]]
-    GLuint getTextureArray() const noexcept {
-        return _textureArray;
+    GLuint getTextureAtlas() const noexcept {
+        return _textureAtlas;
     }
 };
 

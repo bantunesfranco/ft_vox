@@ -8,7 +8,8 @@ in vec3 vWorldPos;
 in float vAO;
 flat in uint vTexIndex;
 
-layout(binding = 0) uniform sampler2DArray uTextures;
+layout(binding = 0) uniform sampler2D uAtlas;
+uniform vec4 uTextureRects[64];
 
 layout(std140, binding = 0) uniform WorldUBO
 {
@@ -21,7 +22,9 @@ out vec4 FragColor;
 
 void main()
 {
-    vec4 tex = texture(uTextures, vec3(vUV, vTexIndex));
+    vec4 rect = uTextureRects[vTexIndex];
+    vec2 atlasUV = rect.xy + vUV * rect.zw;
+    vec4 tex = texture(uAtlas, atlasUV);
 
     if (tex.a < 0.1)
     discard;

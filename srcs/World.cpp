@@ -7,6 +7,8 @@
 #include <vector>
 
 #define STB_PERLIN_IMPLEMENTATION
+#include <ranges>
+
 #include "stb_perlin.h"
 
 /* ============================================================
@@ -85,6 +87,15 @@ std::vector<GpuMesh> World::pruneRenderStates() {
         it = renderStates.erase(it);
     }
 
+    for (auto it = meshedSections.begin(); it != meshedSections.end();) {
+        if (chunks.contains(it->first)) {
+            ++it;
+            continue;
+        }
+
+        it = meshedSections.erase(it);
+    }
+
     return retiredMeshes;
 }
 
@@ -111,9 +122,9 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
      * We walk the rings around the player so chunks close to the
      * player enter the queue first.
      */
-    loadQueue.reserve(static_cast<std::size_t>(CHUNK_DIAMETER * CHUNK_DIAMETER));
+    loadQueue.reserve(static_cast<std::size_t>(CHUNK_LOAD_DIAMETER * CHUNK_LOAD_DIAMETER));
 
-    for (int radius = 0; radius <= CHUNK_RADIUS; ++radius)
+    for (int radius = 0; radius <= CHUNK_LOAD_RADIUS; ++radius)
     {
         for (int dx = -radius; dx <= radius; ++dx)
         {
@@ -171,16 +182,12 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
         unloadQueue.reserve(chunks.size());
 
-        const int unloadRadius = CHUNK_RADIUS + 1;
-        const std::int64_t unloadRadiusSq =
-            static_cast<std::int64_t>(unloadRadius) * static_cast<std::int64_t>(unloadRadius);
-
-        for (const auto& [coord, chunk] : chunks)
+        for (const auto &coord: chunks | std::views::keys)
         {
             const std::int64_t dx = static_cast<std::int64_t>(coord.x) - playerChunk.x;
             const std::int64_t dz = static_cast<std::int64_t>(coord.z) - playerChunk.y;
 
-            if (dx * dx + dz * dz > unloadRadiusSq)
+            if (std::abs(dx) > CHUNK_LOAD_RADIUS || std::abs(dz) > CHUNK_LOAD_RADIUS)
                 unloadQueue.push_back(coord);
         }
     }
@@ -244,7 +251,10 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                 catch (std::exception const& e) {
                     std::lock_guard lock(chunk_mutex);
 
-                    generatingChunks.erase(coord);
+                    if (chunks.contains(coord))
+                        chunks.erase(coord);
+                    if (generatingChunks.contains(coord))
+                        generatingChunks.erase(coord);
 
                     std::cerr
                         << "Failed to generate chunk at " << coord.x << ", " << coord.z
@@ -314,6 +324,10 @@ void World::buildRenderStates() {
 
     for (const auto& [coord, column] : loadedChunks)
     {
+        const auto sectionIt = meshedSections.find(coord);
+        if (sectionIt != meshedSections.end() && sectionIt->second == 0xFFFFu)
+            continue;
+
         /*
          * Check that the complete 3x3 horizontal neighborhood exists.
          * We include the center chunk here as well.
@@ -369,21 +383,13 @@ void World::buildRenderStates() {
          *
          * The section's worldPosition provides the section offset.
          */
+        std::uint16_t& sectionMask = meshedSections[coord];
+
         for (std::uint8_t sectionY = 0; sectionY < ChunkColumn::SECTION_COUNT; ++sectionY)
         {
-            /*
-             * Don't build the same section twice.
-             */
-            bool alreadyBuilt = false;
+            const std::uint16_t sectionBit = static_cast<std::uint16_t>(1u << sectionY);
 
-            for (const auto& state : renderStates) {
-                if (state.coord == coord && state.sectionY == sectionY) {
-                    alreadyBuilt = true;
-                    break;
-                }
-            }
-
-            if (alreadyBuilt)
+            if ((sectionMask & sectionBit) != 0)
                 continue;
 
             ChunkRenderState renderState{};
@@ -416,6 +422,7 @@ void World::buildRenderStates() {
              * DO NOT add sectionY to the packed Y coordinate.
              */
             ChunkMesher::build(column->section(sectionY), sectionY, neighborhood, blockRegistry, renderState.mesh);
+            sectionMask |= sectionBit;
 
             /* Don't create an empty render state */
             if (!renderState.mesh.empty())

@@ -21,7 +21,7 @@ class App : public Engine
 		void	terminate() override;
 
 		bool			_showWireframe{};
-		GLuint			textureArray{};
+		GLuint			textureAtlas{};
 
 	private:
 		void	setCallbackFunctions() const;

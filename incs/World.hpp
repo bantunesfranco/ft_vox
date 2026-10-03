@@ -50,8 +50,10 @@ public:
 
 class World {
 public:
-	static constexpr int CHUNK_RADIUS = 16;
+	static constexpr int CHUNK_RADIUS = 8;
 	static constexpr int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
+	static constexpr int CHUNK_LOAD_RADIUS = CHUNK_RADIUS + 1;
+	static constexpr int CHUNK_LOAD_DIAMETER = CHUNK_LOAD_RADIUS * 2 + 1;
 
 	World() = default;
 
@@ -88,6 +90,7 @@ private:
 	};
 
 	std::unordered_map<ChunkCoord, std::unique_ptr<ChunkColumn>> chunks;
+	std::unordered_map<ChunkCoord, std::uint16_t> meshedSections;
 	std::unordered_set<ChunkCoord> generatingChunks;
 	std::vector<ChunkRenderState> renderStates;
 
