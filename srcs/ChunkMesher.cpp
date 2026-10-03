@@ -7,9 +7,11 @@ void ChunkMesher::build(
     const int sectionY,
     const ChunkNeighborhood& neighborhood,
     const BlockRegistry& registry,
-    MeshData& output
+    MeshData& output,
+    MeshData& transparentOutput
 ) {
     output.clear();
+    transparentOutput.clear();
 
     /*
      * Worst-case:
@@ -41,37 +43,37 @@ void ChunkMesher::build(
                     continue;
 
                 const BlockDefinition& definition = registry.get(block);
-
-                /*
-                 * Non-opaque blocks will eventually need their own
-                 * rendering path.
-                 *
-                 * For now we simply allow them to be meshed.
-                 */
+                MeshData& target = definition.transparent ? transparentOutput : output;
+                const auto shouldRenderFace = [&](const int neighborX, const int neighborY, const int neighborZ) {
+                    const BlockId neighbor = neighborhood.getBlock(neighborX, neighborY, neighborZ);
+                    if (definition.transparent && neighbor == block)
+                        return false;
+                    return !registry.isOpaque(neighbor);
+                };
 
                 // +X
-                if (!neighborhood.isOpaque(x + 1, columnY, z, registry))
-                    emitFace(output, x, y, z, NormalDir::PositiveX, definition.textureSide);
+                if (shouldRenderFace(x + 1, columnY, z))
+                    emitFace(target, x, y, z, NormalDir::PositiveX, definition.textureSide);
 
                 // -X
-                if (!neighborhood.isOpaque(x - 1, columnY, z, registry))
-                    emitFace(output, x, y, z, NormalDir::NegativeX, definition.textureSide);
+                if (shouldRenderFace(x - 1, columnY, z))
+                    emitFace(target, x, y, z, NormalDir::NegativeX, definition.textureSide);
 
                 // +Y
-                if (!neighborhood.isOpaque(x, columnY + 1, z, registry))
-                    emitFace(output, x, y, z, NormalDir::PositiveY, definition.textureTop);
+                if (shouldRenderFace(x, columnY + 1, z))
+                    emitFace(target, x, y, z, NormalDir::PositiveY, definition.textureTop);
 
                 // -Y
-                if (!neighborhood.isOpaque(x, columnY - 1, z, registry))
-                    emitFace(output, x, y, z,NormalDir::NegativeY, definition.textureBottom);
+                if (shouldRenderFace(x, columnY - 1, z))
+                    emitFace(target, x, y, z, NormalDir::NegativeY, definition.textureBottom);
 
                 // +Z
-                if (!neighborhood.isOpaque(x, columnY, z + 1, registry))
-                    emitFace(output, x, y, z, NormalDir::PositiveZ, definition.textureSide);
+                if (shouldRenderFace(x, columnY, z + 1))
+                    emitFace(target, x, y, z, NormalDir::PositiveZ, definition.textureSide);
 
                 // -Z
-                if (!neighborhood.isOpaque(x, columnY, z - 1, registry))
-                    emitFace(output, x, y, z, NormalDir::NegativeZ, definition.textureSide);
+                if (shouldRenderFace(x, columnY, z - 1))
+                    emitFace(target, x, y, z, NormalDir::NegativeZ, definition.textureSide);
             }
         }
     }

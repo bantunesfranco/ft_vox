@@ -126,6 +126,8 @@ public:
     void releaseMesh(GpuMesh& gpuMesh);
 
     void renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPositio) const;
+    void beginTransparentPass() const;
+    void endTransparentPass() const;
 
     void setTextureAtlas(GLuint textureAtlas) noexcept;
     void setAtlasRects(const std::array<glm::vec4, 64>& rects);

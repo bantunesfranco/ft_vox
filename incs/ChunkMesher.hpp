@@ -14,7 +14,8 @@ public:
         int sectionY,
         const ChunkNeighborhood& neighborhood,
         const BlockRegistry& registry,
-        MeshData& output
+        MeshData& output,
+        MeshData& transparentOutput
     );
 
 private:
@@ -50,6 +51,8 @@ struct ChunkRenderState
 
     MeshData mesh{};
     GpuMesh gpuMesh{};
+    MeshData transparentMesh{};
+    GpuMesh transparentGpuMesh{};
 };
 
 #endif // CHUNK_MESHER_HPP

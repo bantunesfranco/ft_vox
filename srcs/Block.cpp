@@ -13,6 +13,8 @@ BlockRegistry::BlockRegistry() noexcept {
      *   3 = stone
      *   4 = sand
      *   5 = amethyst
+     *   6 = water
+     *   7 = snow
      */
 
     // Air
@@ -67,6 +69,22 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureTop = 5,
         .textureBottom = 5,
         .textureSide = 5
+    };
+
+    _definitions[toBlockId(BlockType::Water)] = {
+        .opaque = false,
+        .transparent = true,
+        .textureTop = 6,
+        .textureBottom = 6,
+        .textureSide = 6
+    };
+
+    _definitions[toBlockId(BlockType::Snow)] = {
+        .opaque = true,
+        .transparent = false,
+        .textureTop = 7,
+        .textureBottom = 7,
+        .textureSide = 7
     };
 }
 

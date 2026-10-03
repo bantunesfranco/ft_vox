@@ -20,6 +20,7 @@ namespace
     constexpr int BASE_HEIGHT = ChunkColumn::HEIGHT / 8;
     constexpr int MIN_HEIGHT  = 1;
     constexpr int MAX_HEIGHT  = ChunkColumn::HEIGHT - 3;
+    constexpr int SEA_LEVEL = 40;
 
     constexpr int MAX_CHUNKS_PER_UPDATE = 32;
 
@@ -36,19 +37,32 @@ namespace
     }
 
     [[nodiscard]]
+    float noiseAt(const int worldX, const int worldZ, const float frequency, const int seed) noexcept
+    {
+        return stb_perlin_noise3_seed(
+            static_cast<float>(worldX) * frequency,
+            0.0f,
+            static_cast<float>(worldZ) * frequency,
+            0,
+            0,
+            0,
+            seed
+        );
+    }
+
+    [[nodiscard]]
     float terrainNoise(const int worldX, const int worldZ) noexcept
     {
-        constexpr int SEED = 0;
+        return noiseAt(worldX, worldZ, 0.010f, 0) * 0.65f
+            + noiseAt(worldX, worldZ, 0.025f, 1) * 0.25f
+            + noiseAt(worldX, worldZ, 0.060f, 2) * 0.10f;
+    }
 
-        return stb_perlin_noise3_seed(
-            static_cast<float>(worldX) * 0.05f,
-            0.0f,
-            static_cast<float>(worldZ) * 0.05f,
-            0,
-            0,
-            0,
-            SEED
-        );
+    [[nodiscard]]
+    float smoothStep(const float edge0, const float edge1, const float value) noexcept
+    {
+        const float t = std::clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
     }
 }
 
@@ -84,6 +98,7 @@ std::vector<GpuMesh> World::pruneRenderStates() {
         }
 
         retiredMeshes.push_back(it->gpuMesh);
+        retiredMeshes.push_back(it->transparentGpuMesh);
         it = renderStates.erase(it);
     }
 
@@ -359,6 +374,7 @@ void World::buildRenderStates() {
 
         {
             std::lock_guard lock(chunk_mutex);
+            neighborhood.setCenter(column);
 
             for (int dz = -1; dz <= 1; ++dz) {
                 for (int dx = -1; dx <= 1; ++dx) {
@@ -369,8 +385,6 @@ void World::buildRenderStates() {
                         neighborhood.setNeighbor(dx, dz, it->second.get());
                 }
             }
-
-            neighborhood.setCenter(column);
         }
 
         /*
@@ -421,11 +435,18 @@ void World::buildRenderStates() {
              *
              * DO NOT add sectionY to the packed Y coordinate.
              */
-            ChunkMesher::build(column->section(sectionY), sectionY, neighborhood, blockRegistry, renderState.mesh);
+            ChunkMesher::build(
+                column->section(sectionY),
+                sectionY,
+                neighborhood,
+                blockRegistry,
+                renderState.mesh,
+                renderState.transparentMesh
+            );
             sectionMask |= sectionBit;
 
             /* Don't create an empty render state */
-            if (!renderState.mesh.empty())
+            if (!renderState.mesh.empty() || !renderState.transparentMesh.empty())
                 renderStates.push_back(std::move(renderState));
         }
     }
@@ -447,8 +468,54 @@ void World::generateTerrain(ChunkColumn& column, const glm::ivec2& coord) {
             const int worldZ = coord.y * ChunkSection::SIZE + z;
             const float noise = terrainNoise(worldX, worldZ);
 
-            int height = BASE_HEIGHT + static_cast<int>(noise * 25.0f);
+            const float continentalness = noiseAt(worldX, worldZ, 0.0018f, 31);
+            const float mountainField = noiseAt(worldX, worldZ, 0.0025f, 47);
+            const float seaWeight = smoothStep(-0.12f, -0.48f, continentalness);
+            const float mountainWeight = smoothStep(0.16f, 0.52f, mountainField) * (1.0f - seaWeight);
+            const float snowField = noiseAt(worldX, worldZ, 0.0016f, 59);
+            const float snowBiomeWeight = smoothStep(0.08f, 0.42f, snowField) * (1.0f - seaWeight);
+            const float desertField = noiseAt(worldX, worldZ, 0.0014f, 83);
+            const float desertBiomeWeight = smoothStep(0.06f, 0.42f, desertField)
+                * (1.0f - seaWeight)
+                * (1.0f - snowBiomeWeight)
+                * (1.0f - mountainWeight);
+
+            const float plainsHeight = static_cast<float>(BASE_HEIGHT + 2) + noise * 22.0f;
+            const float snowyPlainsHeight = static_cast<float>(BASE_HEIGHT + 4) + noise * 18.0f;
+            const float duneNoise = noiseAt(worldX, worldZ, 0.018f, 101);
+            const float desertHeight = static_cast<float>(BASE_HEIGHT + 1) + noise * 10.0f
+                + std::abs(duneNoise) * 6.0f;
+            const float ridgeNoise = noiseAt(worldX, worldZ, 0.006f, 71);
+            const float ridgeShape = 1.0f - std::abs(ridgeNoise);
+            const float mountainHeight = 54.0f + ridgeShape * 72.0f + noise * 10.0f;
+            const float seaFloorHeight = 17.0f + noise * 7.0f;
+            const float nonMountainHeight = plainsHeight * (1.0f - snowBiomeWeight)
+                + snowyPlainsHeight * snowBiomeWeight;
+            const float biomeLandHeight = nonMountainHeight * (1.0f - desertBiomeWeight)
+                + desertHeight * desertBiomeWeight;
+            const float landHeight = biomeLandHeight * (1.0f - mountainWeight)
+                + mountainHeight * mountainWeight;
+            const float coastalBlend = smoothStep(0.0f, 0.5f, seaWeight);
+            const float oceanFloorBlend = smoothStep(0.5f, 1.0f, seaWeight);
+            const float terrainHeight = seaWeight < 0.5f
+                ? landHeight * (1.0f - coastalBlend) + static_cast<float>(SEA_LEVEL) * coastalBlend
+                : static_cast<float>(SEA_LEVEL) * (1.0f - oceanFloorBlend)
+                    + seaFloorHeight * oceanFloorBlend;
+
+            int height = static_cast<int>(std::round(terrainHeight));
             height = std::clamp(height, MIN_HEIGHT, MAX_HEIGHT);
+            const bool isSea = seaWeight >= 0.5f && height < SEA_LEVEL;
+            const bool isShore = !isSea
+                && seaWeight >= 0.30f
+                && height >= SEA_LEVEL
+                && height <= SEA_LEVEL + 4;
+
+            const bool isDesert = desertBiomeWeight >= 0.5f;
+            const bool isSnowBiome = snowBiomeWeight >= 0.5f;
+            const bool isHighMountain = mountainWeight >= 0.5f && height >= 82;
+            const bool hasSnow = !isSea && (isSnowBiome || (mountainWeight >= 0.5f && height >= 104));
+            const int waterSurface = isSea ? SEA_LEVEL : height;
+            const int columnTop = isSea ? waterSurface : (hasSnow ? height + 1 : height);
 
             /*
              * Fill from the bottom up.
@@ -456,12 +523,24 @@ void World::generateTerrain(ChunkColumn& column, const glm::ivec2& coord) {
              * ChunkColumn::setUnchecked() handles section
              * selection internally.
              */
-            for (int y = MIN_HEIGHT; y <= height; ++y)
+            for (int y = MIN_HEIGHT; y <= columnTop; ++y)
             {
                 BlockType type;
 
-                if (y == height)
-                    type = BlockType::Grass;
+                if (isSea && y > height)
+                    type = BlockType::Water;
+                else if (hasSnow && y > height)
+                    type = BlockType::Snow;
+                else if (y == height)
+                    type = (isSea || isShore || isDesert)
+                        ? BlockType::Sand
+                        : (isHighMountain ? BlockType::Stone : BlockType::Grass);
+                else if (isSea && y >= height - 4)
+                    type = BlockType::Sand;
+                else if ((isShore && y >= height - 2) || (isDesert && y >= height - 7))
+                    type = BlockType::Sand;
+                else if (isHighMountain && y >= height - 2)
+                    type = BlockType::Dirt;
                 else if (y >= height - 4)
                     type = BlockType::Dirt;
                 else

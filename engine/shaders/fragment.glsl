@@ -30,6 +30,11 @@ void main()
     if (vTexIndex == 0u)
         tex.rgb *= vec3(0.65, 0.99, 0.45);
 
+    if (vTexIndex == 6u) {
+        tex.rgb *= vec3(0.25, 0.55, 0.9);
+        tex.a *= 0.75;
+    }
+
     if (tex.a < 0.1)
     discard;
 

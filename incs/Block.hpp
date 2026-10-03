@@ -13,7 +13,8 @@ enum class BlockType : std::uint8_t {
     Stone,
     Sand,
     Amethyst,
-    // Water,
+    Water,
+    Snow,
 
     Count
 };

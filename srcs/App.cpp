@@ -177,6 +177,8 @@ void App::loadTextures() {
 		atlasRects[3] = spriteRect(1680, 1312); // stone
 		atlasRects[4] = spriteRect(1440, 1216); // sand
 		atlasRects[5] = spriteRect(512, 288);   // amethyst_block
+		atlasRects[6] = spriteRect(480, 1504);  // water_still
+		atlasRects[7] = spriteRect(672, 1312);  // snow
 
 		renderer->setTextureAtlas(textureAtlas);
 		renderer->setAtlasRects(atlasRects);
@@ -191,30 +193,45 @@ void App::loadTextures() {
 }
 
 void App::renderWorld(const World& world) {
+	std::vector<const ChunkRenderState*> transparentStates;
+	transparentStates.reserve(world.getRenderStates().size());
+
 	for (const auto& renderState : world.getRenderStates()) {
-		if (!renderState.gpuMesh.uploaded)
-			continue;
-
-		if (renderState.gpuMesh.indexCount == 0)
-			continue;
-
 		if (!world.frustum.isBoxInFrustum(renderState.worldMin, renderState.worldMax))
 			continue;
 
-		renderer->renderMesh(renderState.gpuMesh, renderState.worldPosition);
+		if (renderState.gpuMesh.uploaded && renderState.gpuMesh.indexCount > 0)
+			renderer->renderMesh(renderState.gpuMesh, renderState.worldPosition);
+
+		if (renderState.transparentGpuMesh.uploaded && renderState.transparentGpuMesh.indexCount > 0)
+			transparentStates.push_back(&renderState);
+	}
+
+	std::ranges::sort(transparentStates, [this](const auto* a, const auto* b) {
+		const glm::vec3 centerOffset(ChunkSection::SIZE * 0.5f);
+		const float distanceA = glm::length2(a->worldPosition + centerOffset - camera->pos);
+		const float distanceB = glm::length2(b->worldPosition + centerOffset - camera->pos);
+		return distanceA > distanceB;
+	});
+
+	if (!transparentStates.empty()) {
+		renderer->beginTransparentPass();
+		for (const auto* renderState : transparentStates)
+			renderer->renderMesh(renderState->transparentGpuMesh, renderState->worldPosition);
+		renderer->endTransparentPass();
 	}
 }
 
 void App::processMeshUploads(World& world) {
 	for (auto& renderState : world.getRenderStates()) {
-		if (renderState.mesh.empty())
-			continue;
+		if (!renderState.mesh.empty() && !renderState.gpuMesh.uploaded) {
+			renderer->uploadMesh(renderState.mesh, renderState.gpuMesh);
+			renderState.mesh.clear();
+		}
 
-		if (renderState.gpuMesh.uploaded)
-			continue;
-
-		renderer->uploadMesh(renderState.mesh, renderState.gpuMesh);
-
-		renderState.mesh.clear();
+		if (!renderState.transparentMesh.empty() && !renderState.transparentGpuMesh.uploaded) {
+			renderer->uploadMesh(renderState.transparentMesh, renderState.transparentGpuMesh);
+			renderState.transparentMesh.clear();
+		}
 	}
 }

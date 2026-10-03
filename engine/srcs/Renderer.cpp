@@ -66,7 +66,7 @@ Renderer::Renderer() {
     }
 
     glEnable(GL_DEPTH_TEST);
-    // glEnable(GL_CULL_FACE);
+    glEnable(GL_CULL_FACE);
 
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
@@ -512,6 +512,17 @@ void Renderer::renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPosition
         reinterpret_cast<const void*>(indexOffset),
         static_cast<GLint>(gpuMesh.vertexOffset)
     );
+}
+
+void Renderer::beginTransparentPass() const {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+}
+
+void Renderer::endTransparentPass() const {
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 void Renderer::initProjectionMatrix(

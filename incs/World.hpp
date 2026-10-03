@@ -50,7 +50,7 @@ public:
 
 class World {
 public:
-	static constexpr int CHUNK_RADIUS = 8;
+	static constexpr int CHUNK_RADIUS = 12; // 8 ~140 fps , 16 ~30 fps
 	static constexpr int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 	static constexpr int CHUNK_LOAD_RADIUS = CHUNK_RADIUS + 1;
 	static constexpr int CHUNK_LOAD_DIAMETER = CHUNK_LOAD_RADIUS * 2 + 1;
