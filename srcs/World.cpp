@@ -636,32 +636,40 @@ void World::generateTerrain(ChunkColumn& column) {
             const float noise = terrainNoise(worldX, worldZ);
 
             const float continentalness = noiseAt(worldX, worldZ, 0.0018f, 31);
-            const float mountainField = noiseAt(worldX, worldZ, 0.0025f, 47);
             const float seaWeight = smoothStep(-0.12f, -0.48f, continentalness);
-            const float mountainWeight = smoothStep(0.16f, 0.52f, mountainField) * (1.0f - seaWeight);
-            const float snowField = noiseAt(worldX, worldZ, 0.0016f, 59);
-            const float snowBiomeWeight = smoothStep(0.08f, 0.42f, snowField) * (1.0f - seaWeight);
-            const float desertField = noiseAt(worldX, worldZ, 0.0014f, 83);
-            const float desertBiomeWeight = smoothStep(0.06f, 0.42f, desertField)
-                * (1.0f - seaWeight)
-                * (1.0f - snowBiomeWeight)
-                * (1.0f - mountainWeight);
-
             const float plainsHeight = static_cast<float>(BASE_HEIGHT + 2) + noise * 22.0f;
             const float snowyPlainsHeight = static_cast<float>(BASE_HEIGHT + 4) + noise * 18.0f;
-            const float duneNoise = noiseAt(worldX, worldZ, 0.018f, 101);
-            const float desertHeight = static_cast<float>(BASE_HEIGHT + 1) + noise * 10.0f
-                + std::abs(duneNoise) * 6.0f;
-            const float ridgeNoise = noiseAt(worldX, worldZ, 0.006f, 71);
-            const float ridgeShape = 1.0f - std::abs(ridgeNoise);
-            const float mountainHeight = 54.0f + ridgeShape * 72.0f + noise * 10.0f;
             const float seaFloorHeight = 17.0f + noise * 7.0f;
-            const float nonMountainHeight = plainsHeight * (1.0f - snowBiomeWeight)
-                + snowyPlainsHeight * snowBiomeWeight;
-            const float biomeLandHeight = nonMountainHeight * (1.0f - desertBiomeWeight)
-                + desertHeight * desertBiomeWeight;
-            const float landHeight = biomeLandHeight * (1.0f - mountainWeight)
-                + mountainHeight * mountainWeight;
+            float mountainWeight = 0.0f;
+            float snowBiomeWeight = 0.0f;
+            float desertBiomeWeight = 0.0f;
+            float landHeight = 0.0f;
+
+            if (seaWeight <= 0.5f) {
+                const float mountainField = noiseAt(worldX, worldZ, 0.0025f, 47);
+                mountainWeight = smoothStep(0.16f, 0.52f, mountainField) * (1.0f - seaWeight);
+                const float snowField = noiseAt(worldX, worldZ, 0.0016f, 59);
+                snowBiomeWeight = smoothStep(0.08f, 0.42f, snowField) * (1.0f - seaWeight);
+                const float desertField = noiseAt(worldX, worldZ, 0.0014f, 83);
+                desertBiomeWeight = smoothStep(0.06f, 0.42f, desertField)
+                    * (1.0f - seaWeight)
+                    * (1.0f - snowBiomeWeight)
+                    * (1.0f - mountainWeight);
+
+                const float duneNoise = noiseAt(worldX, worldZ, 0.018f, 101);
+                const float desertHeight = static_cast<float>(BASE_HEIGHT + 1) + noise * 10.0f
+                    + std::abs(duneNoise) * 6.0f;
+                const float ridgeNoise = noiseAt(worldX, worldZ, 0.006f, 71);
+                const float ridgeShape = 1.0f - std::abs(ridgeNoise);
+                const float mountainHeight = 54.0f + ridgeShape * 72.0f + noise * 10.0f;
+                const float nonMountainHeight = plainsHeight * (1.0f - snowBiomeWeight)
+                    + snowyPlainsHeight * snowBiomeWeight;
+                const float biomeLandHeight = nonMountainHeight * (1.0f - desertBiomeWeight)
+                    + desertHeight * desertBiomeWeight;
+                landHeight = biomeLandHeight * (1.0f - mountainWeight)
+                    + mountainHeight * mountainWeight;
+            }
+
             const float coastalBlend = smoothStep(0.0f, 0.5f, seaWeight);
             const float oceanFloorBlend = smoothStep(0.5f, 1.0f, seaWeight);
             const float terrainHeight = seaWeight < 0.5f

@@ -19,11 +19,14 @@ public:
     );
 
 private:
-    static void emitFace(
+    static void emitQuad(
         MeshData& mesh,
-        int x,
-        int y,
-        int z,
+        int minX,
+        int minY,
+        int minZ,
+        int maxX,
+        int maxY,
+        int maxZ,
         NormalDir normal,
         std::uint16_t texture
     );

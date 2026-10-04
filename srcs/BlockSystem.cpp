@@ -1,5 +1,7 @@
 #include "BlockSystem.hpp"
 
+#include "PlayerCollision.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -51,7 +53,7 @@ BlockRaycastHit BlockSystem::raycast(
 		BlockId block = AIR_BLOCK;
 		if (!world.getBlockAt(cell, block))
 			return hit;
-		if (block != AIR_BLOCK) {
+		if (block != AIR_BLOCK && block != WATER_BLOCK) {
 			hit.blockPos = cell;
 			hit.adjacentPos = previous;
 			hit.distance = distance;
@@ -108,7 +110,9 @@ bool BlockSystem::placeBlock(
 		return false;
 
 	BlockId existing = AIR_BLOCK;
-	if (!world.getBlockAt(hit.adjacentPos, existing) || existing != AIR_BLOCK)
+	if (!world.getBlockAt(hit.adjacentPos, existing) || (existing != AIR_BLOCK && existing != WATER_BLOCK))
+		return false;
+	if (PlayerCollision::overlapsBlock(origin, hit.adjacentPos))
 		return false;
 
 	return world.setBlockAt(hit.adjacentPos, block);

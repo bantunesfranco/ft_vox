@@ -31,6 +31,7 @@ constexpr BlockType toBlockType(BlockId id) noexcept {
 }
 
 constexpr BlockId AIR_BLOCK = toBlockId(BlockType::Air);
+constexpr BlockId WATER_BLOCK = toBlockId(BlockType::Water);
 
 constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Count);
 

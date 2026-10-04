@@ -63,14 +63,10 @@ void main()
     // 0..3 -> 0..1
     vAO = float(ao) / 3.0;
 
-    uint corner = (data >> 26u) & 0x03u;
-
-    const vec2 corners[4] = vec2[4](
-        vec2(1.0, 1.0),
-        vec2(1.0, 0.0),
-        vec2(0.0, 0.0),
-        vec2(0.0, 1.0)
-    );
-
-    vUV = corners[corner];
+    if (normal <= 1u)
+        vUV = vec2(localPos.z, 1.0 - localPos.y);
+    else if (normal <= 3u)
+        vUV = vec2(localPos.x, localPos.z);
+    else
+        vUV = vec2(localPos.x, 1.0 - localPos.y);
 }

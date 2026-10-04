@@ -12,22 +12,19 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include "ThreadPool.hpp"
 #include "glm/gtx/norm.hpp"
+#include "PlayerCollision.hpp"
 
 namespace {
-constexpr float PLAYER_HALF_WIDTH = 0.3f;
-constexpr float PLAYER_EYE_HEIGHT = 1.62f;
-constexpr float PLAYER_HEIGHT = 1.8f;
 constexpr float GRAVITY = 24.0f;
 constexpr float JUMP_SPEED = 8.5f;
 
 bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
-	constexpr float epsilon = 0.001f;
-	const int minX = static_cast<int>(std::floor(eyePosition.x - PLAYER_HALF_WIDTH + epsilon));
-	const int maxX = static_cast<int>(std::floor(eyePosition.x + PLAYER_HALF_WIDTH - epsilon));
-	const int minY = static_cast<int>(std::floor(eyePosition.y - PLAYER_EYE_HEIGHT + epsilon));
-	const int maxY = static_cast<int>(std::floor(eyePosition.y + PLAYER_HEIGHT - PLAYER_EYE_HEIGHT - epsilon));
-	const int minZ = static_cast<int>(std::floor(eyePosition.z - PLAYER_HALF_WIDTH + epsilon));
-	const int maxZ = static_cast<int>(std::floor(eyePosition.z + PLAYER_HALF_WIDTH - epsilon));
+	const int minX = static_cast<int>(std::floor(eyePosition.x - PlayerCollision::HALF_WIDTH + PlayerCollision::EPSILON));
+	const int maxX = static_cast<int>(std::floor(eyePosition.x + PlayerCollision::HALF_WIDTH - PlayerCollision::EPSILON));
+	const int minY = static_cast<int>(std::floor(eyePosition.y - PlayerCollision::EYE_HEIGHT + PlayerCollision::EPSILON));
+	const int maxY = static_cast<int>(std::floor(eyePosition.y + PlayerCollision::HEIGHT - PlayerCollision::EYE_HEIGHT - PlayerCollision::EPSILON));
+	const int minZ = static_cast<int>(std::floor(eyePosition.z - PlayerCollision::HALF_WIDTH + PlayerCollision::EPSILON));
+	const int maxZ = static_cast<int>(std::floor(eyePosition.z + PlayerCollision::HALF_WIDTH - PlayerCollision::EPSILON));
 
 	for (int y = minY; y <= maxY; ++y) {
 		if (y < 0)
@@ -219,7 +216,7 @@ void App::run() {
 				static_cast<int>(std::floor(camera->pos.z)),
 				surfaceHeight
 			)) {
-				camera->pos.y = static_cast<float>(surfaceHeight + 1) + PLAYER_EYE_HEIGHT;
+				camera->pos.y = static_cast<float>(surfaceHeight + 1) + PlayerCollision::EYE_HEIGHT;
 				spawnInitialized = true;
 				grounded = true;
 				jumpRequested = false;
