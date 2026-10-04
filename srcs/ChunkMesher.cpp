@@ -2,8 +2,6 @@
 
 #include <algorithm>
 
-constexpr std::uint8_t DEFAULT_AO = 3;
-
 void ChunkMesher::build(
     const ChunkSection& section,
     const int sectionY,
@@ -22,13 +20,24 @@ void ChunkMesher::build(
 
     constexpr int size = ChunkSection::SIZE;
     constexpr int empty = -1;
+    constexpr std::uint8_t nonUniformAo = 0xFF;
     constexpr std::array<NormalDir, 6> directions = {
         NormalDir::PositiveX, NormalDir::NegativeX,
         NormalDir::PositiveY, NormalDir::NegativeY,
         NormalDir::PositiveZ, NormalDir::NegativeZ
     };
     constexpr std::array<std::array<int, 2>, 3> faceAxes = {{{1, 2}, {0, 2}, {0, 1}}};
+    constexpr std::array<std::array<std::array<int, 2>, 4>, 6> cornerUv = {{
+        {{{0, 0}, {1, 0}, {1, 1}, {0, 1}}},
+        {{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+        {{{0, 1}, {1, 1}, {1, 0}, {0, 0}}},
+        {{{0, 0}, {1, 0}, {1, 1}, {0, 1}}},
+        {{{1, 0}, {1, 1}, {0, 1}, {0, 0}}},
+        {{{0, 0}, {0, 1}, {1, 1}, {1, 0}}}
+    }};
     std::array<int, size * size> mask{};
+    std::array<std::uint8_t, size * size> maskAo{};
+    std::array<std::array<std::uint8_t, 4>, size * size> maskCornerAo{};
 
     output.reserve(2048, 3072);
     transparentOutput.reserve(512, 768);
@@ -43,6 +52,7 @@ void ChunkMesher::build(
 
             for (int slice = 0; slice < size; ++slice) {
                 mask.fill(empty);
+                maskAo.fill(nonUniformAo);
 
                 for (int v = 0; v < size; ++v) {
                     for (int u = 0; u < size; ++u) {
@@ -70,28 +80,68 @@ void ChunkMesher::build(
                         const std::uint16_t texture = axis == 1
                             ? (sign > 0 ? definition.textureTop : definition.textureBottom)
                             : definition.textureSide;
-                        mask[v * size + u] = static_cast<int>(texture)
+                        std::array<std::uint8_t, 4> faceAo{};
+                        for (std::size_t corner = 0; corner < faceAo.size(); ++corner) {
+                            std::array<int, 3> sideOne = position;
+                            std::array<int, 3> sideTwo = position;
+                            std::array<int, 3> diagonal = position;
+                            sideOne[axis] += sign;
+                            sideTwo[axis] += sign;
+                            diagonal[axis] += sign;
+
+                            const int uSign = cornerUv[directionIndex][corner][0] == 0 ? -1 : 1;
+                            const int vSign = cornerUv[directionIndex][corner][1] == 0 ? -1 : 1;
+                            sideOne[uAxis] += uSign;
+                            sideTwo[vAxis] += vSign;
+                            diagonal[uAxis] += uSign;
+                            diagonal[vAxis] += vSign;
+
+                            const int worldY = sectionY * size;
+                            const bool sideOneOpaque = registry.isOpaque(neighborhood.getBlock(
+                                sideOne[0], sideOne[1] + worldY, sideOne[2]));
+                            const bool sideTwoOpaque = registry.isOpaque(neighborhood.getBlock(
+                                sideTwo[0], sideTwo[1] + worldY, sideTwo[2]));
+                            const bool diagonalOpaque = registry.isOpaque(neighborhood.getBlock(
+                                diagonal[0], diagonal[1] + worldY, diagonal[2]));
+                            faceAo[corner] = sideOneOpaque && sideTwoOpaque
+                                ? 0
+                                : static_cast<std::uint8_t>(3 - static_cast<int>(sideOneOpaque)
+                                    - static_cast<int>(sideTwoOpaque) - static_cast<int>(diagonalOpaque));
+                        }
+
+                        const bool uniformAo = std::all_of(faceAo.begin() + 1, faceAo.end(),
+                            [&faceAo](const std::uint8_t value) { return value == faceAo[0]; });
+                        const std::size_t maskIndex = static_cast<std::size_t>(v * size + u);
+                        mask[maskIndex] = static_cast<int>(texture)
                             | (definition.transparent ? 0x40 : 0);
+                        maskAo[maskIndex] = uniformAo ? faceAo[0] : nonUniformAo;
+                        maskCornerAo[maskIndex] = faceAo;
                     }
                 }
 
                 for (int v = 0; v < size; ++v) {
                     for (int u = 0; u < size;) {
-                        const int key = mask[v * size + u];
+                        const std::size_t faceIndex = static_cast<std::size_t>(v * size + u);
+                        const int key = mask[faceIndex];
                         if (key == empty) {
                             ++u;
                             continue;
                         }
 
                         int width = 1;
-                        while (u + width < size && mask[v * size + u + width] == key)
+                        const std::uint8_t aoKey = maskAo[faceIndex];
+                        const auto& faceAo = maskCornerAo[faceIndex];
+                        while (aoKey != nonUniformAo && u + width < size
+                            && mask[v * size + u + width] == key
+                            && maskAo[v * size + u + width] == aoKey)
                             ++width;
 
                         int height = 1;
-                        bool canExtend = true;
+                        bool canExtend = aoKey != nonUniformAo;
                         while (v + height < size && canExtend) {
                             for (int offset = 0; offset < width; ++offset) {
-                                if (mask[(v + height) * size + u + offset] != key) {
+                                const std::size_t candidateIndex = static_cast<std::size_t>((v + height) * size + u + offset);
+                                if (mask[candidateIndex] != key || maskAo[candidateIndex] != aoKey) {
                                     canExtend = false;
                                     break;
                                 }
@@ -119,7 +169,8 @@ void ChunkMesher::build(
                             minimum[0], minimum[1], minimum[2],
                             maximum[0], maximum[1], maximum[2],
                             direction,
-                            static_cast<std::uint16_t>(key & 0x3F)
+                            static_cast<std::uint16_t>(key & 0x3F),
+                            faceAo
                         );
                         u += width;
                     }
@@ -132,7 +183,7 @@ void ChunkMesher::build(
 void ChunkMesher::emitVertex(
     MeshData& mesh,
     std::uint8_t x,
-    std::uint8_t y,
+    std::uint16_t y,
     std::uint8_t z,
     NormalDir normal,
     std::uint16_t texture,
@@ -157,7 +208,8 @@ void ChunkMesher::emitQuad(
     const int maxY,
     const int maxZ,
     NormalDir normal,
-    std::uint16_t texture
+    std::uint16_t texture,
+    const std::array<std::uint8_t, 4>& ao
 ) {
     const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
     using VertexPosition = std::array<std::uint8_t, 3>;
@@ -196,7 +248,7 @@ void ChunkMesher::emitQuad(
         emitVertex(
             mesh,
             position[0], position[1], position[2],
-            normal, texture, DEFAULT_AO, static_cast<std::uint8_t>(corner)
+            normal, texture, ao[corner], static_cast<std::uint8_t>(corner)
         );
     }
 
@@ -213,11 +265,19 @@ void ChunkMesher::emitQuad(
      * 0 1 2
      * 2 3 0
      */
-    mesh.indices.push_back(base + 0);
-    mesh.indices.push_back(base + 1);
-    mesh.indices.push_back(base + 2);
-
-    mesh.indices.push_back(base + 2);
-    mesh.indices.push_back(base + 3);
-    mesh.indices.push_back(base + 0);
+    if (ao[0] + ao[2] > ao[1] + ao[3]) {
+        mesh.indices.push_back(base + 0);
+        mesh.indices.push_back(base + 1);
+        mesh.indices.push_back(base + 3);
+        mesh.indices.push_back(base + 1);
+        mesh.indices.push_back(base + 2);
+        mesh.indices.push_back(base + 3);
+    } else {
+        mesh.indices.push_back(base + 0);
+        mesh.indices.push_back(base + 1);
+        mesh.indices.push_back(base + 2);
+        mesh.indices.push_back(base + 2);
+        mesh.indices.push_back(base + 3);
+        mesh.indices.push_back(base + 0);
+    }
 }

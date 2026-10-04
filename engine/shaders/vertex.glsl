@@ -34,19 +34,19 @@ void main()
 {
     uint data = aPackedVertex;
 
-    // 5 bits each.
+    // X/Z use 5 bits; Y spans a complete 256-block chunk column.
     uint x =  data         & 0x1Fu;
-    uint y = (data >> 5u)  & 0x1Fu;
-    uint z = (data >> 10u) & 0x1Fu;
+    uint y = (data >> 5u)  & 0x1FFu;
+    uint z = (data >> 14u) & 0x1Fu;
 
     // 3 bits.
-    uint normal = (data >> 15u) & 0x07u;
+    uint normal = (data >> 19u) & 0x07u;
 
     // 6 bits.
-    uint texture = (data >> 18u) & 0x3Fu;
+    uint texture = (data >> 22u) & 0x3Fu;
 
     // 2 bits.
-    uint ao = (data >> 24u) & 0x03u;
+    uint ao = (data >> 28u) & 0x03u;
 
     vec3 localPos = vec3(x, y, z);
     if (uHighlightPass)
@@ -60,8 +60,8 @@ void main()
 
     vTexIndex = texture;
 
-    // 0..3 -> 0..1
-    vAO = float(ao) / 3.0;
+    // Keep blocked corners shaded without making them completely black.
+    vAO = 0.55 + (float(ao) / 3.0) * 0.45;
 
     if (normal <= 1u)
         vUV = vec2(localPos.z, 1.0 - localPos.y);

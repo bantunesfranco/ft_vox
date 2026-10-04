@@ -227,7 +227,7 @@ void App::run() {
 		world.frustum.updateFrustum(camera->proj, camera->view);
 		for (auto& gpuMesh : world.pruneRenderStates())
 			renderer->releaseMesh(gpuMesh);
-    	world.buildRenderStates();
+        world.buildRenderStates(camera->pos, camera->dir);
 		updateBlockHighlight();
 
         WorldUBO worldUBO{};

@@ -1,6 +1,7 @@
 #include "World.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <ranges>
 #include <fstream>
+#include <chrono>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
@@ -69,6 +71,361 @@ namespace
         const float t = std::clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
         return t * t * (3.0f - 2.0f * t);
     }
+
+    struct TerrainProfile {
+        float seaWeight;
+        float mountainWeight;
+        float snowBiomeWeight;
+        float desertBiomeWeight;
+        int height;
+        bool isSea;
+    };
+
+    [[nodiscard]]
+    TerrainProfile terrainProfileAt(const int worldX, const int worldZ) noexcept
+    {
+        const float noise = terrainNoise(worldX, worldZ);
+        const float continentalness = noiseAt(worldX, worldZ, 0.0018f, 31);
+        const float seaWeight = smoothStep(-0.12f, -0.48f, continentalness);
+        const float plainsHeight = static_cast<float>(BASE_HEIGHT + 2) + noise * 22.0f;
+        const float snowyPlainsHeight = static_cast<float>(BASE_HEIGHT + 4) + noise * 18.0f;
+        const float seaFloorHeight = 17.0f + noise * 7.0f;
+        float mountainWeight = 0.0f;
+        float snowBiomeWeight = 0.0f;
+        float desertBiomeWeight = 0.0f;
+        float landHeight = 0.0f;
+
+        if (seaWeight <= 0.5f) {
+            const float mountainField = noiseAt(worldX, worldZ, 0.0025f, 47);
+            mountainWeight = smoothStep(0.16f, 0.52f, mountainField) * (1.0f - seaWeight);
+            const float snowField = noiseAt(worldX, worldZ, 0.0016f, 59);
+            snowBiomeWeight = smoothStep(0.08f, 0.42f, snowField) * (1.0f - seaWeight);
+            const float desertField = noiseAt(worldX, worldZ, 0.0014f, 83);
+            desertBiomeWeight = smoothStep(0.06f, 0.42f, desertField)
+                * (1.0f - seaWeight)
+                * (1.0f - snowBiomeWeight)
+                * (1.0f - mountainWeight);
+
+            const float duneNoise = noiseAt(worldX, worldZ, 0.018f, 101);
+            const float desertHeight = static_cast<float>(BASE_HEIGHT + 1) + noise * 10.0f
+                + std::abs(duneNoise) * 6.0f;
+            const float ridgeNoise = noiseAt(worldX, worldZ, 0.006f, 71);
+            const float ridgeShape = 1.0f - std::abs(ridgeNoise);
+            const float mountainHeight = 54.0f + ridgeShape * 72.0f + noise * 10.0f;
+            const float nonMountainHeight = plainsHeight * (1.0f - snowBiomeWeight)
+                + snowyPlainsHeight * snowBiomeWeight;
+            const float biomeLandHeight = nonMountainHeight * (1.0f - desertBiomeWeight)
+                + desertHeight * desertBiomeWeight;
+            landHeight = biomeLandHeight * (1.0f - mountainWeight)
+                + mountainHeight * mountainWeight;
+        }
+
+        const float coastalBlend = smoothStep(0.0f, 0.5f, seaWeight);
+        const float oceanFloorBlend = smoothStep(0.5f, 1.0f, seaWeight);
+        const float terrainHeight = seaWeight < 0.5f
+            ? landHeight * (1.0f - coastalBlend) + static_cast<float>(SEA_LEVEL) * coastalBlend
+            : static_cast<float>(SEA_LEVEL) * (1.0f - oceanFloorBlend)
+                + seaFloorHeight * oceanFloorBlend;
+        const int height = std::clamp(static_cast<int>(std::round(terrainHeight)), MIN_HEIGHT, MAX_HEIGHT);
+
+        return {
+            seaWeight,
+            mountainWeight,
+            snowBiomeWeight,
+            desertBiomeWeight,
+            height,
+            seaWeight >= 0.5f && height < SEA_LEVEL
+        };
+    }
+
+    struct CaveRandom {
+        std::uint32_t state;
+
+        [[nodiscard]] std::uint32_t next() noexcept
+        {
+            state ^= state << 13u;
+            state ^= state >> 17u;
+            state ^= state << 5u;
+            return state;
+        }
+
+        [[nodiscard]] float unit() noexcept
+        {
+            return static_cast<float>(next() >> 8u) * (1.0f / 16'777'216.0f);
+        }
+
+        [[nodiscard]] float range(const float minimum, const float maximum) noexcept
+        {
+            return minimum + unit() * (maximum - minimum);
+        }
+    };
+
+    [[nodiscard]]
+    std::uint32_t caveRegionSeed(const int regionX, const int regionZ) noexcept
+    {
+        std::uint32_t seed = static_cast<std::uint32_t>(regionX) * 0x9E3779B9u
+            ^ static_cast<std::uint32_t>(regionZ) * 0x85EBCA6Bu
+            ^ 0xC2B2AE35u;
+        seed ^= seed >> 16u;
+        seed *= 0x7FEB352Du;
+        seed ^= seed >> 15u;
+        seed *= 0x846CA68Bu;
+        seed ^= seed >> 16u;
+        return seed == 0 ? 1u : seed;
+    }
+
+    void generateCaveMasks(
+        const ChunkCoord& coord,
+        std::vector<std::uint8_t>& caveMask,
+        std::vector<std::uint8_t>& entranceMask
+    ) {
+        constexpr int regionSize = 64;
+        constexpr int featureMargin = 352;
+        constexpr std::size_t horizontalArea = ChunkSection::SIZE * ChunkSection::SIZE;
+        constexpr std::size_t maskSize = ChunkColumn::HEIGHT * horizontalArea;
+        caveMask.assign(maskSize, 0);
+        entranceMask.assign(maskSize, 0);
+
+        const int chunkMinX = coord.x * ChunkSection::SIZE;
+        const int chunkMinZ = coord.z * ChunkSection::SIZE;
+        const int chunkMaxX = chunkMinX + ChunkSection::SIZE - 1;
+        const int chunkMaxZ = chunkMinZ + ChunkSection::SIZE - 1;
+        const int firstRegionX = floorDiv(chunkMinX - featureMargin, regionSize);
+        const int lastRegionX = floorDiv(chunkMaxX + featureMargin, regionSize);
+        const int firstRegionZ = floorDiv(chunkMinZ - featureMargin, regionSize);
+        const int lastRegionZ = floorDiv(chunkMaxZ + featureMargin, regionSize);
+
+        const auto stampEllipsoid = [&](const float centerX, const float centerY, const float centerZ,
+            const float radiusX, const float radiusY, const float radiusZ, const bool entrance) {
+            const int minX = std::max(chunkMinX, static_cast<int>(std::floor(centerX - radiusX)));
+            const int maxX = std::min(chunkMaxX, static_cast<int>(std::ceil(centerX + radiusX)));
+            const int minZ = std::max(chunkMinZ, static_cast<int>(std::floor(centerZ - radiusZ)));
+            const int maxZ = std::min(chunkMaxZ, static_cast<int>(std::ceil(centerZ + radiusZ)));
+            const int minY = std::max(8, static_cast<int>(std::floor(centerY - radiusY)));
+            const int maxY = std::min(ChunkColumn::HEIGHT - 1,
+                static_cast<int>(std::ceil(centerY + radiusY)));
+            if (minX > maxX || minZ > maxZ || minY > maxY)
+                return;
+
+            for (int worldZ = minZ; worldZ <= maxZ; ++worldZ) {
+                for (int worldX = minX; worldX <= maxX; ++worldX) {
+                    const float dx = (static_cast<float>(worldX) + 0.5f - centerX) / radiusX;
+                    const float dz = (static_cast<float>(worldZ) + 0.5f - centerZ) / radiusZ;
+                    for (int y = minY; y <= maxY; ++y) {
+                        const float dy = (static_cast<float>(y) + 0.5f - centerY) / radiusY;
+                        if (dx * dx + dy * dy + dz * dz > 1.0f)
+                            continue;
+
+                        const int localX = worldX - chunkMinX;
+                        const int localZ = worldZ - chunkMinZ;
+                        const std::size_t index = static_cast<std::size_t>(y) * horizontalArea
+                            + static_cast<std::size_t>(localZ * ChunkSection::SIZE + localX);
+                        caveMask[index] = 1;
+                        if (entrance)
+                            entranceMask[index] = 1;
+                    }
+                }
+            }
+        };
+
+        const auto carveWorm = [&](CaveRandom& random, float x, float y, float z,
+            glm::vec3 direction, const float length, float radius, const bool entrance,
+            const bool descend = false) {
+            std::vector<glm::vec3> path;
+            float travelled = 0.0f;
+            while (travelled <= length) {
+                path.emplace_back(x, y, z);
+                const bool openToSurface = entrance && travelled <= 20.0f;
+                stampEllipsoid(x, y, z, radius, radius, radius, openToSurface);
+
+                direction.x += random.range(-0.12f, 0.12f);
+                direction.y += random.range(-0.08f, 0.08f);
+                direction.z += random.range(-0.12f, 0.12f);
+                if (descend && travelled < length * 0.75f)
+                    direction.y = std::min(direction.y, -0.20f);
+                if (entrance && travelled < 20.0f)
+                    direction.y = std::min(direction.y, -0.30f);
+                if (y < 12.0f)
+                    direction.y = std::max(direction.y, 0.16f);
+                else if (y > 104.0f)
+                    direction.y = std::min(direction.y, -0.16f);
+                direction = glm::normalize(direction);
+
+                x += direction.x * 1.6f;
+                y += direction.y * 1.6f;
+                z += direction.z * 1.6f;
+                travelled += 1.6f;
+                radius = std::clamp(radius + random.range(-0.10f, 0.10f), 2.35f, 3.45f);
+            }
+            return path;
+        };
+
+        const auto carveConnector = [&](const glm::vec3& start, const glm::vec3& end,
+            const float radius) {
+            const glm::vec3 delta = end - start;
+            const float distance = glm::length(delta);
+            if (distance < 1.0f)
+                return;
+            const int steps = std::max(1, static_cast<int>(std::ceil(distance / 1.6f)));
+            glm::vec3 side = glm::cross(glm::normalize(delta), glm::vec3(0.0f, 1.0f, 0.0f));
+            if (glm::length(side) < 0.01f)
+                side = glm::vec3(1.0f, 0.0f, 0.0f);
+            else
+                side = glm::normalize(side);
+
+            for (int step = 0; step <= steps; ++step) {
+                const float t = static_cast<float>(step) / static_cast<float>(steps);
+                const float bend = std::sin(t * 3.14159265f) * std::sin(t * 6.2831853f) * 2.0f;
+                const glm::vec3 point = start + delta * t + side * bend;
+                stampEllipsoid(point.x, point.y, point.z, radius, radius, radius, false);
+            }
+        };
+
+        for (int regionZ = firstRegionZ; regionZ <= lastRegionZ; ++regionZ) {
+            for (int regionX = firstRegionX; regionX <= lastRegionX; ++regionX) {
+                CaveRandom wormRandom{caveRegionSeed(regionX, regionZ)};
+                if (wormRandom.unit() < 0.56f) {
+                    const float startX = static_cast<float>(regionX * regionSize) + wormRandom.range(0.0f, regionSize);
+                    const float startZ = static_cast<float>(regionZ * regionSize) + wormRandom.range(0.0f, regionSize);
+                    const TerrainProfile startProfile = terrainProfileAt(
+                        static_cast<int>(std::floor(startX)), static_cast<int>(std::floor(startZ)));
+                    const bool entrance = !startProfile.isSea
+                        && startProfile.height >= SEA_LEVEL - 2
+                        && wormRandom.unit() < 0.18f;
+                    const float angle = wormRandom.range(0.0f, 6.2831853f);
+                    glm::vec3 direction{std::cos(angle), wormRandom.range(-0.14f, 0.14f), std::sin(angle)};
+                    if (entrance)
+                        direction.y = -0.52f;
+                    direction = glm::normalize(direction);
+
+                    const float startY = entrance
+                        ? static_cast<float>(startProfile.height) - 1.0f
+                        : std::max(16.0f, std::min(
+                            static_cast<float>(startProfile.height)
+                                - wormRandom.range(14.0f, 28.0f),
+                            wormRandom.range(28.0f, 58.0f)));
+                    const float radius = wormRandom.range(2.55f, 3.35f);
+                    const float length = wormRandom.range(150.0f, 200.0f);
+                    const std::vector<glm::vec3> mainPath = carveWorm(
+                        wormRandom, startX, startY, startZ, direction, length, radius, entrance, true);
+
+                    const auto stampRoomOnPath = [&](const std::size_t pathIndex) {
+                        const glm::vec3 center = mainPath[pathIndex];
+                        const float roomRadius = wormRandom.range(8.0f, 12.0f);
+                        const float roomHeight = wormRandom.range(6.0f, 9.0f);
+                        const float roomAngle = wormRandom.range(0.0f, 6.2831853f);
+                        stampEllipsoid(center.x, center.y, center.z,
+                            roomRadius, roomHeight, roomRadius, false);
+                        stampEllipsoid(center.x + std::cos(roomAngle) * roomRadius * 0.42f,
+                            center.y + wormRandom.range(-1.5f, 1.5f),
+                            center.z + std::sin(roomAngle) * roomRadius * 0.42f,
+                            roomRadius * 0.62f, roomHeight * 0.78f, roomRadius * 0.62f, false);
+                    };
+
+                    if (mainPath.size() > 24) {
+                        stampRoomOnPath(mainPath.size() / 3);
+                        stampRoomOnPath(mainPath.size() * 2 / 3);
+                    }
+
+                    if (mainPath.size() > 12) {
+                        constexpr std::array<float, 3> branchPositions{0.28f, 0.55f, 0.80f};
+                        for (const float branchPosition : branchPositions) {
+                            if (wormRandom.unit() >= 0.68f)
+                                continue;
+                            const std::size_t branchIndex = static_cast<std::size_t>(
+                                branchPosition * static_cast<float>(mainPath.size() - 1));
+                            const glm::vec3 branchStart = mainPath[branchIndex];
+                            const float branchAngle = wormRandom.range(0.0f, 6.2831853f);
+                            glm::vec3 branchDirection{
+                                std::cos(branchAngle), wormRandom.range(-0.22f, 0.22f),
+                                std::sin(branchAngle)};
+                            branchDirection = glm::normalize(branchDirection);
+                            const float branchLength = wormRandom.range(45.0f, 75.0f);
+                            const float branchRadius = wormRandom.range(2.35f, 2.9f);
+                            carveWorm(wormRandom, branchStart.x, branchStart.y, branchStart.z,
+                                branchDirection, branchLength, branchRadius, false);
+                        }
+
+                        if (mainPath.size() > 40 && wormRandom.unit() < 0.55f)
+                            carveConnector(mainPath[mainPath.size() / 4],
+                                mainPath[mainPath.size() * 3 / 4],
+                                wormRandom.range(2.45f, 3.0f));
+                    }
+                }
+
+                CaveRandom chamberRandom{caveRegionSeed(regionX, regionZ) ^ 0xA511E9B3u};
+                const float centerX = static_cast<float>(regionX * regionSize)
+                    + chamberRandom.range(0.0f, regionSize);
+                const float centerZ = static_cast<float>(regionZ * regionSize)
+                    + chamberRandom.range(0.0f, regionSize);
+                const TerrainProfile profile = terrainProfileAt(
+                    static_cast<int>(std::floor(centerX)), static_cast<int>(std::floor(centerZ)));
+                const float chamberChance = 0.15f + profile.mountainWeight * 0.29f;
+                if (profile.isSea || chamberRandom.unit() >= chamberChance)
+                    continue;
+
+                const float centerY = profile.mountainWeight > 0.30f
+                    ? static_cast<float>(profile.height)
+                        - chamberRandom.range(20.0f, 42.0f + profile.mountainWeight * 22.0f)
+                    : chamberRandom.range(12.0f, static_cast<float>(std::max(13, profile.height - 9)));
+                if (centerY < 8.0f || centerY > ChunkColumn::HEIGHT - 8.0f)
+                    continue;
+
+                const float radiusX = chamberRandom.range(10.0f, 17.0f)
+                    + profile.mountainWeight * 7.0f;
+                const float radiusZ = chamberRandom.range(10.0f, 17.0f)
+                    + profile.mountainWeight * 7.0f;
+                const float radiusY = chamberRandom.range(7.0f, 11.0f)
+                    + profile.mountainWeight * 5.0f;
+                const float angle = chamberRandom.range(0.0f, 6.2831853f);
+                stampEllipsoid(centerX, centerY, centerZ,
+                    radiusX, radiusY, radiusZ, false);
+                stampEllipsoid(centerX + std::cos(angle) * radiusX * 0.48f,
+                    centerY + chamberRandom.range(-2.0f, 2.0f),
+                    centerZ + std::sin(angle) * radiusZ * 0.48f,
+                    radiusX * 0.58f, radiusY * 0.78f, radiusZ * 0.58f, false);
+
+                if (chamberRandom.unit() < 0.72f) {
+                    const float tunnelAngle = chamberRandom.range(0.0f, 6.2831853f);
+                    glm::vec3 direction{
+                        std::cos(tunnelAngle), chamberRandom.range(-0.16f, 0.16f),
+                        std::sin(tunnelAngle)};
+                    const float tunnelLength = chamberRandom.range(38.0f, 82.0f);
+                    const float tunnelRadius = chamberRandom.range(2.45f, 3.0f);
+                    carveWorm(chamberRandom, centerX, centerY, centerZ,
+                        glm::normalize(direction), tunnelLength, tunnelRadius, false);
+                }
+            }
+        }
+    }
+
+    void appendSectionMesh(MeshData& columnMesh, const MeshData& sectionMesh, const int sectionY)
+    {
+        const auto baseVertex = static_cast<std::uint32_t>(columnMesh.vertices.size());
+
+        for (const PackedVertex vertex : sectionMesh.vertices) {
+            const auto x = static_cast<std::uint8_t>(vertex & 0x1Fu);
+            const auto localY = static_cast<std::uint16_t>((vertex >> 5u) & 0x1FFu);
+            const auto z = static_cast<std::uint8_t>((vertex >> 14u) & 0x1Fu);
+            const auto normal = static_cast<NormalDir>((vertex >> 19u) & 0x07u);
+            const auto texture = static_cast<std::uint8_t>((vertex >> 22u) & 0x3Fu);
+            const auto ao = static_cast<std::uint8_t>((vertex >> 28u) & 0x03u);
+            const auto corner = static_cast<std::uint8_t>((vertex >> 30u) & 0x03u);
+
+            columnMesh.vertices.push_back(packVertex(
+                x,
+                static_cast<std::uint16_t>(localY + sectionY * ChunkSection::SIZE),
+                z,
+                normal,
+                texture,
+                ao,
+                corner
+            ));
+        }
+
+        for (const std::uint32_t index : sectionMesh.indices)
+            columnMesh.indices.push_back(baseVertex + index);
+    }
 }
 
 
@@ -115,6 +472,15 @@ std::vector<GpuMesh> World::pruneRenderStates() {
         }
 
         it = meshedSections.erase(it);
+    }
+
+    for (auto it = meshWaitFrames.begin(); it != meshWaitFrames.end();) {
+        if (chunks.contains(it->first)) {
+            ++it;
+            continue;
+        }
+
+        it = meshWaitFrames.erase(it);
     }
 
     return retiredMeshes;
@@ -193,19 +559,19 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
         const int affectedChunkX = floorDiv(affected.x, ChunkSection::SIZE);
         const int affectedChunkZ = floorDiv(affected.z, ChunkSection::SIZE);
         const ChunkCoord affectedCoord{affectedChunkX, affectedChunkZ};
-        const std::uint8_t sectionY = static_cast<std::uint8_t>(affected.y / ChunkSection::SIZE);
         const auto maskIt = meshedSections.find(affectedCoord);
         if (maskIt != meshedSections.end())
-            maskIt->second &= static_cast<std::uint16_t>(~(1u << sectionY));
+            maskIt->second = 0;
 
-        for (auto stateIt = renderStates.begin(); stateIt != renderStates.end(); ++stateIt) {
-            if (stateIt->coord != affectedCoord || stateIt->sectionY != sectionY)
+        for (auto stateIt = renderStates.begin(); stateIt != renderStates.end();) {
+            if (stateIt->coord != affectedCoord) {
+                ++stateIt;
                 continue;
+            }
 
             pendingRetiredMeshes.push_back(std::move(stateIt->gpuMesh));
             pendingRetiredMeshes.push_back(std::move(stateIt->transparentGpuMesh));
-            renderStates.erase(stateIt);
-            break;
+            stateIt = renderStates.erase(stateIt);
         }
     }
 
@@ -474,7 +840,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
  * Terrain generation
  * ============================================================ */
 
-void World::buildRenderStates() {
+void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward) {
     /*
      * Snapshot the currently loaded columns.
      *
@@ -486,26 +852,75 @@ void World::buildRenderStates() {
      * loaded. If chunks can be erased concurrently, the snapshot
      * should use shared_ptr instead of raw pointers.
      */
-    std::vector<std::pair<ChunkCoord, ChunkColumn*>> loadedChunks;
+    struct MeshCandidate {
+        ChunkCoord coord;
+        ChunkColumn* column;
+        float priority;
+    };
+    std::vector<MeshCandidate> candidates;
+    constexpr auto MESH_BUDGET = std::chrono::milliseconds(2);
+    constexpr float CHUNK_SIZE = static_cast<float>(ChunkSection::SIZE);
+
+    glm::vec2 forward{playerForward.x, playerForward.z};
+    if (glm::dot(forward, forward) > 1e-6f)
+        forward = glm::normalize(forward);
+    else
+        forward = {1.0f, 0.0f};
 
     {
         std::lock_guard lock(chunk_mutex);
 
-        loadedChunks.reserve(chunks.size());
+        candidates.reserve(chunks.size());
 
         for (auto& [coord, column] : chunks){
             if (!column)
                 continue;
 
-            loadedChunks.emplace_back(coord, column.get());
+            const auto sectionIt = meshedSections.find(coord);
+            if (sectionIt != meshedSections.end() && sectionIt->second == 0xFFFFu) {
+                meshWaitFrames.erase(coord);
+                continue;
+            }
+
+            const float minX = static_cast<float>(coord.x) * CHUNK_SIZE;
+            const float minZ = static_cast<float>(coord.z) * CHUNK_SIZE;
+            const float maxX = minX + CHUNK_SIZE;
+            const float maxZ = minZ + CHUNK_SIZE;
+            const float dx = std::max({minX - playerPosition.x, 0.0f, playerPosition.x - maxX});
+            const float dz = std::max({minZ - playerPosition.z, 0.0f, playerPosition.z - maxZ});
+            const float distanceInChunks = std::sqrt(dx * dx + dz * dz) / CHUNK_SIZE;
+            const float centerX = (minX + maxX) * 0.5f - playerPosition.x;
+            const float centerZ = (minZ + maxZ) * 0.5f - playerPosition.z;
+            const float forwardExtent = CHUNK_SIZE * 0.5f * (std::abs(forward.x) + std::abs(forward.y));
+            const bool intersectsForwardHalfPlane =
+                centerX * forward.x + centerZ * forward.y + forwardExtent >= 0.0f;
+            const std::uint32_t waitedFrames = ++meshWaitFrames[coord];
+
+            // A nearby safety radius comes first; forward chunks get a boost, while age prevents starvation.
+            const float safetyBonus = distanceInChunks <= 2.0f ? 100.0f : 0.0f;
+            const float viewBonus = intersectsForwardHalfPlane ? 8.0f : 0.0f;
+            const float ageBonus = std::min(static_cast<float>(waitedFrames) * 0.25f, 256.0f);
+            candidates.push_back({coord, column.get(), distanceInChunks - safetyBonus - viewBonus - ageBonus});
         }
     }
 
-    for (const auto& [coord, column] : loadedChunks)
+    std::sort(candidates.begin(), candidates.end(), [](const MeshCandidate& lhs, const MeshCandidate& rhs) {
+        if (lhs.priority != rhs.priority)
+            return lhs.priority < rhs.priority;
+        if (lhs.coord.x != rhs.coord.x)
+            return lhs.coord.x < rhs.coord.x;
+        return lhs.coord.z < rhs.coord.z;
+    });
+
+    const auto meshStart = std::chrono::steady_clock::now();
+    bool meshedAnyChunk = false;
+    for (const MeshCandidate& candidate : candidates)
     {
-        const auto sectionIt = meshedSections.find(coord);
-        if (sectionIt != meshedSections.end() && sectionIt->second == 0xFFFFu)
-            continue;
+        if (meshedAnyChunk && std::chrono::steady_clock::now() - meshStart >= MESH_BUDGET)
+            break;
+
+        const ChunkCoord& coord = candidate.coord;
+        ChunkColumn* column = candidate.column;
 
         /*
          * Check that the complete 3x3 horizontal neighborhood exists.
@@ -551,68 +966,76 @@ void World::buildRenderStates() {
             }
         }
 
-        /*
-         * One render state represents one 16x16x16 section.
-         * The packed vertex stores section-local coordinates:
-         *
-         *      X = [0, 16]
-         *      Y = [0, 16]
-         *      Z = [0, 16]
-         *
-         * The section's worldPosition provides the section offset.
-         */
         std::uint16_t& sectionMask = meshedSections[coord];
+        ChunkRenderState opaqueState{};
+        opaqueState.coord = coord;
+        opaqueState.sectionY = 0;
+        opaqueState.worldPosition = {
+            static_cast<float>(coord.x * ChunkSection::SIZE),
+            0.0f,
+            static_cast<float>(coord.z * ChunkSection::SIZE)
+        };
+
+        MeshData sectionOpaqueMesh;
+        MeshData sectionTransparentMesh;
+        int lowestOpaqueSection = ChunkColumn::SECTION_COUNT;
+        int highestOpaqueSection = -1;
 
         for (std::uint8_t sectionY = 0; sectionY < ChunkColumn::SECTION_COUNT; ++sectionY)
         {
-            const std::uint16_t sectionBit = static_cast<std::uint16_t>(1u << sectionY);
-
-            if ((sectionMask & sectionBit) != 0)
-                continue;
-
-            ChunkRenderState renderState{};
-
-            renderState.coord = coord;
-
-            /*
-             * This render state represents this vertical section.
-             */
-            renderState.sectionY = sectionY;
-
-            renderState.worldPosition = {
-                static_cast<float>(coord.x * ChunkSection::SIZE),
-                static_cast<float>(sectionY * ChunkSection::SIZE),
-                static_cast<float>(coord.z * ChunkSection::SIZE)
-            };
-
-            renderState.worldMin = renderState.worldPosition;
-
-            renderState.worldMax = {
-                renderState.worldPosition.x + static_cast<float>(ChunkSection::SIZE),
-                renderState.worldPosition.y + static_cast<float>(ChunkSection::SIZE),
-                renderState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
-            };
-
-            /*
-             * Build this section.
-             * The mesher produces section-local vertices.
-             *
-             * DO NOT add sectionY to the packed Y coordinate.
-             */
             ChunkMesher::build(
                 column->section(sectionY),
                 sectionY,
                 neighborhood,
                 blockRegistry,
-                renderState.mesh,
-                renderState.transparentMesh
+                sectionOpaqueMesh,
+                sectionTransparentMesh
             );
-            sectionMask |= sectionBit;
 
-            /* Don't create an empty render state */
-            if (!renderState.mesh.empty() || !renderState.transparentMesh.empty())
-                renderStates.push_back(std::move(renderState));
+            if (!sectionOpaqueMesh.empty()) {
+                appendSectionMesh(opaqueState.mesh, sectionOpaqueMesh, sectionY);
+                lowestOpaqueSection = std::min(lowestOpaqueSection, static_cast<int>(sectionY));
+                highestOpaqueSection = std::max(highestOpaqueSection, static_cast<int>(sectionY));
+            }
+
+            if (!sectionTransparentMesh.empty()) {
+                ChunkRenderState transparentState{};
+                transparentState.coord = coord;
+                transparentState.sectionY = sectionY;
+                transparentState.worldPosition = {
+                    opaqueState.worldPosition.x,
+                    static_cast<float>(sectionY * ChunkSection::SIZE),
+                    opaqueState.worldPosition.z
+                };
+                transparentState.worldMin = transparentState.worldPosition;
+                transparentState.worldMax = {
+                    transparentState.worldPosition.x + static_cast<float>(ChunkSection::SIZE),
+                    transparentState.worldPosition.y + static_cast<float>(ChunkSection::SIZE),
+                    transparentState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
+                };
+                transparentState.transparentMesh = std::move(sectionTransparentMesh);
+                renderStates.push_back(std::move(transparentState));
+            }
+
+            sectionMask |= static_cast<std::uint16_t>(1u << sectionY);
         }
+
+        if (!opaqueState.mesh.empty()) {
+            opaqueState.worldMin = {
+                opaqueState.worldPosition.x,
+                static_cast<float>(lowestOpaqueSection * ChunkSection::SIZE),
+                opaqueState.worldPosition.z
+            };
+            opaqueState.worldMax = {
+                opaqueState.worldPosition.x + static_cast<float>(ChunkSection::SIZE),
+                static_cast<float>((highestOpaqueSection + 1) * ChunkSection::SIZE),
+                opaqueState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
+            };
+            renderStates.push_back(std::move(opaqueState));
+        }
+
+        meshWaitFrames.erase(coord);
+        meshedAnyChunk = true;
     }
 }
 
@@ -626,6 +1049,9 @@ void World::generateTerrain(ChunkColumn& column) {
 
     auto coord = column.coord();
     auto blocks = loadChunk(coord);
+    std::vector<std::uint8_t> caveMask;
+    std::vector<std::uint8_t> entranceMask;
+    generateCaveMasks(coord, caveMask, entranceMask);
 
     for (int x = 0; x < ChunkSection::SIZE; ++x)
     {
@@ -633,53 +1059,13 @@ void World::generateTerrain(ChunkColumn& column) {
         {
             const int worldX = coord.x * ChunkSection::SIZE + x;
             const int worldZ = coord.z * ChunkSection::SIZE + z;
-            const float noise = terrainNoise(worldX, worldZ);
-
-            const float continentalness = noiseAt(worldX, worldZ, 0.0018f, 31);
-            const float seaWeight = smoothStep(-0.12f, -0.48f, continentalness);
-            const float plainsHeight = static_cast<float>(BASE_HEIGHT + 2) + noise * 22.0f;
-            const float snowyPlainsHeight = static_cast<float>(BASE_HEIGHT + 4) + noise * 18.0f;
-            const float seaFloorHeight = 17.0f + noise * 7.0f;
-            float mountainWeight = 0.0f;
-            float snowBiomeWeight = 0.0f;
-            float desertBiomeWeight = 0.0f;
-            float landHeight = 0.0f;
-
-            if (seaWeight <= 0.5f) {
-                const float mountainField = noiseAt(worldX, worldZ, 0.0025f, 47);
-                mountainWeight = smoothStep(0.16f, 0.52f, mountainField) * (1.0f - seaWeight);
-                const float snowField = noiseAt(worldX, worldZ, 0.0016f, 59);
-                snowBiomeWeight = smoothStep(0.08f, 0.42f, snowField) * (1.0f - seaWeight);
-                const float desertField = noiseAt(worldX, worldZ, 0.0014f, 83);
-                desertBiomeWeight = smoothStep(0.06f, 0.42f, desertField)
-                    * (1.0f - seaWeight)
-                    * (1.0f - snowBiomeWeight)
-                    * (1.0f - mountainWeight);
-
-                const float duneNoise = noiseAt(worldX, worldZ, 0.018f, 101);
-                const float desertHeight = static_cast<float>(BASE_HEIGHT + 1) + noise * 10.0f
-                    + std::abs(duneNoise) * 6.0f;
-                const float ridgeNoise = noiseAt(worldX, worldZ, 0.006f, 71);
-                const float ridgeShape = 1.0f - std::abs(ridgeNoise);
-                const float mountainHeight = 54.0f + ridgeShape * 72.0f + noise * 10.0f;
-                const float nonMountainHeight = plainsHeight * (1.0f - snowBiomeWeight)
-                    + snowyPlainsHeight * snowBiomeWeight;
-                const float biomeLandHeight = nonMountainHeight * (1.0f - desertBiomeWeight)
-                    + desertHeight * desertBiomeWeight;
-                landHeight = biomeLandHeight * (1.0f - mountainWeight)
-                    + mountainHeight * mountainWeight;
-            }
-
-            const float coastalBlend = smoothStep(0.0f, 0.5f, seaWeight);
-            const float oceanFloorBlend = smoothStep(0.5f, 1.0f, seaWeight);
-            const float terrainHeight = seaWeight < 0.5f
-                ? landHeight * (1.0f - coastalBlend) + static_cast<float>(SEA_LEVEL) * coastalBlend
-                : static_cast<float>(SEA_LEVEL) * (1.0f - oceanFloorBlend)
-                    + seaFloorHeight * oceanFloorBlend;
-
-            int height = static_cast<int>(std::round(terrainHeight));
-            height = std::clamp(height, MIN_HEIGHT, MAX_HEIGHT);
-            const bool isSea = seaWeight >= 0.5f && height < SEA_LEVEL;
+            const TerrainProfile terrain = terrainProfileAt(worldX, worldZ);
+            const float seaWeight = terrain.seaWeight;
+            const float mountainWeight = terrain.mountainWeight;
+            const float snowBiomeWeight = terrain.snowBiomeWeight;
+            const float desertBiomeWeight = terrain.desertBiomeWeight;
+            const int height = terrain.height;
+            const bool isSea = terrain.isSea;
             const bool isShore = !isSea
                 && seaWeight >= 0.30f
                 && height >= SEA_LEVEL
@@ -720,6 +1106,16 @@ void World::generateTerrain(ChunkColumn& column) {
                     type = BlockType::Dirt;
                 else
                     type = BlockType::Stone;
+
+                const std::size_t caveIndex = static_cast<std::size_t>(y)
+                    * ChunkSection::SIZE * ChunkSection::SIZE
+                    + static_cast<std::size_t>(z * ChunkSection::SIZE + x);
+                const bool isEntrance = entranceMask[caveIndex] != 0;
+                const bool coveredStone = type == BlockType::Stone && !isSea
+                    && y <= height - 6;
+                if (caveMask[caveIndex] != 0 && !isSea
+                    && ((isEntrance && type != BlockType::Water) || coveredStone))
+                    continue;
 
                 column.setUnchecked(x, y, z, toBlockId(type));
             }

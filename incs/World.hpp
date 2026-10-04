@@ -66,7 +66,7 @@ public:
 		ChunkColumn &column
 	);
 
-	void buildRenderStates();
+	void buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward);
 	std::vector<GpuMesh> pruneRenderStates();
 	[[nodiscard]] bool getBlockAt(const glm::ivec3& worldPos, BlockId& block) const;
 	bool setBlockAt(const glm::ivec3& worldPos, BlockId block);
@@ -96,6 +96,7 @@ private:
 
 	std::unordered_map<ChunkCoord, std::unique_ptr<ChunkColumn>> chunks;
 	std::unordered_map<ChunkCoord, std::uint16_t> meshedSections;
+	std::unordered_map<ChunkCoord, std::uint32_t> meshWaitFrames;
 	std::unordered_set<ChunkCoord> generatingChunks;
 	std::vector<ChunkRenderState> renderStates;
 	std::vector<GpuMesh> pendingRetiredMeshes;

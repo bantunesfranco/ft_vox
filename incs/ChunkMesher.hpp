@@ -28,13 +28,14 @@ private:
         int maxY,
         int maxZ,
         NormalDir normal,
-        std::uint16_t texture
+        std::uint16_t texture,
+        const std::array<std::uint8_t, 4>& ao
     );
 
     static void emitVertex(
         MeshData &mesh,
         uint8_t x,
-        uint8_t y,
+        uint16_t y,
         uint8_t z,
         NormalDir normal,
         uint16_t texture,

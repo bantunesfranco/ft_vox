@@ -23,24 +23,22 @@ enum class NormalDir : std::uint8_t
 };
 
 /*
- * Section vertices can exist at coordinate 16 because a block at
- * local coordinate 15 occupies [15, 16].
- *
- * Therefore X/Y/Z each need 5 bits.
+ * Chunk vertices can exist at Y=256 because the world column is
+ * 256 blocks tall. X/Z remain section-sized and can reach 16.
  *
  * Layout:
  *
  * bits  0 -  4 : X       5 bits
- * bits  5 -  9 : Y       5 bits
- * bits 10 - 14 : Z       5 bits
- * bits 15 - 17 : Normal  3 bits
- * bits 18 - 23 : Texture 6 bits
- * bits 24 - 25 : AO      2 bits
- * bits 26 - 31 : corner
+ * bits  5 - 13 : Y       9 bits
+ * bits 14 - 18 : Z       5 bits
+ * bits 19 - 21 : Normal  3 bits
+ * bits 22 - 27 : Texture 6 bits
+ * bits 28 - 29 : AO      2 bits
+ * bits 30 - 31 : corner  2 bits
  */
 constexpr PackedVertex packVertex(
     std::uint8_t x,
-    std::uint8_t y,
+    std::uint16_t y,
     std::uint8_t z,
     NormalDir normal,
     std::uint8_t texture,
@@ -50,12 +48,12 @@ constexpr PackedVertex packVertex(
 {
     return
         (static_cast<PackedVertex>(x) & 0x1Fu) |
-        ((static_cast<PackedVertex>(y) & 0x1Fu) << 5u) |
-        ((static_cast<PackedVertex>(z) & 0x1Fu) << 10u) |
-        ((static_cast<PackedVertex>(normal) & 0x07u) << 15u) |
-        ((static_cast<PackedVertex>(texture) & 0x3Fu) << 18u) |
-        ((static_cast<PackedVertex>(ao) & 0x03u) << 24u) |
-        ((static_cast<PackedVertex>(corner) & 0x03u) << 26u);
+        ((static_cast<PackedVertex>(y) & 0x1FFu) << 5u) |
+        ((static_cast<PackedVertex>(z) & 0x1Fu) << 14u) |
+        ((static_cast<PackedVertex>(normal) & 0x07u) << 19u) |
+        ((static_cast<PackedVertex>(texture) & 0x3Fu) << 22u) |
+        ((static_cast<PackedVertex>(ao) & 0x03u) << 28u) |
+        ((static_cast<PackedVertex>(corner) & 0x03u) << 30u);
 }
 
 
