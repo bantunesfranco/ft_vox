@@ -85,8 +85,18 @@ private:
 
 class ChunkColumn {
 public:
-    static constexpr int SECTION_COUNT = 16;
+    static constexpr int MIN_WORLD_Y = -64;
+    static constexpr int MAX_WORLD_Y = 256;
+    static constexpr int SECTION_COUNT = (MAX_WORLD_Y - MIN_WORLD_Y) / ChunkSection::SIZE;
     static constexpr int HEIGHT = SECTION_COUNT * ChunkSection::SIZE;
+
+    [[nodiscard]] static constexpr int toStorageY(const int worldY) noexcept {
+        return worldY - MIN_WORLD_Y;
+    }
+
+    [[nodiscard]] static constexpr int toWorldY(const int storageY) noexcept {
+        return storageY + MIN_WORLD_Y;
+    }
 
     ChunkColumn() noexcept = default;
 

@@ -15,6 +15,7 @@ enum class BlockType : std::uint8_t {
     Amethyst,
     Water,
     Snow,
+    Bedrock,
 
     Count
 };

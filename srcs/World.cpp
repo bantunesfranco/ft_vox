@@ -24,9 +24,9 @@
 
 namespace
 {
-    constexpr int BASE_HEIGHT = ChunkColumn::HEIGHT / 8;
+    constexpr int BASE_HEIGHT = 256 / 8;
     constexpr int MIN_HEIGHT  = 1;
-    constexpr int MAX_HEIGHT  = ChunkColumn::HEIGHT - 3;
+    constexpr int MAX_HEIGHT  = ChunkColumn::MAX_WORLD_Y - 3;
     constexpr int SEA_LEVEL = 40;
 
     constexpr int MAX_CHUNKS_PER_UPDATE = 32;
@@ -41,6 +41,17 @@ namespace
             return q - 1;
 
         return q;
+    }
+
+    [[nodiscard]]
+    int bedrockThickness(const int worldX, const int worldZ) noexcept
+    {
+        std::uint32_t hash = static_cast<std::uint32_t>(worldX) * 0x9E3779B9u
+            ^ static_cast<std::uint32_t>(worldZ) * 0x85EBCA6Bu;
+        hash ^= hash >> 16u;
+        hash *= 0x7FEB352Du;
+        hash ^= hash >> 15u;
+        return static_cast<int>(hash % 3u) + 1;
     }
 
     [[nodiscard]]
@@ -201,8 +212,9 @@ namespace
             const int maxX = std::min(chunkMaxX, static_cast<int>(std::ceil(centerX + radiusX)));
             const int minZ = std::max(chunkMinZ, static_cast<int>(std::floor(centerZ - radiusZ)));
             const int maxZ = std::min(chunkMaxZ, static_cast<int>(std::ceil(centerZ + radiusZ)));
-            const int minY = std::max(8, static_cast<int>(std::floor(centerY - radiusY)));
-            const int maxY = std::min(ChunkColumn::HEIGHT - 1,
+            const int minY = std::max(ChunkColumn::MIN_WORLD_Y,
+                static_cast<int>(std::floor(centerY - radiusY)));
+            const int maxY = std::min(ChunkColumn::MAX_WORLD_Y - 1,
                 static_cast<int>(std::ceil(centerY + radiusY)));
             if (minX > maxX || minZ > maxZ || minY > maxY)
                 return;
@@ -218,7 +230,8 @@ namespace
 
                         const int localX = worldX - chunkMinX;
                         const int localZ = worldZ - chunkMinZ;
-                        const std::size_t index = static_cast<std::size_t>(y) * horizontalArea
+                        const int storageY = ChunkColumn::toStorageY(y);
+                        const std::size_t index = static_cast<std::size_t>(storageY) * horizontalArea
                             + static_cast<std::size_t>(localZ * ChunkSection::SIZE + localX);
                         caveMask[index] = 1;
                         if (entrance)
@@ -245,7 +258,7 @@ namespace
                     direction.y = std::min(direction.y, -0.20f);
                 if (entrance && travelled < 20.0f)
                     direction.y = std::min(direction.y, -0.30f);
-                if (y < 12.0f)
+                if (y < static_cast<float>(ChunkColumn::MIN_WORLD_Y + 8))
                     direction.y = std::max(direction.y, 0.16f);
                 else if (y > 104.0f)
                     direction.y = std::min(direction.y, -0.16f);
@@ -300,7 +313,7 @@ namespace
 
                     const float startY = entrance
                         ? static_cast<float>(startProfile.height) - 1.0f
-                        : std::max(16.0f, std::min(
+                        : std::max(static_cast<float>(ChunkColumn::MIN_WORLD_Y + 12), std::min(
                             static_cast<float>(startProfile.height)
                                 - wormRandom.range(14.0f, 28.0f),
                             wormRandom.range(28.0f, 58.0f)));
@@ -367,8 +380,10 @@ namespace
                 const float centerY = profile.mountainWeight > 0.30f
                     ? static_cast<float>(profile.height)
                         - chamberRandom.range(20.0f, 42.0f + profile.mountainWeight * 22.0f)
-                    : chamberRandom.range(12.0f, static_cast<float>(std::max(13, profile.height - 9)));
-                if (centerY < 8.0f || centerY > ChunkColumn::HEIGHT - 8.0f)
+                    : chamberRandom.range(static_cast<float>(ChunkColumn::MIN_WORLD_Y + 12),
+                        static_cast<float>(std::max(ChunkColumn::MIN_WORLD_Y + 13, profile.height - 9)));
+                if (centerY < static_cast<float>(ChunkColumn::MIN_WORLD_Y + 8)
+                    || centerY > static_cast<float>(ChunkColumn::MAX_WORLD_Y - 8))
                     continue;
 
                 const float radiusX = chamberRandom.range(10.0f, 17.0f)
@@ -487,7 +502,7 @@ std::vector<GpuMesh> World::pruneRenderStates() {
 }
 
 bool World::getBlockAt(const glm::ivec3& worldPos, BlockId& block) const {
-    if (worldPos.y < 0 || worldPos.y >= ChunkColumn::HEIGHT)
+    if (worldPos.y < ChunkColumn::MIN_WORLD_Y || worldPos.y >= ChunkColumn::MAX_WORLD_Y)
         return false;
 
     const int chunkX = floorDiv(worldPos.x, ChunkSection::SIZE);
@@ -500,7 +515,7 @@ bool World::getBlockAt(const glm::ivec3& worldPos, BlockId& block) const {
     if (it == chunks.end() || !it->second)
         return false;
 
-    block = it->second->getUnchecked(localX, worldPos.y, localZ);
+    block = it->second->getUnchecked(localX, ChunkColumn::toStorageY(worldPos.y), localZ);
     return true;
 }
 
@@ -515,11 +530,11 @@ bool World::getSurfaceHeight(const int worldX, const int worldZ, int& height) co
     if (it == chunks.end() || !it->second)
         return false;
 
-    for (int y = ChunkColumn::HEIGHT - 1; y >= 0; --y) {
-        if (!blockRegistry.isOpaque(it->second->getUnchecked(localX, y, localZ)))
+    for (int storageY = ChunkColumn::HEIGHT - 1; storageY >= 0; --storageY) {
+        if (!blockRegistry.isOpaque(it->second->getUnchecked(localX, storageY, localZ)))
             continue;
 
-        height = y;
+        height = ChunkColumn::toWorldY(storageY);
         return true;
     }
 
@@ -527,7 +542,8 @@ bool World::getSurfaceHeight(const int worldX, const int worldZ, int& height) co
 }
 
 bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
-    if (worldPos.y < 0 || worldPos.y >= ChunkColumn::HEIGHT || block >= BLOCK_TYPE_COUNT)
+    if (worldPos.y < ChunkColumn::MIN_WORLD_Y || worldPos.y >= ChunkColumn::MAX_WORLD_Y
+        || block >= BLOCK_TYPE_COUNT)
         return false;
 
     const int chunkX = floorDiv(worldPos.x, ChunkSection::SIZE);
@@ -541,10 +557,14 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
         return false;
 
     ChunkColumn& column = *columnIt->second;
-    if (column.getUnchecked(localX, worldPos.y, localZ) == block)
+    const int storageY = ChunkColumn::toStorageY(worldPos.y);
+    const BlockId currentBlock = column.getUnchecked(localX, storageY, localZ);
+    if (currentBlock == toBlockId(BlockType::Bedrock) && block != currentBlock)
+        return false;
+    if (currentBlock == block)
         return false;
 
-    column.setUnchecked(localX, worldPos.y, localZ, block);
+    column.setUnchecked(localX, storageY, localZ, block);
 
     static constexpr std::array<glm::ivec3, 7> affectedOffsets = {{
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
@@ -553,7 +573,7 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
 
     for (const glm::ivec3& offset : affectedOffsets) {
         const glm::ivec3 affected = worldPos + offset;
-        if (affected.y < 0 || affected.y >= ChunkColumn::HEIGHT)
+        if (affected.y < ChunkColumn::MIN_WORLD_Y || affected.y >= ChunkColumn::MAX_WORLD_Y)
             continue;
 
         const int affectedChunkX = floorDiv(affected.x, ChunkSection::SIZE);
@@ -629,7 +649,7 @@ std::unordered_map<glm::ivec3, BlockId> World::loadChunk(const ChunkCoord& coord
         }
 
         if (localPos.x < 0 || localPos.x >= ChunkSection::SIZE
-            || localPos.y < 0 || localPos.y >= ChunkColumn::HEIGHT
+            || localPos.y < ChunkColumn::MIN_WORLD_Y || localPos.y >= ChunkColumn::MAX_WORLD_Y
             || localPos.z < 0 || localPos.z >= ChunkSection::SIZE
             || block >= BLOCK_TYPE_COUNT) {
             std::cerr << "Warning: Invalid block entry encountered in " << savePath << std::endl;
@@ -877,7 +897,9 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
                 continue;
 
             const auto sectionIt = meshedSections.find(coord);
-            if (sectionIt != meshedSections.end() && sectionIt->second == 0xFFFFu) {
+            constexpr std::uint32_t ALL_SECTIONS_MESHED =
+                (std::uint32_t{1} << ChunkColumn::SECTION_COUNT) - 1;
+            if (sectionIt != meshedSections.end() && sectionIt->second == ALL_SECTIONS_MESHED) {
                 meshWaitFrames.erase(coord);
                 continue;
             }
@@ -966,13 +988,13 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
             }
         }
 
-        std::uint16_t& sectionMask = meshedSections[coord];
+        std::uint32_t& sectionMask = meshedSections[coord];
         ChunkRenderState opaqueState{};
         opaqueState.coord = coord;
         opaqueState.sectionY = 0;
         opaqueState.worldPosition = {
             static_cast<float>(coord.x * ChunkSection::SIZE),
-            0.0f,
+            static_cast<float>(ChunkColumn::MIN_WORLD_Y),
             static_cast<float>(coord.z * ChunkSection::SIZE)
         };
 
@@ -1004,7 +1026,7 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
                 transparentState.sectionY = sectionY;
                 transparentState.worldPosition = {
                     opaqueState.worldPosition.x,
-                    static_cast<float>(sectionY * ChunkSection::SIZE),
+                    static_cast<float>(ChunkColumn::toWorldY(sectionY * ChunkSection::SIZE)),
                     opaqueState.worldPosition.z
                 };
                 transparentState.worldMin = transparentState.worldPosition;
@@ -1017,18 +1039,18 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
                 renderStates.push_back(std::move(transparentState));
             }
 
-            sectionMask |= static_cast<std::uint16_t>(1u << sectionY);
+            sectionMask |= std::uint32_t{1} << sectionY;
         }
 
         if (!opaqueState.mesh.empty()) {
             opaqueState.worldMin = {
                 opaqueState.worldPosition.x,
-                static_cast<float>(lowestOpaqueSection * ChunkSection::SIZE),
+                static_cast<float>(ChunkColumn::toWorldY(lowestOpaqueSection * ChunkSection::SIZE)),
                 opaqueState.worldPosition.z
             };
             opaqueState.worldMax = {
                 opaqueState.worldPosition.x + static_cast<float>(ChunkSection::SIZE),
-                static_cast<float>((highestOpaqueSection + 1) * ChunkSection::SIZE),
+                static_cast<float>(ChunkColumn::toWorldY((highestOpaqueSection + 1) * ChunkSection::SIZE)),
                 opaqueState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
             };
             renderStates.push_back(std::move(opaqueState));
@@ -1077,6 +1099,7 @@ void World::generateTerrain(ChunkColumn& column) {
             const bool hasSnow = !isSea && (isSnowBiome || (mountainWeight >= 0.5f && height >= 104));
             const int waterSurface = isSea ? SEA_LEVEL : height;
             const int columnTop = isSea ? waterSurface : (hasSnow ? height + 1 : height);
+            const int bedrockTop = ChunkColumn::MIN_WORLD_Y + bedrockThickness(worldX, worldZ) - 1;
 
             /*
              * Fill from the bottom up.
@@ -1084,40 +1107,43 @@ void World::generateTerrain(ChunkColumn& column) {
              * ChunkColumn::setUnchecked() handles section
              * selection internally.
              */
-            for (int y = MIN_HEIGHT; y <= columnTop; ++y)
+            for (int worldY = ChunkColumn::MIN_WORLD_Y; worldY <= columnTop; ++worldY)
             {
                 BlockType type;
 
-                if (isSea && y > height)
+                if (worldY <= bedrockTop)
+                    type = BlockType::Bedrock;
+                else if (isSea && worldY > height)
                     type = BlockType::Water;
-                else if (hasSnow && y > height)
+                else if (hasSnow && worldY > height)
                     type = BlockType::Snow;
-                else if (y == height)
+                else if (worldY == height)
                     type = (isSea || isShore || isDesert)
                         ? BlockType::Sand
                         : (isHighMountain ? BlockType::Stone : BlockType::Grass);
-                else if (isSea && y >= height - 4)
+                else if (isSea && worldY >= height - 4)
                     type = BlockType::Sand;
-                else if ((isShore && y >= height - 2) || (isDesert && y >= height - 7))
+                else if ((isShore && worldY >= height - 2) || (isDesert && worldY >= height - 7))
                     type = BlockType::Sand;
-                else if (isHighMountain && y >= height - 2)
+                else if (isHighMountain && worldY >= height - 2)
                     type = BlockType::Dirt;
-                else if (y >= height - 4)
+                else if (worldY >= height - 4)
                     type = BlockType::Dirt;
                 else
                     type = BlockType::Stone;
 
-                const std::size_t caveIndex = static_cast<std::size_t>(y)
+                const int storageY = ChunkColumn::toStorageY(worldY);
+                const std::size_t caveIndex = static_cast<std::size_t>(storageY)
                     * ChunkSection::SIZE * ChunkSection::SIZE
                     + static_cast<std::size_t>(z * ChunkSection::SIZE + x);
                 const bool isEntrance = entranceMask[caveIndex] != 0;
                 const bool coveredStone = type == BlockType::Stone && !isSea
-                    && y <= height - 6;
-                if (caveMask[caveIndex] != 0 && !isSea
+                    && worldY <= height - 6;
+                if (type != BlockType::Bedrock && caveMask[caveIndex] != 0 && !isSea
                     && ((isEntrance && type != BlockType::Water) || coveredStone))
                     continue;
 
-                column.setUnchecked(x, y, z, toBlockId(type));
+                column.setUnchecked(x, storageY, z, toBlockId(type));
             }
         }
     }
@@ -1125,5 +1151,5 @@ void World::generateTerrain(ChunkColumn& column) {
     // Apply edits after terrain generation so placements above natural terrain
     // and removals of generated blocks are both restored exactly.
     for (const auto& [localPos, block] : blocks)
-        column.setUnchecked(localPos.x, localPos.y, localPos.z, block);
+        column.setUnchecked(localPos.x, ChunkColumn::toStorageY(localPos.y), localPos.z, block);
 }

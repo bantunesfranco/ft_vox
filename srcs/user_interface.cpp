@@ -31,7 +31,7 @@ void setupImGui(GLFWwindow* window)
     ImGui::StyleColorsDark();
 }
 
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4])
+void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float* rgba)
 {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();

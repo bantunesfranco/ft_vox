@@ -86,6 +86,14 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureBottom = 7,
         .textureSide = 7
     };
+
+    _definitions[toBlockId(BlockType::Bedrock)] = {
+        .opaque = true,
+        .transparent = false,
+        .textureTop = 8,
+        .textureBottom = 8,
+        .textureSide = 8
+    };
 }
 
 

@@ -95,7 +95,7 @@ private:
 	};
 
 	std::unordered_map<ChunkCoord, std::unique_ptr<ChunkColumn>> chunks;
-	std::unordered_map<ChunkCoord, std::uint16_t> meshedSections;
+	std::unordered_map<ChunkCoord, std::uint32_t> meshedSections;
 	std::unordered_map<ChunkCoord, std::uint32_t> meshWaitFrames;
 	std::unordered_set<ChunkCoord> generatingChunks;
 	std::vector<ChunkRenderState> renderStates;

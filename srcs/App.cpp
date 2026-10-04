@@ -27,9 +27,9 @@ bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
 	const int maxZ = static_cast<int>(std::floor(eyePosition.z + PlayerCollision::HALF_WIDTH - PlayerCollision::EPSILON));
 
 	for (int y = minY; y <= maxY; ++y) {
-		if (y < 0)
+		if (y < ChunkColumn::MIN_WORLD_Y)
 			return true;
-		if (y >= ChunkColumn::HEIGHT)
+		if (y >= ChunkColumn::MAX_WORLD_Y)
 			continue;
 		for (int z = minZ; z <= maxZ; ++z) {
 			for (int x = minX; x <= maxX; ++x) {
@@ -195,12 +195,7 @@ void App::run() {
 
     while (windowIsOpen(window))
     {
-        glClearColor(
-            0.075f,
-            0.33f,
-            0.61f,
-            1.0f
-        );
+        glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -342,6 +337,7 @@ void App::loadTextures() {
 		atlasRects[5] = spriteRect(512, 288);   // amethyst_block
 		atlasRects[6] = spriteRect(480, 1504);  // water_still
 		atlasRects[7] = spriteRect(672, 1312);  // snow
+		atlasRects[8] = spriteRect(704, 240);   // bedrock
 
 		renderer->setTextureAtlas(textureAtlas);
 		renderer->setAtlasRects(atlasRects);
