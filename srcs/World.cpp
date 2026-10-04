@@ -133,6 +133,28 @@ bool World::getBlockAt(const glm::ivec3& worldPos, BlockId& block) const {
     return true;
 }
 
+bool World::getSurfaceHeight(const int worldX, const int worldZ, int& height) const {
+    const int chunkX = floorDiv(worldX, ChunkSection::SIZE);
+    const int chunkZ = floorDiv(worldZ, ChunkSection::SIZE);
+    const int localX = worldX - chunkX * ChunkSection::SIZE;
+    const int localZ = worldZ - chunkZ * ChunkSection::SIZE;
+
+    std::lock_guard lock(chunk_mutex);
+    const auto it = chunks.find({chunkX, chunkZ});
+    if (it == chunks.end() || !it->second)
+        return false;
+
+    for (int y = ChunkColumn::HEIGHT - 1; y >= 0; --y) {
+        if (!blockRegistry.isOpaque(it->second->getUnchecked(localX, y, localZ)))
+            continue;
+
+        height = y;
+        return true;
+    }
+
+    return false;
+}
+
 bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
     if (worldPos.y < 0 || worldPos.y >= ChunkColumn::HEIGHT || block >= BLOCK_TYPE_COUNT)
         return false;

@@ -71,6 +71,7 @@ public:
 	std::vector<GpuMesh> pruneRenderStates();
 	[[nodiscard]] bool getBlockAt(const glm::ivec3& worldPos, BlockId& block) const;
 	bool setBlockAt(const glm::ivec3& worldPos, BlockId block);
+	[[nodiscard]] bool getSurfaceHeight(int worldX, int worldZ, int& height) const;
 
 	const BlockRegistry& getBlockRegistry() const noexcept;
 

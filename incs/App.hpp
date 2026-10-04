@@ -23,6 +23,8 @@ class App : public Engine
 		void	destroyBlock();
 		void	placeBlock();
 		void	toggleSpeedBoost();
+		void	toggleFlyMode();
+		void	jump();
 
 		bool			_showWireframe{};
 		GLuint			textureAtlas{};
@@ -33,10 +35,16 @@ class App : public Engine
 		World world;
 		BlockSystem blockSystem;
 		bool speedBoostEnabled = false;
+		bool flyMode = false;
+		bool grounded = false;
+		bool spawnInitialized = false;
+		bool jumpRequested = false;
+		float verticalVelocity = 0.0f;
 		bool hasHighlightedBlock = false;
 		glm::ivec3 highlightedBlockPos{};
 		void	renderWorld(const World& world);
 		void	processMeshUploads(World& world);
+		void	updatePlayerMovement();
 		void	updateBlockHighlight();
 		void	renderBlockHighlight();
 

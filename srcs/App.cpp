@@ -1,5 +1,7 @@
 #include "App.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 
 #include <imgui.h>
@@ -11,59 +13,38 @@
 #include "ThreadPool.hpp"
 #include "glm/gtx/norm.hpp"
 
-static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& camera) {
-	glm::vec3 moveDir(0.0f);
+namespace {
+constexpr float PLAYER_HALF_WIDTH = 0.3f;
+constexpr float PLAYER_EYE_HEIGHT = 1.62f;
+constexpr float PLAYER_HEIGHT = 1.8f;
+constexpr float GRAVITY = 24.0f;
+constexpr float JUMP_SPEED = 8.5f;
 
-	auto app = static_cast<App*>(glfwGetWindowUserPointer(const_cast<GLFWwindow*>(window)));
-	float dt = FPSCounter::getDeltaTime();
+bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
+	constexpr float epsilon = 0.001f;
+	const int minX = static_cast<int>(std::floor(eyePosition.x - PLAYER_HALF_WIDTH + epsilon));
+	const int maxX = static_cast<int>(std::floor(eyePosition.x + PLAYER_HALF_WIDTH - epsilon));
+	const int minY = static_cast<int>(std::floor(eyePosition.y - PLAYER_EYE_HEIGHT + epsilon));
+	const int maxY = static_cast<int>(std::floor(eyePosition.y + PLAYER_HEIGHT - PLAYER_EYE_HEIGHT - epsilon));
+	const int minZ = static_cast<int>(std::floor(eyePosition.z - PLAYER_HALF_WIDTH + epsilon));
+	const int maxZ = static_cast<int>(std::floor(eyePosition.z + PLAYER_HALF_WIDTH - epsilon));
 
-	// clamp very large dt (pause/hitch) to avoid huge jumps
-	if (dt <= 0.0f) dt = 0.0001f;
-	dt = glm::min(dt, 0.1f);
-
-	// Movement directions
-	auto forward = glm::normalize(camera->dir);
-	auto right = glm::normalize(glm::cross(forward, camera->up));
-
-	bool moved = false;
-	if (app->isKeyDown(VOX_KEY_W)) { moveDir += forward; moved = true; }
-	if (app->isKeyDown(VOX_KEY_S)) { moveDir -= forward; moved = true; }
-	if (app->isKeyDown(VOX_KEY_A)) { moveDir -= right;   moved = true; }
-	if (app->isKeyDown(VOX_KEY_D)) { moveDir += right;   moved = true; }
-
-	if (moved && glm::length(moveDir) > 0.0f) {
-		moveDir = glm::normalize(moveDir) * camera->moveSpeed * dt;
-		camera->pos += moveDir;
+	for (int y = minY; y <= maxY; ++y) {
+		if (y < 0)
+			return true;
+		if (y >= ChunkColumn::HEIGHT)
+			continue;
+		for (int z = minZ; z <= maxZ; ++z) {
+			for (int x = minX; x <= maxX; ++x) {
+				BlockId block = AIR_BLOCK;
+				if (!world.getBlockAt({x, y, z}, block) || world.getBlockRegistry().isOpaque(block))
+					return true;
+			}
+		}
 	}
 
-	// Camera rotation
-	bool rotated = false;
-	if (app->isKeyDown(VOX_KEY_UP)) {
-		camera->pitch += camera->rotSpeed * dt;
-		camera->pitch = glm::min(camera->pitch, 89.0f);
-		rotated = true;
-	}
-	if (app->isKeyDown(VOX_KEY_DOWN)) {
-		camera->pitch -= camera->rotSpeed * dt;
-		camera->pitch = glm::max(camera->pitch, -89.0f);
-		rotated = true;
-	}
-	if (app->isKeyDown(VOX_KEY_LEFT)) {
-		camera->yaw -= camera->rotSpeed * dt;
-		rotated = true;
-	}
-	if (app->isKeyDown(VOX_KEY_RIGHT)) {
-		camera->yaw += camera->rotSpeed * dt;
-		rotated = true;
-	}
-
-	if (rotated) {
-		const float pitchRad = glm::radians(camera->pitch);
-		const float yawRad = glm::radians(camera->yaw);
-
-		glm::vec3 dir{cosf(yawRad) * cosf(pitchRad) ,sinf(pitchRad) ,sinf(yawRad) * cosf(pitchRad)};
-		camera->dir = glm::normalize(dir);
-	}
+	return false;
+}
 }
 
 App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings)
@@ -80,6 +61,122 @@ void App::setCallbackFunctions() const {
 	setKeyCallback(key_callback);
 	setCursorPosCallback(mouse_callback);
 	setMouseButtonCallback(mouse_button_callback);
+}
+
+void App::updatePlayerMovement() {
+	if (!camera)
+		return;
+
+	float dt = FPSCounter::getDeltaTime();
+	if (dt <= 0.0f)
+		dt = 0.0001f;
+	dt = glm::min(dt, 0.1f);
+
+	bool rotated = false;
+	if (isKeyDown(VOX_KEY_UP)) {
+		camera->pitch = glm::min(camera->pitch + camera->rotSpeed * dt, 89.0f);
+		rotated = true;
+	}
+	if (isKeyDown(VOX_KEY_DOWN)) {
+		camera->pitch = glm::max(camera->pitch - camera->rotSpeed * dt, -89.0f);
+		rotated = true;
+	}
+	if (isKeyDown(VOX_KEY_LEFT)) {
+		camera->yaw -= camera->rotSpeed * dt;
+		rotated = true;
+	}
+	if (isKeyDown(VOX_KEY_RIGHT)) {
+		camera->yaw += camera->rotSpeed * dt;
+		rotated = true;
+	}
+	if (rotated) {
+		const float pitch = glm::radians(camera->pitch);
+		const float yaw = glm::radians(camera->yaw);
+		camera->dir = glm::normalize(glm::vec3{
+			std::cos(yaw) * std::cos(pitch),
+			std::sin(pitch),
+			std::sin(yaw) * std::cos(pitch)
+		});
+	}
+
+	if (!spawnInitialized)
+		return;
+
+	glm::vec3 forward = camera->dir;
+	glm::vec3 right;
+	if (!flyMode) {
+		forward.y = 0.0f;
+		if (glm::dot(forward, forward) < 1e-6f) {
+			const float yaw = glm::radians(camera->yaw);
+			forward = {std::cos(yaw), 0.0f, std::sin(yaw)};
+		}
+		forward = glm::normalize(forward);
+		right = glm::normalize(glm::cross(forward, camera->up));
+	} else {
+		forward = glm::normalize(forward);
+		right = glm::normalize(glm::cross(forward, camera->up));
+	}
+
+	glm::vec3 moveDirection(0.0f);
+	if (isKeyDown(VOX_KEY_W)) moveDirection += forward;
+	if (isKeyDown(VOX_KEY_S)) moveDirection -= forward;
+	if (isKeyDown(VOX_KEY_A)) moveDirection -= right;
+	if (isKeyDown(VOX_KEY_D)) moveDirection += right;
+	if (flyMode) {
+		if (isKeyDown(VOX_KEY_SPACE)) moveDirection.y += 1.0f;
+		if (isKeyDown(VOX_KEY_LEFT_CONTROL)) moveDirection.y -= 1.0f;
+		if (glm::dot(moveDirection, moveDirection) > 0.0f)
+			camera->pos += glm::normalize(moveDirection) * camera->moveSpeed * dt;
+		verticalVelocity = 0.0f;
+		jumpRequested = false;
+		return;
+	}
+
+	moveDirection.y = 0.0f;
+	if (glm::dot(moveDirection, moveDirection) > 0.0f) {
+		const glm::vec3 displacement = glm::normalize(moveDirection) * camera->moveSpeed * dt;
+		const auto moveAxis = [this](const int axis, const float amount) {
+			const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(amount) / 0.25f)));
+			const float step = amount / static_cast<float>(steps);
+			for (int i = 0; i < steps; ++i) {
+				glm::vec3 candidate = camera->pos;
+				candidate[axis] += step;
+				if (collidesWithWorld(candidate, world))
+					break;
+				camera->pos = candidate;
+			}
+		};
+		moveAxis(0, displacement.x);
+		moveAxis(2, displacement.z);
+	}
+
+	grounded = collidesWithWorld(camera->pos - glm::vec3(0.0f, 0.04f, 0.0f), world);
+	if (jumpRequested && grounded) {
+		verticalVelocity = JUMP_SPEED;
+		grounded = false;
+	}
+	jumpRequested = false;
+
+	if (grounded && verticalVelocity < 0.0f)
+		verticalVelocity = 0.0f;
+	else
+		verticalVelocity -= GRAVITY * dt;
+
+	const float verticalStep = verticalVelocity * dt;
+	const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(verticalStep) / 0.25f)));
+	const float step = verticalStep / static_cast<float>(steps);
+	for (int i = 0; i < steps; ++i) {
+		glm::vec3 candidate = camera->pos;
+		candidate.y += step;
+		if (collidesWithWorld(candidate, world)) {
+			if (step < 0.0f)
+				grounded = true;
+			verticalVelocity = 0.0f;
+			break;
+		}
+		camera->pos = candidate;
+		grounded = false;
+	}
 }
 
 void App::run() {
@@ -114,10 +211,23 @@ void App::run() {
 
         FPSCounter::update();
 
-        handleMovement(window, camera);
-
-        world.frustum.updateFrustum(camera->proj, camera->view);
         world.updateChunks(camera->pos, threadPool);
+		if (!spawnInitialized) {
+			int surfaceHeight = 0;
+			if (world.getSurfaceHeight(
+				static_cast<int>(std::floor(camera->pos.x)),
+				static_cast<int>(std::floor(camera->pos.z)),
+				surfaceHeight
+			)) {
+				camera->pos.y = static_cast<float>(surfaceHeight + 1) + PLAYER_EYE_HEIGHT;
+				spawnInitialized = true;
+				grounded = true;
+				jumpRequested = false;
+			}
+		}
+		updatePlayerMovement();
+
+		world.frustum.updateFrustum(camera->proj, camera->view);
 		for (auto& gpuMesh : world.pruneRenderStates())
 			renderer->releaseMesh(gpuMesh);
     	world.buildRenderStates();
@@ -161,6 +271,17 @@ void App::toggleSpeedBoost() {
 	speedBoostEnabled = !speedBoostEnabled;
 	camera->moveSpeed = camera->baseMoveSpeed * (speedBoostEnabled ? 10.0f : 1.0f);
 	camera->rotSpeed = camera->baseRotSpeed * (speedBoostEnabled ? 2.0f : 1.0f);
+}
+
+void App::toggleFlyMode() {
+	flyMode = !flyMode;
+	verticalVelocity = 0.0f;
+	jumpRequested = false;
+}
+
+void App::jump() {
+	if (!flyMode)
+		jumpRequested = true;
 }
 
 void App::updateBlockHighlight() {

@@ -65,26 +65,21 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 
     const auto app = static_cast<App*>(glfwGetWindowUserPointer(window));
 
-    if (key == VOX_KEY_ESCAPE && action == VOX_PRESS)
-    {
+    if (key == VOX_KEY_ESCAPE && action == VOX_PRESS) {
         app->closeWindow();
-    }
-    else if (key == VOX_KEY_F11 && action == VOX_PRESS)
-    {
+    } else if (key == VOX_KEY_F11 && action == VOX_PRESS) {
         app->toggleFullscreen();
-    }
-    else if (key == VOX_KEY_SPACE && action == VOX_PRESS)
-    {
+    } else if (key == VOX_KEY_SPACE && action == VOX_PRESS) {
+        app->jump();
+    } else if (key == VOX_KEY_LEFT_SHIFT && action == VOX_PRESS) {
         app->toggleSpeedBoost();
-    }
-    else if (key == VOX_KEY_X && action == VOX_PRESS)
-    {
+    } else if (key == VOX_KEY_X && action == VOX_PRESS) {
         app->_showWireframe = !app->_showWireframe;
         App::toggleWireframe(app->_showWireframe);
         std::cout << "Toggle wireframe" << std::endl;
-    }
-    else if (key == VOX_KEY_Z && action == VOX_PRESS)
-    {
+    } else if (key == VOX_KEY_Z && action == VOX_PRESS) {
+        app->toggleFlyMode();
+    } else if (key == VOX_KEY_C && action == VOX_PRESS) {
         static bool mouseMode = false;
         glfwSetInputMode(window, GLFW_CURSOR, mouseMode? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
         mouseMode = !mouseMode;
