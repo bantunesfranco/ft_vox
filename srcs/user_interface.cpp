@@ -51,7 +51,7 @@ void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, floa
     const ImVec2 center = ImGui::GetIO().DisplaySize * 0.5f;
     constexpr float crosshairSize = 10.0f;
     const ImU32 whiteColor = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-    const float lineThickness = 2.0f;
+    constexpr float lineThickness = 1.5f;
 
     drawList->AddLine(
         ImVec2(center.x - crosshairSize, center.y),

@@ -159,7 +159,7 @@ void App::toggleSpeedBoost() {
 		return;
 
 	speedBoostEnabled = !speedBoostEnabled;
-	camera->moveSpeed = camera->baseMoveSpeed * (speedBoostEnabled ? 20.0f : 1.0f);
+	camera->moveSpeed = camera->baseMoveSpeed * (speedBoostEnabled ? 10.0f : 1.0f);
 	camera->rotSpeed = camera->baseRotSpeed * (speedBoostEnabled ? 2.0f : 1.0f);
 }
 

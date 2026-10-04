@@ -15,20 +15,20 @@ class Camera
 		glm::vec3	pos;
 		glm::vec3	dir;
 		glm::vec3	up;
-		float		pitch;
-		float		yaw;
-		double		mousePos[2]{};
+		float		pitch{};
+		float		yaw{};
+		double		mousePos[2];
 		float		fov;
 		glm::mat4	view{};
 		glm::mat4	proj{};
 
 		float baseMoveSpeed;
 		float baseRotSpeed;
-		float moveSpeed;
-		float rotSpeed;
+		float moveSpeed{};
+		float rotSpeed{};
 
-		glm::vec3 lastPosition{};
-		glm::vec3 lastDirection{};
+		glm::vec3 lastPosition;
+		glm::vec3 lastDirection;
 		float rotationThreshold;
 		float movementThreshold;
 
