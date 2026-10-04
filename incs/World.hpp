@@ -63,8 +63,7 @@ public:
 	);
 
 	void generateTerrain(
-		ChunkColumn& column,
-		const glm::ivec2& coord
+		ChunkColumn &column
 	);
 
 	void buildRenderStates();
@@ -83,6 +82,9 @@ public:
 
 	const std::unordered_map<ChunkCoord, std::unique_ptr<ChunkColumn>>&
 	getChunks() const noexcept;
+
+	void saveChunk(const ChunkCoord& coord, const glm::ivec3& localPos, BlockId block) const;
+	std::unordered_map<glm::ivec3, BlockId> loadChunk(const ChunkCoord& coord) const;
 
 	Frustum frustum{};
 

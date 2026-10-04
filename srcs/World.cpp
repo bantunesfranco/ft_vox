@@ -5,11 +5,16 @@
 #include <cstdint>
 #include <iostream>
 #include <vector>
+#include <filesystem>
+#include <ranges>
+#include <fstream>
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 
 #define STB_PERLIN_IMPLEMENTATION
-#include <ranges>
-
 #include "stb_perlin.h"
+
 
 /* ============================================================
  * Helpers
@@ -204,8 +209,74 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
         }
     }
 
+    saveChunk({chunkX, chunkZ}, {localX, worldPos.y, localZ}, block);
+
     return true;
 }
+
+void World::saveChunk(const ChunkCoord& coord, const glm::ivec3& localPos, BlockId block) const {
+    const std::filesystem::path savePath = "saves/world/chunk_" + std::to_string(coord.x) + "_" + std::to_string(coord.z) + ".bin";
+
+    if (!std::filesystem::exists(savePath)) {
+        std::filesystem::create_directories(savePath.parent_path());
+    }
+
+    // Open in binary mode with append
+    std::ofstream saveFile(savePath, std::ios::binary | std::ios::app);
+    if (!saveFile.is_open()) {
+        std::cerr << "Failed to open chunk save file: " << savePath << std::endl;
+        return;
+    }
+
+    // Write the raw bytes of the glm::ivec3 (contains 3 ints = 12 bytes)
+    saveFile.write(reinterpret_cast<const char*>(&localPos), sizeof(localPos));
+
+    // Write the raw bytes of the block ID
+    saveFile.write(reinterpret_cast<const char*>(&block), sizeof(block));
+
+    saveFile.close();
+}
+
+std::unordered_map<glm::ivec3, BlockId> World::loadChunk(const ChunkCoord& coord) const {
+    std::unordered_map<glm::ivec3, BlockId> blocks{};
+
+    const std::filesystem::path savePath = "saves/world/chunk_" + std::to_string(coord.x) + "_" + std::to_string(coord.z) + ".bin";
+    if (!std::filesystem::exists(savePath))
+        return blocks;
+
+    std::ifstream saveFile(savePath, std::ios::binary);
+    if (!saveFile.is_open())
+        throw std::runtime_error("Failed to open chunk save file: " + savePath.string());
+
+    // Temporary variables to hold the data we read per block
+    glm::ivec3 localPos;
+    BlockId block;
+
+    // Loop directly by attempting to read the first piece of data (localPos)
+    while (saveFile.read(reinterpret_cast<char*>(&localPos), sizeof(localPos))) {
+
+        // Read the remaining parameters in the exact same order they were saved
+        if (!saveFile.read(reinterpret_cast<char*>(&block), sizeof(block))) {
+            // File might be corrupted or cut short mid-block write
+            std::cerr << "Warning: Corrupted block entry encountered in " << savePath << std::endl;
+            break;
+        }
+
+        if (localPos.x < 0 || localPos.x >= ChunkSection::SIZE
+            || localPos.y < 0 || localPos.y >= ChunkColumn::HEIGHT
+            || localPos.z < 0 || localPos.z >= ChunkSection::SIZE
+            || block >= BLOCK_TYPE_COUNT) {
+            std::cerr << "Warning: Invalid block entry encountered in " << savePath << std::endl;
+            continue;
+        }
+
+        blocks[localPos] = block;
+    }
+
+    saveFile.close();
+    return blocks;
+}
+
 
 /* ============================================================
  * Chunk streaming
@@ -334,7 +405,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                 try {
                     auto column = std::make_unique<ChunkColumn>(coord);
 
-                    generateTerrain(*column, {coord.x, coord.z});
+                    generateTerrain(*column);
 
                     /*
                      * Publish the fully generated column.
@@ -547,18 +618,21 @@ void World::buildRenderStates() {
 
 
 
-void World::generateTerrain(ChunkColumn& column, const glm::ivec2& coord) {
+void World::generateTerrain(ChunkColumn& column) {
     /*
      * The entire column is initially Air because ChunkSection's
      * storage is zero initialized and Air == 0.
      */
+
+    auto coord = column.coord();
+    auto blocks = loadChunk(coord);
 
     for (int x = 0; x < ChunkSection::SIZE; ++x)
     {
         for (int z = 0; z < ChunkSection::SIZE; ++z)
         {
             const int worldX = coord.x * ChunkSection::SIZE + x;
-            const int worldZ = coord.y * ChunkSection::SIZE + z;
+            const int worldZ = coord.z * ChunkSection::SIZE + z;
             const float noise = terrainNoise(worldX, worldZ);
 
             const float continentalness = noiseAt(worldX, worldZ, 0.0018f, 31);
@@ -643,4 +717,9 @@ void World::generateTerrain(ChunkColumn& column, const glm::ivec2& coord) {
             }
         }
     }
+
+    // Apply edits after terrain generation so placements above natural terrain
+    // and removals of generated blocks are both restored exactly.
+    for (const auto& [localPos, block] : blocks)
+        column.setUnchecked(localPos.x, localPos.y, localPos.z, block);
 }
