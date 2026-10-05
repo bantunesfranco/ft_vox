@@ -878,8 +878,8 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
         float priority;
     };
     std::vector<MeshCandidate> candidates;
-    constexpr auto MESH_BUDGET = std::chrono::milliseconds(2);
-    constexpr float CHUNK_SIZE = static_cast<float>(ChunkSection::SIZE);
+    constexpr auto MESH_BUDGET = std::chrono::milliseconds(3);
+    constexpr auto CHUNK_SIZE = static_cast<float>(ChunkSection::SIZE);
 
     glm::vec2 forward{playerForward.x, playerForward.z};
     if (glm::dot(forward, forward) > 1e-6f)
@@ -926,7 +926,7 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
         }
     }
 
-    std::sort(candidates.begin(), candidates.end(), [](const MeshCandidate& lhs, const MeshCandidate& rhs) {
+    std::ranges::sort(candidates, [](const MeshCandidate& lhs, const MeshCandidate& rhs) {
         if (lhs.priority != rhs.priority)
             return lhs.priority < rhs.priority;
         if (lhs.coord.x != rhs.coord.x)

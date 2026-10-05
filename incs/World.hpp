@@ -12,15 +12,16 @@ public:
 	std::array<glm::vec4, 6> planes;
 
 	void updateFrustum(const glm::mat4& proj, const glm::mat4& view) {
-		glm::mat4 clip = proj * view;
+		// Compute clip matrix (Transpose it to safely extract rows using GLM indexing)
+		glm::mat4 clip = glm::transpose(proj * view);
 
-		// Extract planes from the combined view-projection matrix
-		planes[0] = glm::vec4(clip[0][3] - clip[0][0], clip[1][3] - clip[1][0], clip[2][3] - clip[2][0], clip[3][3] - clip[3][0]); // Right
-		planes[1] = glm::vec4(clip[0][3] + clip[0][0], clip[1][3] + clip[1][0], clip[2][3] + clip[2][0], clip[3][3] + clip[3][0]); // Left
-		planes[2] = glm::vec4(clip[0][3] + clip[0][1], clip[1][3] + clip[1][1], clip[2][3] + clip[2][1], clip[3][3] + clip[3][1]); // Bottom
-		planes[3] = glm::vec4(clip[0][3] - clip[0][1], clip[1][3] - clip[1][1], clip[2][3] - clip[2][1], clip[3][3] - clip[3][1]); // Top
-		planes[4] = glm::vec4(clip[0][3] - clip[0][2], clip[1][3] - clip[1][2], clip[2][3] - clip[2][2], clip[3][3] - clip[3][2]); // Far
-		planes[5] = glm::vec4(clip[0][3] + clip[0][2], clip[1][3] + clip[1][2], clip[2][3] + clip[2][2], clip[3][3] + clip[3][2]); // Near
+		// Now clip[0] is Row 1, clip[1] is Row 2, etc.
+		planes[0] = clip[3] - clip[0]; // Right
+		planes[1] = clip[3] + clip[0]; // Left
+		planes[2] = clip[3] + clip[1]; // Bottom
+		planes[3] = clip[3] - clip[1]; // Top
+		planes[4] = clip[3] - clip[2]; // Far
+		planes[5] = clip[3] + clip[2]; // Near
 
 		// Normalize the planes
 		for (auto& plane : planes) {
@@ -28,22 +29,24 @@ public:
 		}
 	}
 
-	[[nodiscard]] bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
-		for (const auto& plane : planes) {
-			auto normal = glm::vec3(plane);
-			const float distance = plane.w;
+	[[nodiscard]] bool isBoxInFrustum(const glm::vec3& chunkMin, const glm::vec3& chunkMax) const {
+		const glm::vec3 center((chunkMin + chunkMax) * 0.5f);
+		const glm::vec3 extents(chunkMax - center); // Constant vector for all uniform chunks!
 
-			// Compute the positive vertex (vertex most likely outside the plane)
-			glm::vec3 positiveVertex = min;
-			if (normal.x >= 0) positiveVertex.x = max.x;
-			if (normal.y >= 0) positiveVertex.y = max.y;
-			if (normal.z >= 0) positiveVertex.z = max.z;
+		std::ranges::all_of(planes, [&](const glm::vec4& plane) {
+			const glm::vec3 normal(plane);
 
-			// If the positive vertex is outside, the box is fully outside
-			if (glm::dot(normal, positiveVertex) + distance < 0)
-				return false;
-		}
-		return true; // Inside or intersecting
+			// Project center onto the plane normal
+			const float projectionCenter = glm::dot(normal, center) + plane.w;
+
+			// Project extents box radius along the plane normal
+			const float projectionRadius = glm::dot(glm::abs(normal), extents);
+
+			// If the chunk center is further away than its radius, it is completely behind the plane
+			return projectionCenter >= -projectionRadius;
+		});
+
+		return true;
 	}
 };
 
