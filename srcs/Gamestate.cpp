@@ -1,0 +1,34 @@
+#include "Gamestate.hpp"
+
+void GameStateController::toggleInventory() {
+	if (currentState == GameState::IN_GAME)
+		currentState = GameState::INVENTORY;
+	else if (currentState == GameState::INVENTORY)
+		currentState = GameState::IN_GAME;
+	else
+		return;
+}
+
+void GameStateController::togglePause() {
+	if (currentState == GameState::INVENTORY) {
+		currentState = GameState::IN_GAME;
+	} else if (currentState == GameState::IN_GAME) {
+		resumeState = GameState::IN_GAME;
+		currentState = GameState::PAUSE;
+	} else if (currentState == GameState::PAUSE) {
+		currentState = resumeState;
+	} else {
+		return;
+	}
+}
+
+void GameStateController::startGameplay() {
+	if (currentState != GameState::START)
+		return;
+	currentState = GameState::IN_GAME;
+}
+
+void GameStateController::returnToTitle() {
+	currentState = GameState::START;
+	resumeState = GameState::IN_GAME;
+}

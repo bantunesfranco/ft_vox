@@ -34,7 +34,6 @@ class Camera
 
 		void setCameraPosition(const glm::vec3& newPos);
 		void setCameraDirection(const glm::vec3& newDir);
-		[[nodiscard]] bool hasMovedOrRotated() const;
 };
 
 #endif

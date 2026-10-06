@@ -16,10 +16,3 @@ Camera::Camera(GLFWwindow *window) :
 void	Camera::setCameraPosition(const glm::vec3& newPos) { pos = newPos; };
 
 void	Camera::setCameraDirection(const glm::vec3& newDir) { dir = newDir; };
-
-bool Camera::hasMovedOrRotated() const {
-    const float rotationChange = glm::dot(glm::normalize(dir), glm::normalize(lastDirection));
-    const float movementChange = glm::distance(pos, lastPosition);
-
-    return rotationChange < (1.0f - rotationThreshold) || movementChange > movementThreshold;
-}

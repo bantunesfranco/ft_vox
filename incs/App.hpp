@@ -7,6 +7,8 @@
 #include "Block.hpp"
 #include "BlockSystem.hpp"
 #include "Engine.hpp"
+#include "Gamestate.hpp"
+#include "UI.hpp"
 #include "World.hpp"
 
 class App : public Engine
@@ -26,22 +28,38 @@ class App : public Engine
 		void	toggleFlyMode();
 		void	jump();
 
-		bool			_showWireframe{};
-		GLuint			textureAtlas{};
+		void togglePauseMenu();
+		void toggleInventoryMenu();
+		void selectHotbarSlot(uint16_t slot);
+		void cycleHotbar(int delta);
+		void toggleWireframeDebug();
+		bool isInGame() const;
+		bool wantsMouseCapture() const;
+		bool wantsKeyboardCapture() const;
 
 	private:
 		void	setCallbackFunctions() const;
 		void	loadTextures();
+		void	applyGameState();
+		void	applyUiAction(const UiAction& action);
+
 		World world;
 		BlockSystem blockSystem;
+		std::unique_ptr<UI> ui;
+		GameStateController gameState;
+		bool showWireframe{false};
+		uint16_t selectedHotbarSlot{0};
+		GLuint textureAtlas{0};
 		bool speedBoostEnabled = false;
 		bool flyMode = false;
 		bool grounded = false;
 		bool spawnInitialized = false;
 		bool jumpRequested = false;
 		float verticalVelocity = 0.0f;
+		std::array<float, 4> clearColor{0.075f, 0.33f, 0.61f, 1.0f};
 		bool hasHighlightedBlock = false;
 		glm::ivec3 highlightedBlockPos{};
+
 		void	renderWorld(const World& world);
 		void	processMeshUploads(World& world);
 		void	updatePlayerMovement();
@@ -54,11 +72,6 @@ void error_callback(int error, const char* description);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
-void setupImGui(GLFWwindow* window);
-// void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe);
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4]);
-
-
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 
 #endif

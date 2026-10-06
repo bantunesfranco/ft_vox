@@ -15,10 +15,11 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 }
 
 Engine::Engine(const int32_t width, const int32_t height, const char* title, std::map<settings_t, bool>& settings)
-	: window(nullptr), renderer(nullptr), camera(nullptr), fpsCounter(nullptr), settings{0, 0, 0, 1, 0, 0}
+	: window(nullptr), renderer(nullptr), camera(nullptr), settings{0, 0, 0, 1, 0, 0}
 {
 	if (!glfwInit())
 		throw EngineException(VOX_GLFWFAIL);
+	_glfwInitialized = true;
 
 	for (auto const& [key, val] : settings)
 		setSetting(key, val);
@@ -51,12 +52,17 @@ Engine::~Engine()
 
 void	Engine::terminate()
 {
+	// GPU resources must be released while the OpenGL context still exists.
+	renderer.reset();
 	if (window)
 	{
 		glfwDestroyWindow(window);
 		window = nullptr;
 	}
-	glfwTerminate();
+	if (_glfwInitialized) {
+		glfwTerminate();
+		_glfwInitialized = false;
+	}
 }
 
 void	Engine::setSetting(const int32_t setting, const bool value)
@@ -67,6 +73,8 @@ void	Engine::setSetting(const int32_t setting, const bool value)
 
 void Engine::toggleFullscreen()
 {
+	if (!window)
+		return;
 	if (!settings[VOX_FULLSCREEN]) {
 		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
 		const GLFWvidmode* mode = monitor ? glfwGetVideoMode(monitor) : nullptr;
@@ -118,7 +126,7 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 	if (!window)
 		throw EngineException(VOX_WINFAIL);
 
-	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
 	glfwMakeContextCurrent(window);
 	gladLoadGL();
@@ -260,17 +268,18 @@ void	Engine::toggleWireframe(const bool showWireframe)
 
 bool Engine::isKeyDown(const keys_t key) const
 {
-	return glfwGetKey(this->window, key);
+	return window && glfwGetKey(this->window, key) == GLFW_PRESS;
 }
 
 bool	Engine::windowIsOpen(GLFWwindow* window)
 {
-	return !glfwWindowShouldClose(window);
+	return window && !glfwWindowShouldClose(window);
 }
 
 void	Engine::closeWindow() const
 {
-	glfwSetWindowShouldClose(window, GLFW_TRUE);
+	if (window)
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
 void	Engine::setKeyCallback(const GLFWkeyfun callback) const

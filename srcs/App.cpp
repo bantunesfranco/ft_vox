@@ -3,16 +3,17 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <stdexcept>
 
-#include <imgui.h>
 #include <ranges>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_opengl3.h>
 
 #define GLM_ENABLE_EXPERIMENTAL
-#include "ThreadPool.hpp"
+#include "Gamestate.hpp"
 #include "glm/gtx/norm.hpp"
+
+#include "ThreadPool.hpp"
 #include "PlayerCollision.hpp"
+#include "ImGuiUI.hpp"
 
 namespace {
 constexpr float GRAVITY = 24.0f;
@@ -47,9 +48,8 @@ bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
 App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings)
 	: Engine(width, height, title, settings) {
 
-	_showWireframe = false;
 	setCallbackFunctions();
-	setupImGui(window);
+	ui = createImGuiUI(window);
     loadTextures();
 }
 
@@ -58,6 +58,7 @@ void App::setCallbackFunctions() const {
 	setKeyCallback(key_callback);
 	setCursorPosCallback(mouse_callback);
 	setMouseButtonCallback(mouse_button_callback);
+	setScrollCallback(scroll_callback);
 }
 
 void App::updatePlayerMovement() {
@@ -186,56 +187,71 @@ void App::run() {
         )
     );
 
-    float rgba[4] = {
-        0.075f,
-        0.33f,
-        0.61f,
-        1.0f
-    };
-
     while (windowIsOpen(window))
     {
-        glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
-
+        glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glfwPollEvents();
 
         FPSCounter::update();
 
-        world.updateChunks(camera->pos, threadPool);
-		if (!spawnInitialized) {
-			int surfaceHeight = 0;
-			if (world.getSurfaceHeight(
-				static_cast<int>(std::floor(camera->pos.x)),
-				static_cast<int>(std::floor(camera->pos.z)),
-				surfaceHeight
-			)) {
-				camera->pos.y = static_cast<float>(surfaceHeight + 1) + PlayerCollision::EYE_HEIGHT;
-				spawnInitialized = true;
-				grounded = true;
-				jumpRequested = false;
+		ui->beginFrame();
+
+		if (gameState.currentState != GameState::START) {
+			world.updateChunks(camera->pos, threadPool);
+			if (gameState.currentState == GameState::IN_GAME) {
+				if (!spawnInitialized) {
+					int surfaceHeight = 0;
+					if (world.getSurfaceHeight(
+							static_cast<int>(std::floor(camera->pos.x)),
+							static_cast<int>(std::floor(camera->pos.z)),
+							surfaceHeight
+						)) {
+						camera->pos.y = static_cast<float>(surfaceHeight + 1) + PlayerCollision::EYE_HEIGHT;
+						spawnInitialized = true;
+						grounded = true;
+						jumpRequested = false;
+					}
+				}
+				if (!ui->wantsKeyboardCapture())
+					updatePlayerMovement();
 			}
+
+			WorldUBO worldUBO{};
+			Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
+			world.frustum.updateFrustum(camera->proj, camera->view);
+
+			for (auto& gpuMesh : world.pruneRenderStates())
+				renderer->releaseMesh(gpuMesh);
+			world.buildRenderStates(camera->pos, camera->dir);
+			if (gameState.currentState == GameState::IN_GAME)
+				updateBlockHighlight();
+
+			renderer->beginFrame(worldUBO);
+			processMeshUploads(world);
+			App::toggleWireframe(showWireframe);
+			renderWorld(world);
+
+			if (gameState.currentState == GameState::IN_GAME) {
+				renderBlockHighlight();
+			}
+			App::toggleWireframe(false);
 		}
-		updatePlayerMovement();
 
-		world.frustum.updateFrustum(camera->proj, camera->view);
-		for (auto& gpuMesh : world.pruneRenderStates())
-			renderer->releaseMesh(gpuMesh);
-        world.buildRenderStates(camera->pos, camera->dir);
-		updateBlockHighlight();
+		UiFrameModel uiModel;
+		uiModel.state = gameState.currentState;
+		uiModel.selectedHotbarSlot = selectedHotbarSlot;
+		uiModel.fps = FPSCounter::getFPS();
+		if (camera)
+			uiModel.cameraPosition = camera->pos;
+		uiModel.showDebug = gameState.currentState == GameState::IN_GAME;
+		uiModel.wireframe = showWireframe;
+		uiModel.clearColor = clearColor;
+		for (const UiAction& action : ui->render(uiModel))
+			applyUiAction(action);
 
-        WorldUBO worldUBO{};
-    	Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
-
-        renderer->beginFrame(worldUBO);
-
-    	processMeshUploads(world);
-
-        renderWorld(world);
-		renderBlockHighlight();
-
-        renderImGui(camera, _showWireframe, rgba);
+		ui->endFrame();
 
         glfwSwapBuffers(window);
     }
@@ -298,13 +314,77 @@ void App::renderBlockHighlight() {
 
 
 void App::terminate() {
-
-	if (ImGui::GetCurrentContext()) {
-		ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImGui::DestroyContext();
-    }
+	if (ui)
+		ui->shutdown();
     Engine::terminate();
+}
+
+void App::applyGameState() {
+	glfwSetInputMode(window, GLFW_CURSOR,
+		gameState.currentState == GameState::IN_GAME ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+}
+
+void App::togglePauseMenu() {
+	gameState.togglePause();
+	applyGameState();
+}
+
+void App::toggleInventoryMenu() {
+	gameState.toggleInventory();
+	applyGameState();
+}
+
+void App::selectHotbarSlot(const uint16_t slot) {
+	if (slot < 9)
+		selectedHotbarSlot = slot;
+}
+
+void App::cycleHotbar(const int delta) {
+	constexpr int HOTBAR_SIZE = 9;
+	const int next = (static_cast<int>(selectedHotbarSlot) + delta % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
+	selectedHotbarSlot = static_cast<uint16_t>(next);
+}
+
+void App::toggleWireframeDebug() {
+	showWireframe = !showWireframe;
+}
+
+bool App::isInGame() const {
+	return gameState.currentState == GameState::IN_GAME;
+}
+
+bool App::wantsMouseCapture() const {
+	return ui && ui->wantsMouseCapture();
+}
+
+bool App::wantsKeyboardCapture() const {
+	return ui && ui->wantsKeyboardCapture();
+}
+
+void App::applyUiAction(const UiAction& action) {
+	switch (action.type) {
+		case UiActionType::START_GAME:
+			gameState.startGameplay();
+			applyGameState();
+			break;
+		case UiActionType::RESUME_GAME:
+			gameState.togglePause();
+			applyGameState();
+			break;
+		case UiActionType::RETURN_TO_TITLE:
+			gameState.returnToTitle();
+			applyGameState();
+			break;
+		case UiActionType::QUIT_GAME:
+			glfwSetWindowShouldClose(window, GLFW_TRUE);
+			break;
+		case UiActionType::SET_WIREFRAME:
+			showWireframe = action.enabled;
+			break;
+		case UiActionType::SET_CLEAR_COLOR:
+			clearColor = action.color;
+			break;
+	}
 }
 
 void App::loadTextures() {

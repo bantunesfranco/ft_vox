@@ -18,7 +18,6 @@
 
 constexpr double BLOCK_SIZE = 1.0f;
 
-#include <chrono>
 #include <memory>
 
 class FPSCounter {
@@ -52,7 +51,7 @@ class Engine
 		int32_t	_windowedY = 100;
 		int32_t	_windowedWidth{};
 		int32_t	_windowedHeight{};
-		double	_lastFrameTime{};
+		bool	_glfwInitialized{false};
 
 		void	initWindow(int32_t width, int32_t height, const char* title);
 
@@ -73,7 +72,6 @@ class Engine
 		GLFWwindow*					window;
 		std::unique_ptr<Renderer>	renderer;
 		std::unique_ptr<Camera>		camera;
-		FPSCounter*					fpsCounter;
 		int32_t						settings[VOX_SETTINGS_MAX];
 	
 		static const char*	vox_strerror(vox_errno_t val);

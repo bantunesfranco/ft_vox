@@ -7,5 +7,6 @@ Debug
 imgui.ini
 vendor/*
 engine/vendor/*
+saves/*
 
 !engine/vendor/glad
