@@ -23,7 +23,13 @@ public:
 		const World& world
 	) const;
 
-	bool removeBlock(const glm::vec3& origin, const glm::vec3& direction, World& world) const;
+	bool removeBlock(
+		const glm::vec3& origin,
+		const glm::vec3& direction,
+		World& world,
+		BlockId* removedBlock = nullptr
+	) const;
+	bool removeBlock(const glm::ivec3& blockPosition, World& world, BlockId* removedBlock = nullptr) const;
 
 	bool placeBlock(
 		const glm::vec3& origin,

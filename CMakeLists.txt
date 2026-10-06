@@ -58,8 +58,8 @@ target_include_directories(ImGui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/
 target_include_directories(ImGui PUBLIC ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/include)
 
 # Define the executable target for the game
-file(GLOB_RECURSE SOURCES "srcs/*.cpp")
-file(GLOB_RECURSE HEADERS "incs/*.hpp")
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "srcs/*.cpp")
+file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS "incs/*.hpp")
 add_executable(ft_vox ${SOURCES} ${HEADERS})
 
 # Add the engine directory as a subdirectory

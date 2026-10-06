@@ -3,13 +3,14 @@
 
 #include <memory>
 
+#include <glad/glad.h>
 #include "UI.hpp"
 
 struct GLFWwindow;
 
 class ImGuiUI final : public UI {
 public:
-	explicit ImGuiUI(GLFWwindow* window);
+	ImGuiUI(GLFWwindow* window, GLuint guiAtlas, GLuint blockAtlas);
 	~ImGuiUI() override;
 	ImGuiUI(const ImGuiUI&) = delete;
 	ImGuiUI& operator=(const ImGuiUI&) = delete;
@@ -23,8 +24,10 @@ public:
 
 private:
 	bool initialized{false};
+	GLuint guiAtlas{0};
+	GLuint blockAtlas{0};
 };
 
-std::unique_ptr<UI> createImGuiUI(GLFWwindow* window);
+std::unique_ptr<UI> createImGuiUI(GLFWwindow* window, GLuint guiAtlas, GLuint blockAtlas);
 
 #endif

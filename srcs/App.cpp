@@ -49,8 +49,8 @@ App::App(const int32_t width, const int32_t height, const char *title, std::map<
 	: Engine(width, height, title, settings) {
 
 	setCallbackFunctions();
-	ui = createImGuiUI(window);
     loadTextures();
+	ui = createImGuiUI(window, guiAtlas, textureAtlas);
 }
 
 void App::setCallbackFunctions() const {
@@ -241,13 +241,26 @@ void App::run() {
 
 		UiFrameModel uiModel;
 		uiModel.state = gameState.currentState;
-		uiModel.selectedHotbarSlot = selectedHotbarSlot;
+		uiModel.selectedHotbarSlot = inventory.selectedSlot();
 		uiModel.fps = FPSCounter::getFPS();
 		if (camera)
-			uiModel.cameraPosition = camera->pos;
+			uiModel.cameraPosition = {camera->pos.x, camera->pos.y, camera->pos.z};
 		uiModel.showDebug = gameState.currentState == GameState::IN_GAME;
 		uiModel.wireframe = showWireframe;
 		uiModel.clearColor = clearColor;
+		const auto& inventorySlots = inventory.slots();
+		for (std::size_t i = 0; i < inventorySlots.size(); ++i) {
+			const ItemStack& stack = inventorySlots[i];
+			if (!stack.empty())
+				uiModel.inventorySlots[i] = {stack.item, stack.count, ItemRegistry::get(stack.item).name};
+		}
+		const ItemStack& cursorStack = inventory.cursorStack();
+		if (!cursorStack.empty())
+			uiModel.cursorStack = {
+				cursorStack.item,
+				cursorStack.count,
+				ItemRegistry::get(cursorStack.item).name
+			};
 		for (const UiAction& action : ui->render(uiModel))
 			applyUiAction(action);
 
@@ -258,18 +271,31 @@ void App::run() {
 }
 
 void App::destroyBlock() {
-	if (camera)
-		blockSystem.removeBlock(camera->pos, camera->dir, world);
+	if (!camera)
+		return;
+	const BlockRaycastHit hit = blockSystem.raycast(camera->pos, camera->dir, world);
+	if (!hit.valid)
+		return;
+	BlockId block = AIR_BLOCK;
+	if (!world.getBlockAt(hit.blockPos, block))
+		return;
+	const ItemId item = ItemRegistry::fromBlock(block);
+	if (item == ItemId::Empty || !inventory.canAdd(item))
+		return;
+	BlockId removed = AIR_BLOCK;
+	if (blockSystem.removeBlock(hit.blockPos, world, &removed))
+		inventory.add(ItemRegistry::fromBlock(removed));
 }
 
 void App::placeBlock() {
-	if (camera)
-		blockSystem.placeBlock(
-			camera->pos,
-			camera->dir,
-			toBlockId(BlockType::Amethyst),
-			world
-		);
+	if (!camera)
+		return;
+	const ItemStack& selected = inventory.selectedStack();
+	if (selected.empty())
+		return;
+	const BlockId block = ItemRegistry::get(selected.item).placedBlock;
+	if (block != AIR_BLOCK && blockSystem.placeBlock(camera->pos, camera->dir, block, world))
+		inventory.consumeSelected();
 }
 
 void App::toggleSpeedBoost() {
@@ -325,24 +351,36 @@ void App::applyGameState() {
 }
 
 void App::togglePauseMenu() {
+	const bool wasInventory = gameState.currentState == GameState::INVENTORY;
 	gameState.togglePause();
+	if (wasInventory)
+		inventory.returnCursorStack();
 	applyGameState();
 }
 
 void App::toggleInventoryMenu() {
+	const bool wasInventory = gameState.currentState == GameState::INVENTORY;
 	gameState.toggleInventory();
+	if (wasInventory)
+		inventory.returnCursorStack();
 	applyGameState();
 }
 
 void App::selectHotbarSlot(const uint16_t slot) {
-	if (slot < 9)
-		selectedHotbarSlot = slot;
+	inventory.selectHotbarSlot(slot);
 }
 
 void App::cycleHotbar(const int delta) {
-	constexpr int HOTBAR_SIZE = 9;
-	const int next = (static_cast<int>(selectedHotbarSlot) + delta % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
-	selectedHotbarSlot = static_cast<uint16_t>(next);
+	inventory.cycleHotbar(delta);
+}
+
+void App::clickInventorySlot(const int slot, const bool secondaryClick) {
+	if (slot >= 0)
+		inventory.clickSlot(static_cast<std::size_t>(slot), secondaryClick);
+}
+
+uint16_t App::selectedHotbarSlot() const {
+	return inventory.selectedSlot();
 }
 
 void App::toggleWireframeDebug() {
@@ -384,6 +422,9 @@ void App::applyUiAction(const UiAction& action) {
 		case UiActionType::SET_CLEAR_COLOR:
 			clearColor = action.color;
 			break;
+		case UiActionType::INVENTORY_SLOT_CLICK:
+			clickInventorySlot(action.slot, action.secondaryClick);
+			break;
 	}
 }
 
@@ -421,6 +462,12 @@ void App::loadTextures() {
 
 		renderer->setTextureAtlas(textureAtlas);
 		renderer->setAtlasRects(atlasRects);
+
+		guiAtlas = loadTexture("./textures/minecraft_gui_atlas.png");
+		glTextureParameteri(guiAtlas, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTextureParameteri(guiAtlas, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTextureParameteri(guiAtlas, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTextureParameteri(guiAtlas, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	}
 	catch (const std::exception& e) {
 		std::cerr << e.what() << '\n';

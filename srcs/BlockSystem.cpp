@@ -83,10 +83,24 @@ BlockRaycastHit BlockSystem::raycast(
 bool BlockSystem::removeBlock(
 	const glm::vec3& origin,
 	const glm::vec3& direction,
-	World& world
+	World& world,
+	BlockId* removedBlock
 ) const {
 	const BlockRaycastHit hit = raycast(origin, direction, world);
-	return hit.valid && world.setBlockAt(hit.blockPos, AIR_BLOCK);
+	return hit.valid && removeBlock(hit.blockPos, world, removedBlock);
+}
+
+bool BlockSystem::removeBlock(
+	const glm::ivec3& blockPosition,
+	World& world,
+	BlockId* removedBlock
+) const {
+	BlockId block = AIR_BLOCK;
+	if (!world.getBlockAt(blockPosition, block) || !world.setBlockAt(blockPosition, AIR_BLOCK))
+		return false;
+	if (removedBlock)
+		*removedBlock = block;
+	return true;
 }
 
 bool BlockSystem::placeBlock(

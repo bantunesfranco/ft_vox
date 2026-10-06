@@ -8,6 +8,7 @@
 #include "BlockSystem.hpp"
 #include "Engine.hpp"
 #include "Gamestate.hpp"
+#include "Inventory.hpp"
 #include "UI.hpp"
 #include "World.hpp"
 
@@ -32,6 +33,8 @@ class App : public Engine
 		void toggleInventoryMenu();
 		void selectHotbarSlot(uint16_t slot);
 		void cycleHotbar(int delta);
+	void clickInventorySlot(int slot, bool secondaryClick);
+	uint16_t selectedHotbarSlot() const;
 		void toggleWireframeDebug();
 		bool isInGame() const;
 		bool wantsMouseCapture() const;
@@ -45,11 +48,12 @@ class App : public Engine
 
 		World world;
 		BlockSystem blockSystem;
+	Inventory inventory;
 		std::unique_ptr<UI> ui;
 		GameStateController gameState;
 		bool showWireframe{false};
-		uint16_t selectedHotbarSlot{0};
 		GLuint textureAtlas{0};
+	GLuint guiAtlas{0};
 		bool speedBoostEnabled = false;
 		bool flyMode = false;
 		bool grounded = false;

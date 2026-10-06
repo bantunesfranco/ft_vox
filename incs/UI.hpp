@@ -2,10 +2,11 @@
 #define UI_HPP
 
 #include <array>
+#include <string_view>
 #include <vector>
 
 #include "GameMode.hpp"
-#include "glm/glm.hpp"
+#include "ItemId.hpp"
 
 enum class UiActionType {
 	START_GAME,
@@ -14,22 +15,35 @@ enum class UiActionType {
 	QUIT_GAME,
 	SET_WIREFRAME,
 	SET_CLEAR_COLOR,
+	INVENTORY_SLOT_CLICK,
 };
 
 struct UiAction {
 	UiActionType type;
 	bool enabled{false};
 	std::array<float, 4> color{};
+	int slot{-1};
+	bool secondaryClick{false};
+};
+
+struct UiItemStack {
+	ItemId item{ItemId::Empty};
+	std::uint16_t count{0};
+	std::string_view name{};
+
+	[[nodiscard]] bool empty() const noexcept { return count == 0 || item == ItemId::Empty; }
 };
 
 struct UiFrameModel {
 	GameState state{GameState::START};
 	int selectedHotbarSlot{0};
 	int fps{0};
-	glm::vec3 cameraPosition{};
+	std::array<float, 3> cameraPosition{};
 	bool showDebug{true};
 	bool wireframe{false};
 	std::array<float, 4> clearColor{};
+	std::array<UiItemStack, 36> inventorySlots{};
+	UiItemStack cursorStack{};
 };
 
 class UI {

@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <algorithm>
+#include <cstdint>
 
 #include "ImGuiUI.hpp"
 
@@ -51,29 +52,89 @@ void applyStyle() {
     colors[ImGuiCol_TextDisabled]      = ImVec4(0.33f, 0.33f, 0.33f, 1.00f);
 }
 
-void DrawMinecraftBevel(ImVec2 min_p, ImVec2 max_p, bool pressed, float scale = 2.0f) {
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    
-    // Core pixel colors
-    ImU32 black  = IM_COL32(0, 0, 0, 255);
-    ImU32 shadow = pressed ? IM_COL32(255, 255, 255, 255) : IM_COL32(55, 55, 55, 255);  // #373737
-    ImU32 light  = pressed ? IM_COL32(55, 55, 55, 255)   : IM_COL32(255, 255, 255, 255); // #FFFFFF
+struct AtlasRect { float x; float y; float width; float height; };
 
-    // Outer Black Border
-    draw_list->AddRect(min_p, max_p, black, 0.0f, 0, scale);
-
-    // Inner Bevels (Top/Left and Bottom/Right)
-    // Left border
-    draw_list->AddLine(ImVec2(min_p.x + scale, min_p.y + scale), ImVec2(min_p.x + scale, max_p.y - scale * 2), light, scale);
-    // Top border
-    draw_list->AddLine(ImVec2(min_p.x + scale, min_p.y + scale), ImVec2(max_p.x - scale * 2, min_p.y + scale), light, scale);
-    // Right border
-    draw_list->AddLine(ImVec2(max_p.x - scale, min_p.y + scale), ImVec2(max_p.x - scale, max_p.y - scale), shadow, scale);
-    // Bottom border
-    draw_list->AddLine(ImVec2(min_p.x + scale, max_p.y - scale), ImVec2(max_p.x - scale, max_p.y - scale), shadow, scale);
+ImTextureID textureId(const GLuint texture) {
+    return reinterpret_cast<ImTextureID>(static_cast<std::intptr_t>(texture));
 }
 
-void renderStartMenu(std::vector<UiAction>& actions) {
+void addAtlasImage(ImDrawList* drawList, const GLuint texture, const AtlasRect rect,
+    const float atlasSize, const ImVec2 min, const ImVec2 max) {
+    const ImVec2 uv0(rect.x / atlasSize, rect.y / atlasSize);
+    const ImVec2 uv1((rect.x + rect.width) / atlasSize, (rect.y + rect.height) / atlasSize);
+    drawList->AddImage(textureId(texture), min, max, uv0, uv1);
+}
+
+AtlasRect itemIcon(const ItemId item) {
+    switch (item) {
+        case ItemId::GrassBlock: return {1408.0f, 528.0f, 16.0f, 16.0f};
+        case ItemId::Dirt: return {1168.0f, 720.0f, 16.0f, 16.0f};
+        case ItemId::Stone: return {1680.0f, 1312.0f, 16.0f, 16.0f};
+        case ItemId::Sand: return {1440.0f, 1216.0f, 16.0f, 16.0f};
+        case ItemId::AmethystBlock: return {512.0f, 288.0f, 16.0f, 16.0f};
+        case ItemId::Snow: return {672.0f, 1312.0f, 16.0f, 16.0f};
+        default: return {};
+    }
+}
+
+void drawStack(const UiItemStack& stack, const ImVec2 min, const float slotSize,
+    const GLuint blockAtlas, ImDrawList* drawList) {
+    if (stack.empty())
+        return;
+    const float itemSize = slotSize * 0.72f;
+    const float inset = (slotSize - itemSize) * 0.5f;
+    const ImVec2 itemMin(min.x + inset, min.y + inset);
+    const ImVec2 itemMax(itemMin.x + itemSize, itemMin.y + itemSize);
+    addAtlasImage(drawList, blockAtlas, itemIcon(stack.item), 2048.0f, itemMin, itemMax);
+    if (stack.count > 1) {
+        char countText[8];
+        std::snprintf(countText, sizeof(countText), "%u", static_cast<unsigned>(stack.count));
+        const ImVec2 textSize = ImGui::CalcTextSize(countText);
+        drawList->AddText(
+            ImVec2(min.x + slotSize - textSize.x - 3.0f, min.y + slotSize - textSize.y - 1.0f),
+            IM_COL32(255, 255, 255, 255),
+            countText
+        );
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%.*s", static_cast<int>(stack.name.size()), stack.name.data());
+}
+
+bool drawMenuButton(const GLuint guiAtlas, const char* label, const char* id,
+    const ImVec2 size, const bool enabled = true) {
+    ImGui::BeginDisabled(!enabled);
+    const bool clicked = ImGui::InvisibleButton(id, size);
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImGui::EndDisabled();
+
+    AtlasRect buttonRect{607.0f, 513.0f, 200.0f, 20.0f};
+    if (!enabled)
+        buttonRect = {809.0f, 513.0f, 200.0f, 20.0f};
+    else if (hovered || active)
+        buttonRect = {1.0f, 535.0f, 200.0f, 20.0f};
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    addAtlasImage(drawList, guiAtlas, buttonRect, 1024.0f, min, max);
+    const ImVec2 textSize = ImGui::CalcTextSize(label);
+    drawList->AddText(
+        ImVec2(min.x + (size.x - textSize.x) * 0.5f, min.y + (size.y - textSize.y) * 0.5f),
+        ImGui::GetColorU32(ImGuiCol_Text),
+        label
+    );
+    return enabled && clicked;
+}
+
+UiAction inventoryClickAction(const int slot, const bool secondary) {
+    UiAction action{UiActionType::INVENTORY_SLOT_CLICK, false, {}};
+    action.slot = slot;
+    action.secondaryClick = secondary;
+    return action;
+}
+
+void renderStartMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
     ImGuiIO& io = ImGui::GetIO();
     const float button_width = std::max(1.0f, std::min(400.0f, io.DisplaySize.x - 32.0f));
 
@@ -98,35 +159,27 @@ void renderStartMenu(std::vector<UiAction>& actions) {
     constexpr float button_height = 40.0f;
     ImGui::SetCursorPosY(io.DisplaySize.y * 0.45f);
 
-    auto CenteredButton = [&](const char* label) {
+    auto centeredButton = [&](const char* label, const bool enabled = true) {
         ImGui::SetCursorPosX(std::max(16.0f, (io.DisplaySize.x - button_width) * 0.5f));
-        ImVec2 p_min = ImGui::GetCursorScreenPos();
-
-        bool clicked = ImGui::Button(label, ImVec2(button_width, button_height));
-        DrawMinecraftBevel(p_min, ImVec2(p_min.x + button_width, p_min.y + button_height), ImGui::IsItemActive());
-        return clicked;
+        return drawMenuButton(guiAtlas, label, label, ImVec2(button_width, button_height), enabled);
     };
 
-    if (CenteredButton("Singleplayer")) {
+    if (centeredButton("Singleplayer")) {
         actions.push_back({UiActionType::START_GAME, false, {}});
     }
     ImGui::Spacing();
-    ImGui::BeginDisabled();
-    CenteredButton("Multiplayer");
-    ImGui::EndDisabled();
+    centeredButton("Multiplayer", false);
     ImGui::Spacing();
-    ImGui::BeginDisabled();
-    CenteredButton("Options...");
-    ImGui::EndDisabled();
+    centeredButton("Options...", false);
     ImGui::Spacing();
-    if (CenteredButton("Quit Game"))
-        actions.push_back({UiActionType::QUIT_GAME});
+    if (centeredButton("Quit Game"))
+        actions.push_back({UiActionType::QUIT_GAME, false, {}});
 
     ImGui::End();
     ImGui::PopStyleColor();
 }
 
-void renderPauseMenu(std::vector<UiAction>& actions) {
+void renderPauseMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
     ImGuiIO& io = ImGui::GetIO();
     const float menu_width = std::max(24.0f, std::min(420.0f, io.DisplaySize.x - 24.0f));
 
@@ -152,52 +205,42 @@ void renderPauseMenu(std::vector<UiAction>& actions) {
     ImGui::Text("Game Paused");
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 20.0f);
 
-    auto PauseButton = [&](const char* label, float width = 400.0f) {
+    auto pauseButton = [&](const char* label, const char* id, float width = 400.0f, bool enabled = true) {
         width = std::max(1.0f, std::min(width, menu_width - 16.0f));
         ImGui::SetCursorPosX((menu_width - width) * 0.5f);
-        ImVec2 p_min = ImGui::GetCursorScreenPos();
-        bool clicked = ImGui::Button(label, ImVec2(width, 40.0f));
-        DrawMinecraftBevel(p_min, ImVec2(p_min.x + width, p_min.y + 40.0f), ImGui::IsItemActive());
-        return clicked;
+        return drawMenuButton(guiAtlas, label, id, ImVec2(width, 40.0f), enabled);
     };
 
-    if (PauseButton("Back to Game"))
+    if (pauseButton("Back to Game", "resume"))
         actions.push_back({UiActionType::RESUME_GAME, false, {}});
     ImGui::Spacing();
 
     // Side-by-side buttons row
     const float half_button_width = std::max(1.0f, (menu_width - 24.0f) * 0.5f);
     ImGui::SetCursorPosX(8.0f);
-    ImVec2 p_min1 = ImGui::GetCursorScreenPos();
-    ImGui::BeginDisabled();
-    ImGui::Button("Achievements", ImVec2(half_button_width, 40.0f));
-    DrawMinecraftBevel(p_min1, ImVec2(p_min1.x + half_button_width, p_min1.y + 40.0f), ImGui::IsItemActive());
+    drawMenuButton(guiAtlas, "Achievements", "achievements", ImVec2(half_button_width, 20.0f), false);
 
     ImGui::SameLine(16.0f + half_button_width);
-    ImVec2 p_min2 = ImGui::GetCursorScreenPos();
-    ImGui::Button("Statistics", ImVec2(half_button_width, 40.0f));
-    DrawMinecraftBevel(p_min2, ImVec2(p_min2.x + half_button_width, p_min2.y + 40.0f), ImGui::IsItemActive());
-    ImGui::EndDisabled();
+    drawMenuButton(guiAtlas, "Statistics", "statistics", ImVec2(half_button_width, 20.0f), false);
 
     ImGui::Spacing();
-    ImGui::BeginDisabled();
-    PauseButton("Options...");
-    ImGui::EndDisabled();
+    pauseButton("Options...", "options", 400.0f, false);
     ImGui::Spacing();
-    if (PauseButton("Save and Quit to Title"))
+    if (pauseButton("Save and Quit to Title", "title"))
         actions.push_back({UiActionType::RETURN_TO_TITLE, false, {}});
 
     ImGui::End();
 }
 
-void renderInventory() {
+void renderInventory(const GLuint guiAtlas, const GLuint blockAtlas,
+    const UiFrameModel& model, std::vector<UiAction>& actions) {
     ImGuiIO& io = ImGui::GetIO();
     ImGui::GetBackgroundDrawList()->AddRectFilled(
         ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(0, 0, 0, 128));
 
     ImVec2 inv_size = ImVec2(
-        std::max(1.0f, std::min(372.0f, io.DisplaySize.x - 24.0f)),
-        std::max(1.0f, std::min(350.0f, io.DisplaySize.y - 24.0f))
+        std::max(1.0f, std::min(600.0f, io.DisplaySize.x - 24.0f)),
+        std::max(1.0f, std::min(300.0f, io.DisplaySize.y - 24.0f))
     );
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(inv_size);
@@ -212,32 +255,36 @@ void renderInventory() {
     ImGui::TextColored(ImVec4(0.25f, 0.25f, 0.25f, 1.0f), "Inventory");
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10.0f);
 
-    const float slot_dim = std::max(1.0f, std::min(36.0f, (inv_size.x - 40.0f) / 9.0f));
+    const float slot_dim = std::max(1.0f, std::min(52.0f, (inv_size.x - 40.0f) / 9.0f));
 
-    auto DrawItemSlot = [&](const char* slot_id) {
+    auto drawItemSlot = [&](const char* slot_id, const int slotIndex) {
         ImVec2 p_min = ImGui::GetCursorScreenPos();
-        ImVec2 p_max = ImVec2(p_min.x + slot_dim, p_min.y + slot_dim);
 
-        ImGui::GetWindowDrawList()->AddRectFilled(p_min, p_max, IM_COL32(139, 139, 139, 255));
-        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0,0,0,0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 60));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(255, 255, 255, 100));
-
-        ImGui::Button(slot_id, ImVec2(slot_dim, slot_dim));
+        const bool leftClicked = ImGui::InvisibleButton(slot_id, ImVec2(slot_dim, slot_dim));
+        const bool rightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
         const bool pressed = ImGui::IsItemActive();
-
-        ImGui::PopStyleColor(3);
-        DrawMinecraftBevel(p_min, p_max, pressed);
+        const ImVec2 slotMax(p_min.x + slot_dim, p_min.y + slot_dim);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        addAtlasImage(drawList, guiAtlas, {597.0f, 281.0f, 18.0f, 18.0f},
+            1024.0f, p_min, slotMax);
+        if (ImGui::IsItemHovered() || pressed)
+            drawList->AddRect(p_min, slotMax, IM_COL32(255, 255, 255, pressed ? 220 : 120));
+        drawStack(model.inventorySlots[static_cast<std::size_t>(slotIndex)], p_min, slot_dim,
+            blockAtlas, drawList);
+        if (leftClicked)
+            actions.push_back(inventoryClickAction(slotIndex, false));
+        else if (rightClicked)
+            actions.push_back(inventoryClickAction(slotIndex, true));
     };
 
     // 1. Storage Inventory Grid: 3 rows of 9 slots
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 9; c++) {
             char id[32]; std::snprintf(id, sizeof(id), "##inv_%d_%d", r, c);
-            DrawItemSlot(id);
-            if (c < 8) ImGui::SameLine(0.0f, 2.0f);
+            drawItemSlot(id, 9 + r * 9 + c);
+            if (c < 8) ImGui::SameLine(0.0f, 1.0f);
         }
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.0f);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 3.0f);
     }
 
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 15.0f);
@@ -246,75 +293,62 @@ void renderInventory() {
     // 2. Lower Equipped Hotbar Grid Row
     for (int c = 0; c < 9; c++) {
         char id[32]; std::snprintf(id, sizeof(id), "##hot_%d", c);
-        DrawItemSlot(id);
-        if (c < 8) ImGui::SameLine(0.0f, 2.0f);
+        drawItemSlot(id, c);
+        if (c < 8) ImGui::SameLine(0.0f, 1.0f);
     }
 
     ImGui::End();
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(2);
-}
 
-void renderHudHotbar(int selected_slot_index) {
-    ImGuiIO& io = ImGui::GetIO();
-
-    float total_w = 362.0f;
-    float slot_w = 38.0f;
-    float hud_h = 42.0f;
-
-    ImGui::SetNextWindowPos(ImVec2((io.DisplaySize.x - total_w) * 0.5f, io.DisplaySize.y - hud_h - 10.0f));
-    ImGui::SetNextWindowSize(ImVec2(total_w, hud_h));
-
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(60, 60, 60, 180));
-    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(0, 0, 0, 255));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2.0f, 2.0f));
-
-    ImGui::Begin("HUDHotbar", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs);
-
-    ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-    for (int i = 0; i < 9; i++) {
-        ImVec2 p_min = ImGui::GetCursorScreenPos();
-        ImVec2 p_max = ImVec2(p_min.x + slot_w, p_min.y + slot_w);
-
-        draw_list->AddRect(p_min, p_max, IM_COL32(0, 0, 0, 255), 0.0f, 0, 2.0f);
-
-        if (i == selected_slot_index) {
-            ImVec2 active_min = ImVec2(p_min.x - 2.0f, p_min.y - 2.0f);
-            ImVec2 active_max = ImVec2(p_max.x + 2.0f, p_max.y + 2.0f);
-            draw_list->AddRect(active_min, active_max, IM_COL32(255, 255, 255, 255), 0.0f, 0, 4.0f);
+    if (!model.cursorStack.empty()) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        ImDrawList* foreground = ImGui::GetForegroundDrawList();
+        foreground->AddRectFilled(mouse, ImVec2(mouse.x + 34.0f, mouse.y + 34.0f), IM_COL32(70, 70, 70, 235));
+        const float inset = 8.0f;
+        const ImVec2 iconMin(mouse.x + inset, mouse.y + inset);
+        const AtlasRect icon = itemIcon(model.cursorStack.item);
+        addAtlasImage(foreground, blockAtlas, icon, 2048.0f, iconMin,
+            ImVec2(mouse.x + 34.0f - inset, mouse.y + 34.0f - inset));
+        if (model.cursorStack.count > 1) {
+            char countText[8];
+            std::snprintf(countText, sizeof(countText), "%u", static_cast<unsigned>(model.cursorStack.count));
+            foreground->AddText(ImVec2(mouse.x + 18.0f, mouse.y + 20.0f), IM_COL32_WHITE, countText);
         }
-
-        ImGui::SetCursorScreenPos(ImVec2(p_min.x + slot_w + 2.0f, p_min.y));
     }
-
-    ImGui::End();
-    ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor(2);
 }
 
-void renderCrossHair() {
-    // Draw crosshair at screen center
+void renderHudHotbar(const GLuint guiAtlas, const GLuint blockAtlas, const UiFrameModel& model) {
+    ImGuiIO& io = ImGui::GetIO();
+    const ImVec2 hotbarSize(364.0f, 44.0f);
+    const ImVec2 hotbarMin((io.DisplaySize.x - hotbarSize.x) * 0.5f,
+        io.DisplaySize.y - hotbarSize.y - 10.0f);
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    addAtlasImage(drawList, guiAtlas, {714.0f, 1.0f, 182.0f, 22.0f},
+        1024.0f, hotbarMin, ImVec2(hotbarMin.x + hotbarSize.x, hotbarMin.y + hotbarSize.y));
+
+    const float pitch = hotbarSize.x / 9.0f;
+    for (int i = 0; i < 9; ++i) {
+        const float centerX = hotbarMin.x + pitch * (static_cast<float>(i) + 0.5f);
+        if (i == model.selectedHotbarSlot) {
+            const ImVec2 selectionMin(centerX - 24.0f, hotbarMin.y - 2.0f);
+            addAtlasImage(drawList, guiAtlas, {540.0f, 262.0f, 24.0f, 23.0f},
+                1024.0f, selectionMin, ImVec2(selectionMin.x + 48.0f, selectionMin.y + 46.0f));
+        }
+        const ImVec2 slotMin(centerX - 16.0f, hotbarMin.y + 6.0f);
+        drawStack(model.inventorySlots[static_cast<std::size_t>(i)], slotMin, 32.0f,
+            blockAtlas, drawList);
+    }
+}
+
+void renderCrossHair(const GLuint guiAtlas) {
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
     const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
     const ImVec2 center(displaySize.x * 0.5f, displaySize.y * 0.5f);
-    constexpr float crosshairSize = 10.0f;
-    const ImU32 whiteColor = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-    constexpr float lineThickness = 1.5f;
-
-    drawList->AddLine(
-        ImVec2(center.x - crosshairSize, center.y),
-        ImVec2(center.x + crosshairSize, center.y),
-        whiteColor,
-        lineThickness
-    );
-    drawList->AddLine(
-        ImVec2(center.x, center.y - crosshairSize),
-        ImVec2(center.x, center.y + crosshairSize),
-        whiteColor,
-        lineThickness
-    );
+    constexpr float size = 15.0f;
+    addAtlasImage(drawList, guiAtlas, {714.0f, 266.0f, 15.0f, 15.0f}, 1024.0f,
+        ImVec2(center.x - size * 0.5f, center.y - size * 0.5f),
+        ImVec2(center.x + size * 0.5f, center.y + size * 0.5f));
 }
 
 void renderDebugWindow(const UiFrameModel& model, std::vector<UiAction>& actions) {
@@ -322,7 +356,7 @@ void renderDebugWindow(const UiFrameModel& model, std::vector<UiAction>& actions
     ImGui::Begin("Debug Window");
     ImGui::Text("FPS: %i", model.fps);
     ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)",
-        model.cameraPosition.x, model.cameraPosition.y, model.cameraPosition.z);
+        model.cameraPosition[0], model.cameraPosition[1], model.cameraPosition[2]);
 
     bool wireframe = model.wireframe;
     if (ImGui::Checkbox("Wireframe", &wireframe))
@@ -338,7 +372,8 @@ void renderDebugWindow(const UiFrameModel& model, std::vector<UiAction>& actions
 }
 }
 
-ImGuiUI::ImGuiUI(GLFWwindow* window) {
+ImGuiUI::ImGuiUI(GLFWwindow* window, const GLuint guiTexture, const GLuint blockTexture)
+	: guiAtlas(guiTexture), blockAtlas(blockTexture) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
@@ -368,17 +403,17 @@ void ImGuiUI::beginFrame() {
 std::vector<UiAction> ImGuiUI::render(const UiFrameModel& model) {
     std::vector<UiAction> actions;
     if (model.state == GameState::START) {
-        renderStartMenu(actions);
+        renderStartMenu(guiAtlas, actions);
         return actions;
     }
 
     if (model.state == GameState::PAUSE)
-        renderPauseMenu(actions);
+        renderPauseMenu(guiAtlas, actions);
     else if (model.state == GameState::INVENTORY)
-        renderInventory();
+        renderInventory(guiAtlas, blockAtlas, model, actions);
     else {
-        renderHudHotbar(model.selectedHotbarSlot);
-        renderCrossHair();
+        renderHudHotbar(guiAtlas, blockAtlas, model);
+        renderCrossHair(guiAtlas);
     }
 
     if (model.showDebug)
@@ -410,6 +445,6 @@ void ImGuiUI::shutdown() {
     initialized = false;
 }
 
-std::unique_ptr<UI> createImGuiUI(GLFWwindow* window) {
-    return std::make_unique<ImGuiUI>(window);
+std::unique_ptr<UI> createImGuiUI(GLFWwindow* window, const GLuint guiAtlas, const GLuint blockAtlas) {
+	return std::make_unique<ImGuiUI>(window, guiAtlas, blockAtlas);
 }
