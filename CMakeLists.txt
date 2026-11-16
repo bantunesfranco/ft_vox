@@ -124,6 +124,14 @@ target_link_libraries(ft_vox PRIVATE
     ImGui
 )
 
+# Network client test (connects to a running `ft_vox --server`). Unit tests
+# run inside the game binary: `ft_vox --selftest`.
+option(FT_VOX_BUILD_TESTS "Build test executables" OFF)
+if(FT_VOX_BUILD_TESTS)
+    add_executable(netclient_test tests/netclient_test.cpp)
+    target_link_libraries(netclient_test PRIVATE net)
+endif()
+
 # ---------------------------------------------------------------------------
 # Warnings: our own target only, per compiler
 # ---------------------------------------------------------------------------

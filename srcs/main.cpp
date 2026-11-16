@@ -21,6 +21,7 @@
 
 #include "App.hpp"
 #include "GameServer.hpp"
+#include "SelfTest.hpp"
 
 namespace {
 
@@ -66,6 +67,8 @@ int main(const int argc, char** argv)
 {
 	if (argc >= 2 && std::strcmp(argv[1], "--server") == 0)
 		return runDedicatedServer(argc, argv);
+	if (argc >= 2 && std::strcmp(argv[1], "--selftest") == 0)
+		return runSelfTests(argc, argv);
 
 	std::map<settings_t, bool> settings = {{VOX_FULLSCREEN, false}, {VOX_RESIZE, true}, {VOX_DECORATED, true}};
 

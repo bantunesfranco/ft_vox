@@ -72,6 +72,13 @@ warnings           = "high"
 warnings_as_errors = true
 defines.windows    = ["_CRT_SECURE_NO_WARNINGS"]
 
+# Connects to a running server: `netclient_test <port>` (see tests/).
+[bin.netclient_test]
+sources            = ["tests/netclient_test.cpp"]
+deps               = ["net"]
+warnings           = "high"
+warnings_as_errors = true
+
 [dependency.glad]
 path           = "engine/vendor/glad"
 kind           = "sources"
