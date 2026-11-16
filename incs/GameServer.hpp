@@ -26,6 +26,10 @@
 // ============================================================================
 
 #include <climits>
+#include <condition_variable>
+#include <filesystem>
+#include <mutex>
+#include <optional>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -39,6 +43,8 @@
 #include "Net.hpp"
 #include "Protocol.hpp"
 #include "World.hpp"
+#include "RegionStore.hpp"
+#include "WorldStore.hpp"
 
 class ThreadPool;
 
@@ -48,6 +54,10 @@ struct ServerConfig {
 	unsigned      workerThreads = 2;
 	std::size_t   maxPlayers    = 16;
 	bool          log           = true;
+	// The world played: created there (with `seed`, or a random one) when
+	// missing. An existing world keeps its own seed.
+	std::filesystem::path         worldFolder = "saves/server";
+	std::optional<std::uint64_t>  seed;
 };
 
 class GameServer final : public net::ITransportHandler {
@@ -59,7 +69,7 @@ public:
 
 	// Opens the listener. False (and `error`) if the port is taken, etc.
 	bool start(std::string& error);
-	// The event loop. Returns after stop().
+	// The event loop. Returns after stop(), once every changed column is saved.
 	void run();
 	// Thread-safe and async-signal-safe.
 	void stop();
@@ -106,7 +116,9 @@ private:
 
 	// ---- world --------------------------------------------------------------------
 	void requestColumn(const ChunkCoord& coord);
-	void onColumnGenerated(const ChunkCoord& coord, ColumnPtr column);
+	void onColumnGenerated(const ChunkCoord& coord, ColumnPtr column, bool generated);
+	void saveColumn(ColumnPtr column);             // on the pool; counted in _savesInFlight
+	void saveAllAndWait();
 	ChunkColumn* columnAt(const glm::ivec3& pos, glm::ivec3& local);
 	bool blockAt(const glm::ivec3& pos, BlockId& out);
 	void setBlock(const glm::ivec3& pos, BlockId block);
@@ -122,8 +134,15 @@ private:
 	ServerConfig _config;
 	net::Config  _netConfig;
 
-	World        _terrain;                 // generator + saves; its own chunk map is unused
+	World        _terrain;                 // generator only; its own chunk map is unused
+	std::uint64_t _seed = 0;
+	std::shared_ptr<RegionStore>                      _store;
+	std::unique_ptr<WorldLock>                        _lock;
 	std::unordered_map<ChunkCoord, ColumnPtr>         _columns;
+	std::unordered_set<ChunkCoord>                    _dirty;      // generated or edited since saved
+	std::mutex              _saveMutex;
+	std::condition_variable _saveDone;
+	std::size_t             _savesInFlight = 0;
 	std::unordered_map<ChunkCoord, net::SharedBuffer> _encoded;   // ChunkData frames, until edited
 	std::unordered_set<ChunkCoord>                    _generating;
 

@@ -57,18 +57,62 @@ GameServer::GameServer(ServerConfig config) : _config(std::move(config)) {
 GameServer::~GameServer() {
 	_pool.reset();          // join workers first: they post to the transport
 	_transport.reset();
+	_lock.reset();          // the world is free again only after the last save
 }
 
 bool GameServer::start(std::string& error) {
+	const auto world = openOrCreateWorld(_config.worldFolder, _config.seed.value_or(randomSeed()), error);
+	if (!world)
+		return false;
+	_lock = WorldLock::acquire(world->folder, error);
+	if (!_lock) {
+		error = "world " + world->folder.string() + " is locked: " + error;
+		return false;
+	}
+	_seed  = world->seed;
+	_store = std::make_shared<RegionStore>(world->folder / "region");
+	_terrain.open(_seed, nullptr);
+
 	_transport = std::make_unique<net::Transport>(_netConfig, *this);
 	if (!_transport->start(error))
 		return false;
 	_pool = std::make_unique<ThreadPool>(_config.workerThreads);
+	log("world '%s' (%s) seed %lld", world->name.c_str(), world->folder.string().c_str(),
+	    static_cast<long long>(_seed));
 	log("listening on port %u (view radius %d)", static_cast<unsigned>(_config.port), _config.viewRadius);
 	return true;
 }
 
-void GameServer::run()  { if (_transport) _transport->run(); }
+void GameServer::run() {
+	if (!_transport)
+		return;
+	_transport->run();
+	saveAllAndWait();
+	log("saved, stopped");
+}
+
+void GameServer::saveColumn(ColumnPtr column) {
+	{
+		std::lock_guard lock(_saveMutex);
+		++_savesInFlight;
+	}
+	_pool->enqueueFireAndForget([this, store = _store, column = std::move(column)] {
+		if (!store->save(*column))
+			std::fprintf(stderr, "[server] failed to save chunk %d,%d\n", column->coord().x, column->coord().z);
+		std::lock_guard lock(_saveMutex);
+		--_savesInFlight;
+		_saveDone.notify_all();
+	});
+}
+
+void GameServer::saveAllAndWait() {
+	for (const ChunkCoord& coord : _dirty)
+		if (const auto it = _columns.find(coord); it != _columns.end())
+			saveColumn(it->second);
+	_dirty.clear();
+	std::unique_lock lock(_saveMutex);
+	_saveDone.wait(lock, [this] { return _savesInFlight == 0; });
+}
 void GameServer::stop() { if (_transport) _transport->stop(); }
 
 // ============================================================================
@@ -382,7 +426,9 @@ void GameServer::evictColumns() {
 			continue;
 		}
 		_encoded.erase(it->first);
-		it = _columns.erase(it);                       // edits are already on disk
+		if (_dirty.erase(it->first) != 0)
+			saveColumn(it->second);                    // a snapshot: the map entry goes now
+		it = _columns.erase(it);
 	}
 }
 
@@ -394,23 +440,32 @@ void GameServer::requestColumn(const ChunkCoord& coord) {
 	_generating.insert(coord);
 	net::Transport* transport = _transport.get();
 	World* terrain = &_terrain;
-	_pool->enqueueFireAndForget([this, transport, terrain, coord] {
+	_pool->enqueueFireAndForget([this, transport, terrain, store = _store, coord] {
 		ColumnPtr column;
+		bool generated = false;
 		try {
-			column = std::make_shared<ChunkColumn>(coord);
-			terrain->generateTerrain(*column);
+			if (auto saved = store->load(coord)) {
+				column = std::move(saved);             // a saved column is used as is
+			} else {
+				column = std::make_shared<ChunkColumn>(coord);
+				terrain->generateTerrain(*column);
+				generated = true;
+			}
 		} catch (const std::exception& e) {
 			std::fprintf(stderr, "[server] failed to generate chunk %d,%d: %s\n", coord.x, coord.z, e.what());
 			column.reset();
 		}
-		transport->post([this, coord, column] { onColumnGenerated(coord, column); });
+		transport->post([this, coord, column, generated] { onColumnGenerated(coord, column, generated); });
 	});
 }
 
-void GameServer::onColumnGenerated(const ChunkCoord& coord, ColumnPtr column) {
+void GameServer::onColumnGenerated(const ChunkCoord& coord, ColumnPtr column, const bool generated) {
 	_generating.erase(coord);
-	if (column)
-		_columns[coord] = std::move(column);           // failures are retried by requestGeneration()
+	if (!column)
+		return;                                        // failures are retried by requestGeneration()
+	_columns[coord] = std::move(column);
+	if (generated)
+		_dirty.insert(coord);
 }
 
 ChunkColumn* GameServer::columnAt(const glm::ivec3& pos, glm::ivec3& local) {
@@ -435,12 +490,15 @@ bool GameServer::blockAt(const glm::ivec3& pos, BlockId& out) {
 
 void GameServer::setBlock(const glm::ivec3& pos, const BlockId block) {
 	glm::ivec3 local{};
-	ChunkColumn* column = columnAt(pos, local);
-	if (!column)
+	if (!columnAt(pos, local))
 		return;
+	const ChunkCoord coord{floorDiv(pos.x, ChunkSection::SIZE), floorDiv(pos.z, ChunkSection::SIZE)};
+	ColumnPtr& column = _columns.at(coord);
+	if (column.use_count() > 1)                        // a save job still reads it: copy on write
+		column = std::make_shared<ChunkColumn>(*column);
 	column->setUnchecked(local.x, local.y, local.z, block);
 
-	const ChunkCoord coord = column->coord();
+	_dirty.insert(coord);
 	_encoded.erase(coord);
 
 	net::ByteWriter w(net::PacketId::BlockUpdate, 14);

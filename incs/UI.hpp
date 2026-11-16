@@ -78,6 +78,7 @@ struct UiFrameModel {
 	std::vector<UiWorldEntry> worlds{};       // world list, most recently played first
 	int selectedWorld{-1};
 	std::string seedText{};                   // seed of the world being played (debug window)
+	std::string hostWorldName{};              // multiplayer menu: the world "Host" would host
 };
 
 class UI {

@@ -294,7 +294,12 @@ void renderMultiplayerMenu(const GLuint guiAtlas, std::array<char, 128>& address
     };
 
     const bool hasName = playerName[0] != '\0';
-    if (centeredButton("Host", hasName)) {
+    ImGui::SetCursorPosX(column_x);
+    if (model.hostWorldName.empty())
+        ImGui::TextDisabled("Host: no world selected (choose one in Singleplayer)");
+    else
+        ImGui::Text("Host: %s (change it in Singleplayer)", model.hostWorldName.c_str());
+    if (centeredButton("Host", hasName && !model.hostWorldName.empty())) {
         UiAction action{UiActionType::HOST_MP, false, {}};
         action.text2 = playerName.data();
         actions.push_back(std::move(action));

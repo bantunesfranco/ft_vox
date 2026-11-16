@@ -22,6 +22,8 @@
 #include "App.hpp"
 #include "GameServer.hpp"
 #include "SelfTest.hpp"
+#include "WorldStore.hpp"
+#include <string_view>
 
 namespace {
 
@@ -32,19 +34,32 @@ void onSignal(int) {
 		g_server->stop();     // one atomic store: async-signal-safe
 }
 
-// ft_vox --server [port]   headless dedicated server, no window. Ctrl+C stops it.
+int serverUsage(const char* exe) {
+	std::cerr << "usage: " << exe << " --server [port] [--world <folder>] [--seed <seed>]\n";
+	return EXIT_FAILURE;
+}
+
+// ft_vox --server [port] [--world <folder>] [--seed <seed>]
+// Headless dedicated server, no window. Ctrl+C stops it (after saving).
 int runDedicatedServer(const int argc, char** argv) {
 	ServerConfig config;
 	config.workerThreads = std::max(2u, std::thread::hardware_concurrency()) - 1;   // 0 = unknown
-	if (argc >= 3) {
-		unsigned port = 0;
-		const char* end = argv[2] + std::strlen(argv[2]);
-		const auto [ptr, ec] = std::from_chars(argv[2], end, port);
-		if (ec != std::errc{} || ptr != end || port == 0 || port > 65535) {
-			std::cerr << "usage: " << argv[0] << " --server [port]\n";
-			return EXIT_FAILURE;
+	for (int i = 2; i < argc; ++i) {
+		const std::string_view arg = argv[i];
+		if (arg == "--world" && i + 1 < argc) {
+			config.worldFolder = argv[++i];
+		} else if (arg == "--seed" && i + 1 < argc) {
+			config.seed = parseSeed(argv[++i], randomSeed());
+		} else if (i == 2 && !arg.starts_with("--")) {
+			unsigned port = 0;
+			const char* end = arg.data() + arg.size();
+			const auto [ptr, ec] = std::from_chars(arg.data(), end, port);
+			if (ec != std::errc{} || ptr != end || port == 0 || port > 65535)
+				return serverUsage(argv[0]);
+			config.port = static_cast<std::uint16_t>(port);
+		} else {
+			return serverUsage(argv[0]);
 		}
-		config.port = static_cast<std::uint16_t>(port);
 	}
 
 	GameServer server(config);
@@ -56,6 +71,9 @@ int runDedicatedServer(const int argc, char** argv) {
 	g_server = &server;
 	std::signal(SIGINT, onSignal);
 	std::signal(SIGTERM, onSignal);
+#if defined(SIGBREAK)
+	std::signal(SIGBREAK, onSignal);   // Windows Ctrl+Break / CTRL_BREAK_EVENT
+#endif
 	server.run();
 	g_server = nullptr;
 	return EXIT_SUCCESS;

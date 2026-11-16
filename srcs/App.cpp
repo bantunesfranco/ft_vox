@@ -168,9 +168,17 @@ bool App::startMultiplayer(const UiAction& action, const bool hostLocally) {
 	config.playerName = action.text2.empty() ? std::string("Player") : action.text2;
 
 	if (hostLocally) {
+		// Hosts the world selected in the world list (endSession() above has
+		// already saved it and released its lock, so the server can take it).
+		if (selectedWorld < 0 || selectedWorld >= static_cast<int>(worlds.size())
+		    || !worlds[static_cast<std::size_t>(selectedWorld)].readable) {
+			lastSessionError = "Choose a world to host in Singleplayer first";
+			return false;
+		}
 		ServerConfig serverConfig;
 		const unsigned cores = std::thread::hardware_concurrency();
 		serverConfig.workerThreads = std::max(1u, cores / 4);   // the client keeps its own pool
+		serverConfig.worldFolder = worlds[static_cast<std::size_t>(selectedWorld)].folder;
 		hostedServer = std::make_unique<HostedServer>();
 		std::string error;
 		if (!hostedServer->start(serverConfig, error)) {
@@ -453,6 +461,9 @@ void App::run() {
 		uiModel.lastError = lastSessionError;
 		if (playingSeed)
 			uiModel.seedText = std::to_string(static_cast<std::int64_t>(*playingSeed));
+		if (gameState.currentState == GameState::MULTIPLAYER
+		    && selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size()))
+			uiModel.hostWorldName = worlds[static_cast<std::size_t>(selectedWorld)].name;
 		if (gameState.currentState == GameState::WORLD_SELECT) {
 			for (const WorldInfo& info : worlds) {
 				UiWorldEntry entry;
@@ -805,6 +816,7 @@ void App::applyUiAction(const UiAction& action) {
 		}
 		case UiActionType::START_GAME_MP:
 			lastSessionError.clear();
+			refreshWorlds();                   // for "Host": which world would be hosted
 			gameState.openMultiplayerMenu();
 			applyGameState();
 			break;
