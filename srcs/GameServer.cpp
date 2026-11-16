@@ -39,7 +39,6 @@ bool validName(const std::string& name) {
 }
 
 constexpr BlockId BEDROCK_BLOCK = toBlockId(BlockType::Bedrock);
-constexpr ChunkCoord SPAWN_CHUNK{0, 0};
 
 } // namespace
 
@@ -71,7 +70,8 @@ bool GameServer::start(std::string& error) {
 	}
 	_seed  = world->seed;
 	_store = std::make_shared<RegionStore>(world->folder / "region");
-	_terrain.open(_seed, nullptr);
+	_generator = std::make_shared<worldgen::TerrainGenerator>(_seed);
+	_spawnXZ = _generator->findSpawn();
 
 	_transport = std::make_unique<net::Transport>(_netConfig, *this);
 	if (!_transport->start(error))
@@ -274,25 +274,26 @@ void GameServer::spawnWaitingPlayers() {
 		return;
 
 	if (!_spawnKnown) {
-		const auto it = _columns.find(SPAWN_CHUNK);
+		const ChunkCoord spawnChunk = chunkOf(glm::vec3(_spawnXZ.x, 0, _spawnXZ.y));
+		const auto it = _columns.find(spawnChunk);
 		if (it == _columns.end()) {
-			if (!_generating.contains(SPAWN_CHUNK))
-				requestColumn(SPAWN_CHUNK);
+			if (!_generating.contains(spawnChunk))
+				requestColumn(spawnChunk);
 			return;
 		}
 		// Stand on the highest opaque block at the middle of the spawn chunk.
-		constexpr int lx = ChunkSection::SIZE / 2;
-		constexpr int lz = ChunkSection::SIZE / 2;
+		const int lx = _spawnXZ.x - spawnChunk.x * ChunkSection::SIZE;
+		const int lz = _spawnXZ.y - spawnChunk.z * ChunkSection::SIZE;
 		int surface = 100;
 		for (int sy = ChunkColumn::HEIGHT - 1; sy >= 0; --sy) {
-			if (_terrain.getBlockRegistry().isOpaque(it->second->getUnchecked(lx, sy, lz))) {
+			if (_blocks.get(it->second->getUnchecked(lx, sy, lz)).solid) {
 				surface = ChunkColumn::toWorldY(sy);
 				break;
 			}
 		}
-		_spawnPoint = {SPAWN_CHUNK.x * ChunkSection::SIZE + lx + 0.5f,
+		_spawnPoint = {static_cast<float>(_spawnXZ.x) + 0.5f,
 		               static_cast<float>(surface + 1) + PlayerCollision::EYE_HEIGHT,
-		               SPAWN_CHUNK.z * ChunkSection::SIZE + lz + 0.5f};
+		               static_cast<float>(_spawnXZ.y) + 0.5f};
 		_spawnKnown = true;
 	}
 
@@ -415,7 +416,7 @@ void GameServer::evictColumns() {
 	for (auto it = _columns.begin(); it != _columns.end();) {
 		bool needed = false;
 		for (const auto& p : _players | std::views::values) {
-			const ChunkCoord center = p.spawned ? chunkOf(p.pos) : SPAWN_CHUNK;
+			const ChunkCoord center = chunkOf(p.spawned ? p.pos : glm::vec3(_spawnXZ.x, 0, _spawnXZ.y));
 			if (chebyshev(it->first, center) <= keep) {
 				needed = true;
 				break;
@@ -439,8 +440,7 @@ void GameServer::evictColumns() {
 void GameServer::requestColumn(const ChunkCoord& coord) {
 	_generating.insert(coord);
 	net::Transport* transport = _transport.get();
-	World* terrain = &_terrain;
-	_pool->enqueueFireAndForget([this, transport, terrain, store = _store, coord] {
+	_pool->enqueueFireAndForget([this, transport, generator = _generator, store = _store, coord] {
 		ColumnPtr column;
 		bool generated = false;
 		try {
@@ -448,7 +448,7 @@ void GameServer::requestColumn(const ChunkCoord& coord) {
 				column = std::move(saved);             // a saved column is used as is
 			} else {
 				column = std::make_shared<ChunkColumn>(coord);
-				terrain->generateTerrain(*column);
+				generator->generate(*column);
 				generated = true;
 			}
 		} catch (const std::exception& e) {

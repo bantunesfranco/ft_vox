@@ -43,6 +43,7 @@
 #include "Net.hpp"
 #include "Protocol.hpp"
 #include "World.hpp"
+#include "worldgen/TerrainGenerator.hpp"
 #include "RegionStore.hpp"
 #include "WorldStore.hpp"
 
@@ -134,7 +135,9 @@ private:
 	ServerConfig _config;
 	net::Config  _netConfig;
 
-	World        _terrain;                 // generator only; its own chunk map is unused
+	std::shared_ptr<const worldgen::TerrainGenerator> _generator;
+	BlockRegistry _blocks;
+	glm::ivec2    _spawnXZ{8, 8};          // from the generator; the column is loaded before use
 	std::uint64_t _seed = 0;
 	std::shared_ptr<RegionStore>                      _store;
 	std::unique_ptr<WorldLock>                        _lock;

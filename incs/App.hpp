@@ -32,7 +32,7 @@ class App : public Engine
 
 		void	run() override;
 		// ft_vox --bench: scripted singleplayer flight with a timing report.
-		void	enableBenchmark(double seconds);
+		void	enableBenchmark(double seconds, glm::vec2 startXZ = {8.0f, 8.0f});
 
 		void	terminate() override;
 		void	destroyBlock();
@@ -119,6 +119,8 @@ class App : public Engine
 			bool   screenshotTaken = false;
 			double duration  = 30.0;
 			double start     = 0.0;
+			glm::vec2 startXZ{8.0f, 8.0f};
+			float  height    = 110.0f;   // eye height of the flight
 		} bench;
 		FrameProfiler profiler;
 		std::size_t   drawCalls = 0;   // meshes drawn this frame (in 2 multi-draw calls)

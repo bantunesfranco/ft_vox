@@ -11,6 +11,7 @@
 #include "ThreadPool.hpp"
 
 class RegionStore;
+namespace worldgen { class TerrainGenerator; }
 
 class Frustum {
 public:
@@ -61,15 +62,11 @@ public:
 	static constexpr int CHUNK_LOAD_RADIUS = CHUNK_RADIUS + 1;
 	static constexpr int CHUNK_LOAD_DIAMETER = CHUNK_LOAD_RADIUS * 2 + 1;
 
-	World() = default;
+	World();   // generates with seed 0 until open() is called
 
 	void updateChunks(
 		const glm::vec3& playerPos,
 		ThreadPool& threadPool
-	);
-
-	void generateTerrain(
-		ChunkColumn &column
 	);
 
 	// Meshing runs on `threadPool`: this applies finished meshes (a bounded
@@ -100,6 +97,10 @@ public:
 	// started by unloading) are on disk.
 	void flush(ThreadPool& threadPool);
 	[[nodiscard]] std::uint64_t seed() const noexcept { return worldSeed; }
+	// Where players start: a land position (x, z) from the generator.
+	[[nodiscard]] glm::ivec2 spawnPoint() const;
+	// Generated ground height at (x, z), loaded or not (before caves / structures).
+	[[nodiscard]] int generatedSurfaceHeight(int x, int z) const;
 	~World();
 
 	// --- multiplayer hooks (main thread) ------------------------------------
@@ -162,6 +163,7 @@ private:
 	// Persistence. `dirty`: columns generated (not loaded) or edited since
 	// their last save, under chunk_mutex.
 	std::uint64_t worldSeed = 0;
+	std::shared_ptr<const worldgen::TerrainGenerator> generator;
 	std::shared_ptr<RegionStore> store;
 	std::unordered_set<ChunkCoord> dirty;
 	std::mutex saveMutex;

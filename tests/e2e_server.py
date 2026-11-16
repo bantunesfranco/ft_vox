@@ -83,14 +83,16 @@ print(f"     alice id={aid} spawn=({sx:.2f}, {sy:.2f}, {sz:.2f})")
 
 # ---- 2. chunk streaming + codec ---------------------------------------------
 a.pump(6)
-ok((0, 0) in a.chunks, f"spawn column streamed and decoded ({len(a.chunks)} columns so far)")
+import math
+spawn_chunk = (math.floor(sx / 16), math.floor(sz / 16))
+ok(spawn_chunk in a.chunks, f"spawn column streamed and decoded ({len(a.chunks)} columns so far)")
 ok(len(a.chunks) > 50, "many columns streamed nearest-first")
-far = max(max(abs(x), abs(z)) for x, z in a.chunks)
+far = max(max(abs(x - spawn_chunk[0]), abs(z - spawn_chunk[1])) for x, z in a.chunks)
 ok(far <= 17, f"nothing beyond view radius (max ring {far})")
 feet_y = round(sy - EYE)
-lx, lz = int(sx) % 16, int(sz) % 16
-below = block_at(a.chunks[(0, 0)], lx, feet_y - 1, lz)
-at_feet = block_at(a.chunks[(0, 0)], lx, feet_y, lz)
+lx, lz = math.floor(sx) % 16, math.floor(sz) % 16
+below = block_at(a.chunks[spawn_chunk], lx, feet_y - 1, lz)
+at_feet = block_at(a.chunks[spawn_chunk], lx, feet_y, lz)
 ok(below != 0 and at_feet == 0, f"spawn stands on a solid block (below={below}, feet={at_feet})")
 
 # ---- 3. second player: join + movement relay ---------------------------------
@@ -116,7 +118,7 @@ msgs = a.pump(2, bob_moved)
 ok(any(bob_moved(n, p) for n, p in msgs), "alice sees bob's new position in EntityMove")
 
 # ---- 4. edits ------------------------------------------------------------------
-target = (int(sx) if sx >= 0 else int(sx) - 1, feet_y - 1, int(sz) if sz >= 0 else int(sz) - 1)
+target = (math.floor(sx), feet_y - 1, math.floor(sz))
 a.send("BreakBlock", struct.pack("<iii", *target))
 upd = lambda n, p: n == "BlockUpdate" and struct.unpack_from("<iii", p) == target
 ra = a.pump(2, upd); rb = b.pump(2, upd)
@@ -132,7 +134,10 @@ far_target = (target[0] + 40, target[1], target[2])
 a.send("BreakBlock", struct.pack("<iii", *far_target))
 upd_far = lambda n, p: n == "BlockUpdate" and struct.unpack_from("<iii", p) == far_target
 pa = [p for n, p in a.pump(2, upd_far) if upd_far(n, p)]
-ok(pa and struct.unpack_from("<H", pa[0], 12)[0] != 0, "out-of-reach break rejected (answered with the real block)")
+far_chunk = (far_target[0] // 16, far_target[2] // 16)
+real = block_at(a.chunks[far_chunk], far_target[0] % 16, far_target[1], far_target[2] % 16) if far_chunk in a.chunks else None
+ok(pa and real is not None and struct.unpack_from("<H", pa[0], 12)[0] == real,
+   "out-of-reach break rejected (answered with the real block)")
 
 bedrock = (target[0], -64, target[2])
 a.send("PlaceBlock", struct.pack("<iiiH", target[0], feet_y, target[2], 3))  # inside alice herself

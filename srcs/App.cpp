@@ -133,7 +133,9 @@ bool App::startSingleplayer(const WorldInfo& info) {
 
 	// `world`, `*threadPool` and `blockSystem` all outlive the session (it is
 	// destroyed in endSession(), before run() ends and in terminate()).
-	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos);
+	const glm::ivec2 spawn = world.spawnPoint();
+	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem,
+		glm::vec3(static_cast<float>(spawn.x) + 0.5f, 0.0f, static_cast<float>(spawn.y) + 0.5f));
 	return true;
 }
 
@@ -143,6 +145,8 @@ void App::startBenchmarkWorld() {
 	resetPlayerState();
 	world.open(BENCH_SEED, nullptr);
 	playingSeed = BENCH_SEED;
+	const int ground = world.generatedSurfaceHeight(static_cast<int>(bench.startXZ.x), static_cast<int>(bench.startXZ.y));
+	bench.height = static_cast<float>(std::max(ground, 62) + 35);
 	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos);
 	gameState.startGameplay();
 	applyGameState();
@@ -648,7 +652,8 @@ void App::collectNameTags(UiFrameModel& model) const {
 //  turning (recorded: streaming, meshing and drawing all at once).
 // ============================================================================
 
-void App::enableBenchmark(const double seconds) {
+void App::enableBenchmark(const double seconds, const glm::vec2 startXZ) {
+	bench.startXZ = startXZ;
 	bench.active   = true;
 	bench.duration = std::max(seconds, BENCH_WARMUP + 1.0);
 	glfwSwapInterval(0);
@@ -678,7 +683,7 @@ void App::runBenchmarkScript() {
 	bench.recording = t >= BENCH_WARMUP;
 
 	const double flying = std::max(0.0, t - BENCH_WARMUP);
-	camera->pos   = glm::vec3(8.0f + static_cast<float>(flying * BENCH_SPEED), 110.0f, 8.0f);
+	camera->pos   = glm::vec3(bench.startXZ.x + static_cast<float>(flying * BENCH_SPEED), bench.height, bench.startXZ.y);
 	// Turning (a full turn every ~14 s), except during the last second of the
 	// warm-up so the screenshot is always taken from exactly the same pose.
 	const double turning = t < BENCH_WARMUP ? std::min(t, BENCH_WARMUP - 1.0) : t - 1.0;

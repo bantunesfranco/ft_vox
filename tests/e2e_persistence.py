@@ -5,6 +5,7 @@ a second server cannot open a world that is in use.
 
 Runs servers in a temporary directory (never touches saves/).
 """
+import math
 import os
 import signal
 import socket
@@ -130,7 +131,8 @@ def login(port):
     login_ok = [p for n, p in msgs if n == "LoginOk"]
     ok(len(login_ok) == 1, "login")
     _, sx, sy, sz = struct.unpack("<Ifff", login_ok[0])
-    client.pump(10, lambda n, p: (0, 0) in client.chunks)
+    spawn_chunk = (math.floor(sx / 16), math.floor(sz / 16))
+    client.pump(10, lambda n, p: spawn_chunk in client.chunks)
     return client, (sx, sy, sz)
 
 
@@ -142,7 +144,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     log = wait_line(server, "listening")
     ok(any("seed 42" in line for line in log), "new world uses --seed 42")
     client, (sx, sy, sz) = login(25621)
-    target = (int(sx // 1), round(sy - EYE) - 1, int(sz // 1))
+    target = (math.floor(sx), round(sy - EYE) - 1, math.floor(sz))
     client.send("BreakBlock", struct.pack("<iii", *target))
     upd = lambda n, p: n == "BlockUpdate" and struct.unpack_from("<iii", p) == target
     got = [p for n, p in client.pump(5, upd) if upd(n, p)]
@@ -170,7 +172,8 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     ok(any("seed 42" in line for line in log), "existing world keeps seed 42")
     client, _ = login(25623)
     lx, lz = target[0] % 16, target[2] % 16
-    ok((0, 0) in client.chunks and block_at(client.chunks[(0, 0)], lx, target[1], lz) == 0,
+    chunk = (target[0] // 16, target[2] // 16)
+    ok(chunk in client.chunks and block_at(client.chunks[chunk], lx, target[1], lz) == 0,
        "edit survived the restart")
     client.close()
     ok(stop_server(server) == 0, "server stops cleanly again")
