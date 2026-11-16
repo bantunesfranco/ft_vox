@@ -1,78 +1,145 @@
 cmake_minimum_required(VERSION 3.18)
 
-# Project name and version
 project(ft_vox VERSION 1.0.0 LANGUAGES C CXX)
 
-# Specify the C++ standard
+# ---------------------------------------------------------------------------
+# Language standard / build type
+# ---------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Set global flags for all build types
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g")
-
-# Create the vendor directory within the project directory
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
-
-# Dependencies
-include(FetchContent)
-
-set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui)
-
-# Fetch ImGui only if not already present
-if(NOT EXISTS ${IMGUI_DIR}/imgui.cpp)
-
-    message(STATUS "ImGui not found locally. Fetching from GitHub...")
-
-    FetchContent_Declare(
-        imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.92.8
-    )
-    FetchContent_MakeAvailable(imgui)
-
-    # Copy fetched source to vendor
-    file(COPY ${imgui_SOURCE_DIR}/ DESTINATION ${IMGUI_DIR})
-
-else()
-    message(STATUS "Using local ImGui in vendor/imgui")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Tell CMake where ImGui is
-set(imgui_SOURCE_DIR ${IMGUI_DIR})
+# ---------------------------------------------------------------------------
+# Optimization: applied before any subproject so everything inherits it
+# ---------------------------------------------------------------------------
 
-# Automatically collect all ImGui source files
-file(GLOB IMGUI_SOURCES
-  "${imgui_SOURCE_DIR}/*.cpp"
-  "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
-  "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp"
-)
+# Optimize Debug builds too (keeps symbols and asserts). Makes header-only
+# GLM fast regardless of build type.
+option(FT_VOX_OPTIMIZE_DEBUG "Optimize Debug builds (keeps -g and asserts)" ON)
+if(FT_VOX_OPTIMIZE_DEBUG)
+    if(MSVC)
+        foreach(var CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG)
+            string(REGEX REPLACE "/RTC[1csu]+" "" ${var} "${${var}}")  # incompatible with /O2
+            string(REGEX REPLACE "/Ob0"        "/Ob2" ${var} "${${var}}")
+            string(REGEX REPLACE "/Od"         "/O2"  ${var} "${${var}}")
+            string(REGEX REPLACE "/ZI"         "/Zi"  ${var} "${${var}}")  # edit-and-continue conflicts with /O2
+            string(REGEX REPLACE "/JMC"        ""     ${var} "${${var}}")
+        endforeach()
+    else()
+        set(CMAKE_C_FLAGS_DEBUG   "-g -O2")
+        set(CMAKE_CXX_FLAGS_DEBUG "-g -O2")
+    endif()
+endif()
 
-# Add ImGui as a static library
-add_library(ImGui STATIC ${IMGUI_SOURCES})
+# Link-time optimization for Release / RelWithDebInfo
+cmake_policy(SET CMP0069 NEW)
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)   # also for subprojects with old cmake_minimum_required
+include(CheckIPOSupported)
+check_ipo_supported(RESULT FT_VOX_IPO_OK OUTPUT FT_VOX_IPO_MSG LANGUAGES C CXX)
+if(FT_VOX_IPO_OK)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE        ON)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+    message(STATUS "LTO/IPO enabled for Release builds")
+else()
+    message(STATUS "LTO/IPO not supported: ${FT_VOX_IPO_MSG}")
+endif()
 
-# Add include directories for ImGui and GLFW
-target_include_directories(ImGui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-target_include_directories(ImGui PUBLIC ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/include)
+# MSVC: parallel compilation
+if(MSVC)
+    add_compile_options(/MP)
+endif()
 
-# Define the executable target for the game
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "srcs/*.cpp")
-file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS "incs/*.hpp")
-add_executable(ft_vox ${SOURCES} ${HEADERS})
-
-# Add the engine directory as a subdirectory
-add_subdirectory(engine)
-
-# Find and link OpenGL
+# ---------------------------------------------------------------------------
+# Host dependency: OpenGL only
+# ---------------------------------------------------------------------------
 find_package(OpenGL REQUIRED)
 
-# Link the ImGui and engine libraries to your executable
-target_link_libraries(ft_vox PRIVATE engine ImGui)
+# ---------------------------------------------------------------------------
+# Sub-projects (engine provides the vendored GLFW, GLM, GLAD, stb)
+# ---------------------------------------------------------------------------
+add_subdirectory(engine)
+add_subdirectory(server)
 
-# Add include directories for the game and engine headers
+if(NOT TARGET glfw)
+    message(FATAL_ERROR "Target 'glfw' not found. Check engine/CMakeLists.txt.")
+endif()
+
+# ---------------------------------------------------------------------------
+# ImGui (fetched into vendor/imgui if missing)
+# ---------------------------------------------------------------------------
+include(FetchContent)
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui)
+
+if(EXISTS ${IMGUI_DIR}/imgui.cpp)
+    message(STATUS "Using local ImGui in vendor/imgui")
+else()
+    message(STATUS "ImGui not found locally. Fetching from GitHub...")
+endif()
+
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.93.0
+    GIT_SHALLOW    TRUE
+    SOURCE_DIR     ${IMGUI_DIR}
+)
+FetchContent_MakeAvailable(imgui)   # no CMakeLists in ImGui: download only
+
+add_library(ImGui STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+)
+
+target_include_directories(ImGui SYSTEM PUBLIC
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
+)
+target_link_libraries(ImGui PUBLIC glfw OpenGL::GL)
+
+# ---------------------------------------------------------------------------
+# Game executable
+# ---------------------------------------------------------------------------
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "srcs/*.cpp")
+file(GLOB_RECURSE HEADERS CONFIGURE_DEPENDS "incs/*.hpp")
+
+add_executable(ft_vox ${SOURCES} ${HEADERS})
+
 target_include_directories(ft_vox PRIVATE ${PROJECT_SOURCE_DIR}/incs)
-target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/incs)
-target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/glfw/include)
-target_include_directories(ft_vox PRIVATE ${CMAKE_SOURCE_DIR}/engine/vendor/stb_image)
+
+# engine (PUBLIC) exports: engine/incs, glfw, glm (+ SIMD flags), glad, stb, OpenGL
+# net (PUBLIC) exports: server/incs, sockets, threads
+target_link_libraries(ft_vox PRIVATE
+    engine
+    net
+    ImGui
+)
+
+# ---------------------------------------------------------------------------
+# Warnings: our own target only, per compiler
+# ---------------------------------------------------------------------------
+if(MSVC)
+    target_compile_options(ft_vox PRIVATE /W4 /WX /permissive-)
+    target_compile_definitions(ft_vox PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_options(ft_vox PRIVATE -Wall -Wextra -Werror)
+endif()
+
+# ---------------------------------------------------------------------------
+# Platform specifics
+# ---------------------------------------------------------------------------
+if(APPLE)
+    # OpenGL is deprecated on macOS; silence it so -Werror doesn't fail the build
+    target_compile_definitions(ImGui PRIVATE GL_SILENCE_DEPRECATION)
+elseif(WIN32)
+    set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ft_vox)
+endif()
