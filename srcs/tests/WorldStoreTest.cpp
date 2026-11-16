@@ -1,0 +1,133 @@
+#include "SelfTest.hpp"
+#include "WorldStore.hpp"
+
+#include <fstream>
+
+namespace fs = std::filesystem;
+
+namespace {
+std::uint64_t fnv1a(std::string_view text) {
+	std::uint64_t h = 14695981039346656037ull;
+	for (const char c : text) {
+		h ^= static_cast<unsigned char>(c);
+		h *= 1099511628211ull;
+	}
+	return h;
+}
+}
+
+SELFTEST(WorldStore, seed_empty_uses_random) {
+	CHECK_EQ(parseSeed("", 7), 7ull);
+	CHECK_EQ(parseSeed("   ", 9), 9ull);
+}
+
+SELFTEST(WorldStore, seed_number) {
+	CHECK_EQ(parseSeed("123", 0), 123ull);
+	CHECK_EQ(parseSeed(" 42 ", 0), 42ull);
+	CHECK_EQ(parseSeed("-1", 0), ~0ull);
+	CHECK_EQ(parseSeed("-0", 5), 0ull);
+}
+
+SELFTEST(WorldStore, seed_text_stable) {
+	CHECK_EQ(parseSeed("potato", 0), parseSeed("potato", 1));
+	CHECK(parseSeed("potato", 0) != parseSeed("potato2", 0));
+	CHECK_EQ(parseSeed("potato", 0), fnv1a("potato"));
+}
+
+SELFTEST(WorldStore, seed_out_of_range_is_text) {
+	CHECK_EQ(parseSeed("99999999999999999999", 0), fnv1a("99999999999999999999"));
+	CHECK_EQ(parseSeed("12a", 0), fnv1a("12a"));
+}
+
+SELFTEST(WorldStore, create_list_delete) {
+	const selftest::TempDir dir;
+	std::string error;
+	auto a = createWorld(dir.path(), "A", "1", error);
+	auto b = createWorld(dir.path(), "B", "", error);
+	CHECK(a.has_value());
+	CHECK(b.has_value());
+	if (!a || !b)
+		return;
+	CHECK_EQ(a->seed, 1ull);
+	CHECK(fs::exists(a->folder / "level.bin"));
+
+	CHECK(markPlayed(*a, error));
+	const auto worlds = listWorlds(dir.path());
+	CHECK_EQ(worlds.size(), std::size_t{2});
+	if (worlds.size() == 2) {
+		CHECK_EQ(worlds[0].name, std::string("A"));   // just played
+		CHECK_EQ(worlds[0].seed, 1ull);
+	}
+
+	CHECK(deleteWorld(*b, error));
+	CHECK(!fs::exists(b->folder));
+	CHECK(fs::exists(a->folder));
+	CHECK_EQ(listWorlds(dir.path()).size(), std::size_t{1});
+}
+
+SELFTEST(WorldStore, same_name_gets_unique_folder) {
+	const selftest::TempDir dir;
+	std::string error;
+	auto first = createWorld(dir.path(), "Test", "", error);
+	auto second = createWorld(dir.path(), "Test", "", error);
+	CHECK(first && second);
+	if (first && second) {
+		CHECK(first->folder != second->folder);
+		CHECK_EQ(second->name, std::string("Test"));   // display name kept
+	}
+}
+
+SELFTEST(WorldStore, bad_names_stay_inside) {
+	const selftest::TempDir dir;
+	const std::string names[] = {"", "CON", "a/b", "..", "   ", std::string(200, 'x'), "w\xC3\xB6rld", "nul", "COM1"};
+	for (const std::string& name : names) {
+		std::string error;
+		const auto world = createWorld(dir.path(), name, "", error);
+		CHECK(world.has_value());
+		if (!world)
+			continue;
+		CHECK_EQ(world->folder.parent_path(), dir.path());
+		CHECK(fs::is_directory(world->folder));
+		const std::string folderName = world->folder.filename().string();
+		CHECK(folderName != "." && folderName != ".." && !folderName.empty());
+		CHECK(folderName.size() <= 40);
+	}
+	CHECK_EQ(listWorlds(dir.path()).size(), std::size(names));
+}
+
+SELFTEST(WorldStore, damaged_level_listed_unreadable) {
+	const selftest::TempDir dir;
+	std::string error;
+	const auto world = createWorld(dir.path(), "Broken", "5", error);
+	CHECK(world.has_value());
+	if (!world)
+		return;
+	std::ofstream(world->folder / "level.bin", std::ios::binary | std::ios::trunc) << "abc";
+	const auto worlds = listWorlds(dir.path());
+	CHECK_EQ(worlds.size(), std::size_t{1});
+	if (!worlds.empty())
+		CHECK(!worlds[0].readable);
+}
+
+SELFTEST(WorldStore, open_or_create) {
+	const selftest::TempDir dir;
+	std::string error;
+	const auto created = openOrCreateWorld(dir.path() / "server", 77, error);
+	CHECK(created && created->seed == 77);
+	const auto reopened = openOrCreateWorld(dir.path() / "server", 99, error);
+	CHECK(reopened && reopened->seed == 77);   // existing seed wins
+}
+
+SELFTEST(WorldStore, lock_is_exclusive) {
+	const selftest::TempDir dir;
+	std::string error;
+	auto first = WorldLock::acquire(dir.path(), error);
+	CHECK(first != nullptr);
+	std::string secondError;
+	auto second = WorldLock::acquire(dir.path(), secondError);
+	CHECK(second == nullptr);
+	CHECK(!secondError.empty());
+	first.reset();
+	auto third = WorldLock::acquire(dir.path(), error);
+	CHECK(third != nullptr);
+}

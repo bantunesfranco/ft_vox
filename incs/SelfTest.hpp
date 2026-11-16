@@ -15,10 +15,23 @@
 //  the failure and the test keeps running; an exception fails the test.
 // ============================================================================
 
+#include <filesystem>
 #include <sstream>
 #include <string>
 
 namespace selftest {
+
+// A fresh directory under the system temp dir, removed when destroyed.
+class TempDir {
+public:
+	TempDir();
+	~TempDir();
+	TempDir(const TempDir&)            = delete;
+	TempDir& operator=(const TempDir&) = delete;
+	[[nodiscard]] const std::filesystem::path& path() const noexcept { return _path; }
+private:
+	std::filesystem::path _path;
+};
 
 using TestFn = void (*)();
 
