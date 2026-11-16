@@ -83,9 +83,9 @@ Renderer::Renderer() {
     if (samplerLoc >= 0)
         glUniform1i(samplerLoc, 0);
 
-    _chunkPositionLocation = glGetUniformLocation(_shaderprog, "uChunkPosition");
     _atlasRectsLocation = glGetUniformLocation(_shaderprog, "uTextureRects");
     _highlightPassLocation = glGetUniformLocation(_shaderprog, "uHighlightPass");
+    _boxSizeLocation = glGetUniformLocation(_shaderprog, "uBoxSize");
 
     glUseProgram(0);
 
@@ -103,6 +103,10 @@ Renderer::~Renderer() {
         glDeleteVertexArrays(1, &_boundsVao);
     if (_cameraUBO)
         glDeleteBuffers(1, &_cameraUBO);
+    if (_indirectBuffer)
+        glDeleteBuffers(1, &_indirectBuffer);
+    if (_instanceBuffer)
+        glDeleteBuffers(1, &_instanceBuffer);
 
     if (_ibo)
         glDeleteBuffers(1, &_ibo);
@@ -122,8 +126,10 @@ void Renderer::createBuffers() {
     glGenVertexArrays(1, &_vao);
     glGenBuffers(1, &_vbo);
     glGenBuffers(1, &_ibo);
+    glGenBuffers(1, &_indirectBuffer);
+    glGenBuffers(1, &_instanceBuffer);
 
-    if (!_vao || !_vbo || !_ibo)
+    if (!_vao || !_vbo || !_ibo || !_indirectBuffer || !_instanceBuffer)
         throw Engine::EngineException(VOX_GLADFAIL);
 
     _vertexBufferCapacity = INITIAL_VERTEX_BUFFER_SIZE;
@@ -171,6 +177,12 @@ void Renderer::createVertexLayout() {
         sizeof(PackedVertex),
         nullptr
     );
+
+    // Chunk position, one per draw: divisor 1 + baseInstance = draw index.
+    glBindBuffer(GL_ARRAY_BUFFER, _instanceBuffer);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
+    glVertexAttribDivisor(1, 1);
 
     glBindVertexArray(0);
 }
@@ -327,8 +339,8 @@ std::optional<std::string> Renderer::loadShaderCode(const char* path) {
     std::ifstream file(path);
 
     if (!file.is_open()) {
-        std::cerr << "Failed to open shader file: " << path << std::endl;
-        std::cerr << file.exceptions() <<std::endl;
+        std::cerr << "Failed to open shader file: " << path
+                  << " (run the game from the project root)" << std::endl;
 
         return std::nullopt;
     }
@@ -499,82 +511,80 @@ void Renderer::releaseMesh(GpuMesh& gpuMesh) {
     gpuMesh = {};
 }
 
-void Renderer::renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPosition) const {
-    if (!gpuMesh.uploaded || gpuMesh.indexCount == 0)
+void Renderer::drawBatch(const std::vector<DrawItem>& items) {
+    _commands.clear();
+    _positions.clear();
+    for (const DrawItem& item : items) {
+        const GpuMesh& mesh = *item.mesh;
+        if (!mesh.uploaded || mesh.indexCount == 0)
+            continue;
+        // {count, instanceCount, firstIndex, baseVertex, baseInstance}
+        _commands.push_back({mesh.indexCount, 1u, mesh.indexOffset, mesh.vertexOffset,
+                             static_cast<std::uint32_t>(_positions.size())});
+        _positions.push_back(item.position);
+    }
+    if (_commands.empty())
         return;
+
+    // Orphan + refill: the driver hands out fresh storage, no stall on the GPU
+    // still reading last frame's (or the previous batch's) data.
+    glNamedBufferData(_instanceBuffer, static_cast<GLsizeiptr>(_positions.size() * sizeof(glm::vec3)),
+                      _positions.data(), GL_STREAM_DRAW);
+    glNamedBufferData(_indirectBuffer, static_cast<GLsizeiptr>(_commands.size() * sizeof(_commands[0])),
+                      _commands.data(), GL_STREAM_DRAW);
 
     glUseProgram(_shaderprog);
     glBindVertexArray(_vao);
-
     if (_highlightPassLocation >= 0)
         glUniform1i(_highlightPassLocation, GL_FALSE);
-
-    if (_chunkPositionLocation >= 0)
-        glUniform3fv(_chunkPositionLocation, 1, glm::value_ptr(worldPosition));
-
     glBindTextureUnit(0, _textureAtlas);
-
-    const auto indexOffset = static_cast<std::uintptr_t>(gpuMesh.indexOffset * sizeof(std::uint32_t));
-
-    glDrawElementsBaseVertex(
-        GL_TRIANGLES,
-        static_cast<GLsizei>(gpuMesh.indexCount),
-        GL_UNSIGNED_INT,
-        reinterpret_cast<const void*>(indexOffset),
-        static_cast<GLint>(gpuMesh.vertexOffset)
-    );
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _indirectBuffer);
+    glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, nullptr,
+                                static_cast<GLsizei>(_commands.size()), 0);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 }
 
+// Outline of an axis-aligned box of any (fractional) size: a unit cube,
+// uploaded once, scaled by uBoxSize in the vertex shader.
 void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos) {
-    if (!_boundsVao) {
-        glGenVertexArrays(1, &_boundsVao);
-        glGenBuffers(1, &_boundsVbo);
-        glGenBuffers(1, &_boundsIbo);
-
-        glBindVertexArray(_boundsVao);
-        glBindBuffer(GL_ARRAY_BUFFER, _boundsVbo);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _boundsIbo);
-        glEnableVertexAttribArray(0);
-        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), nullptr);
-        glBindVertexArray(0);
-    }
-
-    const auto extent = [](const float minValue, const float maxValue) {
-        return static_cast<std::uint8_t>(std::clamp(
-            static_cast<int>(std::round(maxValue - minValue)),
-            1,
-            31
-        ));
-    };
-    const std::uint8_t x = extent(minPos.x, maxPos.x);
-    const std::uint8_t y = extent(minPos.y, maxPos.y);
-    const std::uint8_t z = extent(minPos.z, maxPos.z);
-    const std::array<PackedVertex, 8> vertices = {{
-        packVertex(0, 0, 0, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(x, 0, 0, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(x, y, 0, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(0, y, 0, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(0, 0, z, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(x, 0, z, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(x, y, z, NormalDir::PositiveY, 0, 3, 0),
-        packVertex(0, y, z, NormalDir::PositiveY, 0, 3, 0)
-    }};
     static constexpr std::array<std::uint32_t, 24> indices = {{
         0, 1, 1, 2, 2, 3, 3, 0,
         4, 5, 5, 6, 6, 7, 7, 4,
         0, 4, 1, 5, 2, 6, 3, 7
     }};
 
-    glBindVertexArray(_boundsVao);
-    glBindBuffer(GL_ARRAY_BUFFER, _boundsVbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices.data(), GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _boundsIbo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices.data(), GL_STATIC_DRAW);
+    if (!_boundsVao) {
+        static constexpr std::array<PackedVertex, 8> vertices = {{
+            packVertex(0, 0, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 0, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 1, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(0, 1, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(0, 0, 1, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 0, 1, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 1, 1, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(0, 1, 1, NormalDir::PositiveY, 0, 3, 0)
+        }};
 
-    glUseProgram(_shaderprog);
-    if (_chunkPositionLocation >= 0) {
-        glUniform3fv(_chunkPositionLocation, 1, glm::value_ptr(minPos));
+        glGenVertexArrays(1, &_boundsVao);
+        glGenBuffers(1, &_boundsVbo);
+        glGenBuffers(1, &_boundsIbo);
+
+        glBindVertexArray(_boundsVao);
+        glBindBuffer(GL_ARRAY_BUFFER, _boundsVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _boundsIbo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices.data(), GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), nullptr);
     }
+
+    const glm::vec3 size = glm::max(maxPos - minPos, glm::vec3(0.01f));
+
+    glBindVertexArray(_boundsVao);
+    glUseProgram(_shaderprog);
+    glVertexAttrib3fv(1, glm::value_ptr(minPos));   // attribute 1 has no array in this VAO
+    if (_boxSizeLocation >= 0)
+        glUniform3fv(_boxSizeLocation, 1, glm::value_ptr(size));
     if (_highlightPassLocation >= 0)
         glUniform1i(_highlightPassLocation, GL_TRUE);
     glBindTextureUnit(0, _textureAtlas);
@@ -618,14 +628,14 @@ void Renderer::initProjectionMatrix(
 
     const float ratio = static_cast<float>(width) / static_cast<float>(height);
 
+    // The caller clears at the start of the frame; clearing here too would
+    // just repeat it.
     glViewport(
         0,
         0,
         width,
         height
     );
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     camera->view =
         glm::lookAt(

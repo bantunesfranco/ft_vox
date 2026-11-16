@@ -139,122 +139,30 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 
 }
 
+// Loads an RGBA texture with mipmaps. Throws (and leaks nothing) on failure.
 GLuint Engine::loadTexture(const char* path) {
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-	if (glGetError() != GL_NO_ERROR)
+	int width = 0, height = 0, channels = 0;
+	unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
+	if (!data)
 		throw EngineException(VOX_TEXTFAIL);
 
-    // Load texture image here
-    int width, height, channels;
-    unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
-
-    if (!data)
-	{
-		throw EngineException(VOX_TEXTFAIL);
-	}
-
+	GLuint textureID = 0;
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glGenerateMipmap(GL_TEXTURE_2D);
 	stbi_image_free(data);
+	glGenerateMipmap(GL_TEXTURE_2D);
 
-	if (glGetError() != GL_NO_ERROR)
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	if (glGetError() != GL_NO_ERROR) {
+		glDeleteTextures(1, &textureID);
 		throw EngineException(VOX_TEXTFAIL);
-
-    // Set texture parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	if (glGetError() != GL_NO_ERROR)
-		throw EngineException(VOX_TEXTFAIL);
-
-    return textureID;
-}
-
-GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outWidth, int& outHeight) {
-	int width, height, channels;
-
-	stbi_uc* first = stbi_load(
-		paths[0].c_str(),
-		&width, &height,
-		&channels,
-		STBI_rgb_alpha
-	);
-
-	if (!first)
-		throw EngineException(VOX_TEXTFAIL);
-
-	outWidth  = width;
-	outHeight = height;
-
-	const GLsizei mipLevels = 1 + static_cast<GLsizei>(
-		std::floor(std::log2(std::max(width, height)))
-	);
-
-	GLuint texArray;
-	glCreateTextures(GL_TEXTURE_2D_ARRAY, 1, &texArray);
-
-	glTextureStorage3D(
-		texArray,
-		mipLevels,
-		GL_RGBA8,
-		width, height,
-		static_cast<GLsizei>(paths.size())
-	);
-
-	glTextureSubImage3D(
-		texArray,
-		0,
-		0, 0, 0,
-		width, height,
-		1,
-		GL_RGBA,
-		GL_UNSIGNED_BYTE,
-		first
-	);
-
-	stbi_image_free(first);
-
-	for (size_t i = 1; i < paths.size(); ++i)
-	{
-		stbi_uc* data = stbi_load(
-			paths[i].c_str(),
-			&width, &height,
-			&channels,
-			STBI_rgb_alpha
-		);
-
-		if (!data)
-			throw EngineException(VOX_TEXTFAIL);
-
-		if (width != outWidth || height != outHeight)
-			throw EngineException(VOX_TEXTFAIL); // mismatched texture dimensions
-
-		glTextureSubImage3D(
-			texArray,
-			0,
-			0, 0, static_cast<GLint>(i),
-			width, height,
-			1,
-			GL_RGBA,
-			GL_UNSIGNED_BYTE,
-			data
-		);
-
-		stbi_image_free(data);
 	}
-
-	glGenerateTextureMipmap(texArray);
-
-	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
-	glTextureParameteri(texArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTextureParameteri(texArray, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTextureParameteri(texArray, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-	return texArray;
+	return textureID;
 }
 
 void	Engine::toggleWireframe(const bool showWireframe)

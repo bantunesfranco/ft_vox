@@ -17,7 +17,6 @@ class Camera
 		glm::vec3	up;
 		float		pitch{};
 		float		yaw{};
-		double		mousePos[2];
 		float		fov;
 		glm::mat4	view{};
 		glm::mat4	proj{};
@@ -26,14 +25,6 @@ class Camera
 		float baseRotSpeed;
 		float moveSpeed{};
 		float rotSpeed{};
-
-		glm::vec3 lastPosition;
-		glm::vec3 lastDirection;
-		float rotationThreshold;
-		float movementThreshold;
-
-		void setCameraPosition(const glm::vec3& newPos);
-		void setCameraDirection(const glm::vec3& newDir);
 };
 
 #endif

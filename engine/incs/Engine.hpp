@@ -16,8 +16,6 @@
 #define VOX_ASSERT(val, str) assert(val && str);
 #define VOX_NONNULL(val) assert(val && "Value cannot be null");
 
-constexpr double BLOCK_SIZE = 1.0f;
-
 #include <memory>
 
 class FPSCounter {
@@ -94,7 +92,6 @@ class Engine
 		void				closeWindow() const;
 		[[nodiscard]] bool	isKeyDown(keys_t key) const;
 		static GLuint		loadTexture(const char* path);
-		static GLuint		loadTextureArray(const std::vector<std::string>& paths, int& outWidth, int& outHeight);
 		static void			toggleWireframe(bool showWireframe);
 };
 

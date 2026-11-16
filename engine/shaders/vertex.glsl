@@ -1,6 +1,9 @@
 #version 450 core
 
 layout(location = 0) in uint aPackedVertex;
+// Per draw (instanced attribute, selected by baseInstance in multi-draw).
+// Draws without the array enabled read the value set by glVertexAttrib3f.
+layout(location = 1) in vec3 aChunkPosition;
 
 layout(std140, binding = 0) uniform WorldUBO
 {
@@ -9,8 +12,8 @@ layout(std140, binding = 0) uniform WorldUBO
     vec4 ambientData; // x = ambient
 };
 
-uniform vec3 uChunkPosition;
 uniform bool uHighlightPass;
+uniform vec3 uBoxSize;        // highlight pass: size of the unit-cube outline
 
 out vec2 vUV;
 out vec3 vNormal;
@@ -49,9 +52,11 @@ void main()
     uint ao = (data >> 28u) & 0x03u;
 
     vec3 localPos = vec3(x, y, z);
+    // Outline: scale the unit cube to the box, grown by 1% around its center
+    // so it does not z-fight with the faces it surrounds.
     if (uHighlightPass)
-        localPos = localPos * 1.01 - vec3(0.005);
-    vec3 worldPos = localPos + uChunkPosition;
+        localPos = (localPos - vec3(0.5)) * uBoxSize * 1.01 + uBoxSize * 0.5;
+    vec3 worldPos = localPos + aChunkPosition;
 
     gl_Position = MVP * vec4(worldPos, 1.0);
 

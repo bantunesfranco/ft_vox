@@ -37,6 +37,12 @@ struct GpuMesh {
 };
 
 
+// One mesh to draw at a world position (see Renderer::drawBatch).
+struct DrawItem {
+    const GpuMesh* mesh = nullptr;
+    glm::vec3 position{0.0f};
+};
+
 class GpuStorage
 {
 public:
@@ -68,9 +74,15 @@ private:
     GLuint _cameraUBO = 0;
     GLuint _textureAtlas = 0;
 
-    GLint _chunkPositionLocation = -1;
     GLint _atlasRectsLocation = -1;
     GLint _highlightPassLocation = -1;
+    GLint _boxSizeLocation = -1;
+    // Multi-draw: one indirect command and one chunk position per draw.
+    GLuint _indirectBuffer = 0;
+    GLuint _instanceBuffer = 0;
+    std::vector<std::array<std::uint32_t, 5>> _commands;   // DrawElementsIndirectCommand
+    std::vector<glm::vec3> _positions;
+
     GLuint _boundsVao = 0;
     GLuint _boundsVbo = 0;
     GLuint _boundsIbo = 0;
@@ -129,7 +141,9 @@ public:
     void uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh);
     void releaseMesh(GpuMesh& gpuMesh);
 
-    void renderMesh(const GpuMesh& gpuMesh, const glm::vec3& worldPositio) const;
+    // Draws every item with ONE glMultiDrawElementsIndirect call, in order
+    // (so a back-to-front sorted transparent batch stays sorted).
+    void drawBatch(const std::vector<DrawItem>& items);
     void beginTransparentPass() const;
     void endTransparentPass() const;
 
