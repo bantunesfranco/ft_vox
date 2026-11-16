@@ -71,6 +71,9 @@ deps               = ["engine", "net", "imgui"]
 warnings           = "high"
 warnings_as_errors = true
 defines.windows    = ["_CRT_SECURE_NO_WARNINGS"]
+# Generated terrain must be bit-identical on every build: no FMA contraction
+# (MSVC's default /fp:precise already guarantees it).
+flags.gcc_like     = ["-ffp-contract=off"]
 
 # Connects to a running server: `netclient_test <port>` (see tests/).
 [bin.netclient_test]

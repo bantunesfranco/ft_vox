@@ -139,7 +139,8 @@ if(MSVC)
     target_compile_options(ft_vox PRIVATE /W4 /WX /permissive-)
     target_compile_definitions(ft_vox PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
-    target_compile_options(ft_vox PRIVATE -Wall -Wextra -Werror)
+    # -ffp-contract=off: generated terrain is bit-identical on every build (no FMA).
+    target_compile_options(ft_vox PRIVATE -Wall -Wextra -Werror -ffp-contract=off)
 endif()
 
 # ---------------------------------------------------------------------------
