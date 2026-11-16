@@ -1,4 +1,5 @@
 #include "Block.hpp"
+#include "BlockTextures.hpp"
 
 BlockRegistry::BlockRegistry() noexcept {
     /*
@@ -21,6 +22,7 @@ BlockRegistry::BlockRegistry() noexcept {
     _definitions[toBlockId(BlockType::Air)] = {
         .opaque = false,
         .transparent = true,
+        .solid = false,
         .textureTop = 0,
         .textureBottom = 0,
         .textureSide = 0
@@ -74,6 +76,7 @@ BlockRegistry::BlockRegistry() noexcept {
     _definitions[toBlockId(BlockType::Water)] = {
         .opaque = false,
         .transparent = true,
+        .solid = false,
         .textureTop = 6,
         .textureBottom = 6,
         .textureSide = 6
@@ -93,6 +96,41 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureTop = 8,
         .textureBottom = 8,
         .textureSide = 8
+    };
+
+    // Generated textures (BlockTextures), not from the atlas image.
+    using BlockTextures::Texture;
+    using BlockTextures::index;
+    const auto cube = [this](const BlockType type, const Texture top, const Texture bottom, const Texture side) {
+        _definitions[toBlockId(type)] = {
+            .opaque = true, .transparent = false, .solid = true,
+            .textureTop = index(top), .textureBottom = index(bottom), .textureSide = index(side)
+        };
+    };
+    cube(BlockType::OakLog,    Texture::OakLogTop,    Texture::OakLogTop,    Texture::OakLogSide);
+    cube(BlockType::BirchLog,  Texture::BirchLogTop,  Texture::BirchLogTop,  Texture::BirchLogSide);
+    cube(BlockType::SpruceLog, Texture::SpruceLogTop, Texture::SpruceLogTop, Texture::SpruceLogSide);
+    cube(BlockType::Gravel,    Texture::Gravel,       Texture::Gravel,       Texture::Gravel);
+    cube(BlockType::Clay,      Texture::Clay,         Texture::Clay,         Texture::Clay);
+    cube(BlockType::Cactus,    Texture::CactusTop,    Texture::CactusTop,    Texture::CactusSide);
+    cube(BlockType::Sandstone, Texture::SandstoneTop, Texture::SandstoneBottom, Texture::SandstoneSide);
+
+    // Leaves: solid, but see-through holes (alpha cut-out in the opaque pass),
+    // so they hide nothing behind them.
+    const auto leaves = [this](const BlockType type, const Texture texture) {
+        _definitions[toBlockId(type)] = {
+            .opaque = false, .transparent = false, .solid = true,
+            .textureTop = index(texture), .textureBottom = index(texture), .textureSide = index(texture)
+        };
+    };
+    leaves(BlockType::OakLeaves,    Texture::OakLeaves);
+    leaves(BlockType::BirchLeaves,  Texture::BirchLeaves);
+    leaves(BlockType::SpruceLeaves, Texture::SpruceLeaves);
+
+    // Ice: solid, blended like water.
+    _definitions[toBlockId(BlockType::Ice)] = {
+        .opaque = false, .transparent = true, .solid = true,
+        .textureTop = index(Texture::Ice), .textureBottom = index(Texture::Ice), .textureSide = index(Texture::Ice)
     };
 }
 

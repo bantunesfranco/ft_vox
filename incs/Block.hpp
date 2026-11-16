@@ -15,6 +15,18 @@ enum class BlockType : std::uint8_t {
     Water,
     Snow,
     Bedrock,
+    // Ids are saved in worlds: only ever append.
+    OakLog,
+    BirchLog,
+    SpruceLog,
+    OakLeaves,
+    BirchLeaves,
+    SpruceLeaves,
+    Gravel,
+    Clay,
+    Cactus,
+    Sandstone,
+    Ice,
 
     Count
 };
@@ -37,8 +49,9 @@ constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Cou
 
 
 struct BlockDefinition {
-    bool opaque = true;
-    bool transparent = false;
+    bool opaque = true;        // hides the faces of its neighbours (and casts AO)
+    bool transparent = false;  // drawn in the blended pass (water, ice)
+    bool solid = true;         // the player collides with it
 
     // Texture-array layer indices.
     //

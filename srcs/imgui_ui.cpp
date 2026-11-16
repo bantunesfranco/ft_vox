@@ -3,6 +3,9 @@
 #include <cstdint>
 
 #include "ImGuiUI.hpp"
+#include "Block.hpp"
+#include "BlockTextures.hpp"
+#include "Item.hpp"
 
 #include <glad/glad.h>
 #include <imgui.h>
@@ -73,8 +76,17 @@ AtlasRect itemIcon(const ItemId item) {
         case ItemId::Sand: return {1440.0f, 1216.0f, 16.0f, 16.0f};
         case ItemId::AmethystBlock: return {512.0f, 288.0f, 16.0f, 16.0f};
         case ItemId::Snow: return {672.0f, 1312.0f, 16.0f, 16.0f};
-        default: return {};
+        default: break;
     }
+    // Blocks with generated textures: their side texture in the atlas.
+    static const BlockRegistry registry;
+    const BlockId block = ItemRegistry::get(item).placedBlock;
+    const std::uint16_t texture = registry.get(block).textureSide;
+    if (texture >= BlockTextures::FIRST_GENERATED) {
+        const auto spot = BlockTextures::atlasSpot(texture);
+        return {static_cast<float>(spot.x), static_cast<float>(spot.y), 16.0f, 16.0f};
+    }
+    return {};
 }
 
 void drawStack(const UiItemStack& stack, const ImVec2 min, const float slotSize,

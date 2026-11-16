@@ -9,6 +9,13 @@ constexpr std::array<ItemDefinition, static_cast<std::size_t>(ItemId::Count)> DE
 	{"Sand", toBlockId(BlockType::Sand), 64},
 	{"Amethyst Block", toBlockId(BlockType::Amethyst), 64},
 	{"Snow", toBlockId(BlockType::Snow), 64},
+	{"Oak Log", toBlockId(BlockType::OakLog), 64},
+	{"Birch Log", toBlockId(BlockType::BirchLog), 64},
+	{"Spruce Log", toBlockId(BlockType::SpruceLog), 64},
+	{"Gravel", toBlockId(BlockType::Gravel), 64},
+	{"Clay", toBlockId(BlockType::Clay), 64},
+	{"Cactus", toBlockId(BlockType::Cactus), 64},
+	{"Sandstone", toBlockId(BlockType::Sandstone), 64},
 }};
 }
 
@@ -25,6 +32,13 @@ ItemId ItemRegistry::fromBlock(const BlockId block) noexcept {
 		case BlockType::Sand: return ItemId::Sand;
 		case BlockType::Amethyst: return ItemId::AmethystBlock;
 		case BlockType::Snow: return ItemId::Snow;
+		case BlockType::OakLog: return ItemId::OakLog;
+		case BlockType::BirchLog: return ItemId::BirchLog;
+		case BlockType::SpruceLog: return ItemId::SpruceLog;
+		case BlockType::Gravel: return ItemId::Gravel;
+		case BlockType::Clay: return ItemId::Clay;
+		case BlockType::Cactus: return ItemId::Cactus;
+		case BlockType::Sandstone: return ItemId::Sandstone;
 		default: return ItemId::Empty;
 	}
 }

@@ -15,6 +15,7 @@
 #include "ThreadPool.hpp"
 #include "PlayerCollision.hpp"
 #include "ImGuiUI.hpp"
+#include "BlockTextures.hpp"
 #include "Protocol.hpp"
 #include "RemoteSession.hpp"
 
@@ -43,7 +44,7 @@ bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
 		for (int z = minZ; z <= maxZ; ++z) {
 			for (int x = minX; x <= maxX; ++x) {
 				BlockId block = AIR_BLOCK;
-				if (!world.getBlockAt({x, y, z}, block) || world.getBlockRegistry().isOpaque(block))
+				if (!world.getBlockAt({x, y, z}, block) || world.getBlockRegistry().get(block).solid)
 					return true;
 			}
 		}
@@ -883,6 +884,17 @@ void App::loadTextures() {
 		atlasRects[6] = spriteRect(480, 1504);  // water_still
 		atlasRects[7] = spriteRect(672, 1312);  // snow
 		atlasRects[8] = spriteRect(704, 240);   // bedrock
+
+		// Generated textures go into the empty bottom of the atlas.
+		const auto generated = BlockTextures::generate();
+		for (std::size_t i = 0; i < generated.size(); ++i) {
+			const auto index = static_cast<std::uint16_t>(BlockTextures::FIRST_GENERATED + i);
+			const auto spot = BlockTextures::atlasSpot(index);
+			glTextureSubImage2D(textureAtlas, 0, spot.x, spot.y, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, generated[i].data());
+			atlasRects[index] = glm::vec4(static_cast<float>(spot.x) / atlasSize, static_cast<float>(spot.y) / atlasSize,
+			                              16.0f / atlasSize, 16.0f / atlasSize);
+		}
+		glGenerateTextureMipmap(textureAtlas);
 
 		renderer->setTextureAtlas(textureAtlas);
 		renderer->setAtlasRects(atlasRects);

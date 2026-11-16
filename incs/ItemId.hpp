@@ -11,6 +11,13 @@ enum class ItemId : std::uint8_t {
 	Sand,
 	AmethystBlock,
 	Snow,
+	OakLog,
+	BirchLog,
+	SpruceLog,
+	Gravel,
+	Clay,
+	Cactus,
+	Sandstone,
 	Count,
 };
 
