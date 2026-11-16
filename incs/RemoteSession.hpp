@@ -23,9 +23,9 @@
 //
 //  The wire contract is in Protocol.hpp.
 //
-//  While it exists, the World does not persist edits (setPersistence(false))
-//  and holds only what the server sent: the constructor and destructor both
-//  clear() it, so no terrain leaks between singleplayer and a server.
+//  While it exists, the World holds only what the server sent and is never
+//  saved: the constructor and destructor both open() it without a store, so
+//  no terrain leaks between singleplayer and a server.
 // ============================================================================
 
 #include <chrono>

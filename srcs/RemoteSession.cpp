@@ -29,8 +29,7 @@ float angleDelta(const float from, const float to) noexcept {
 
 RemoteSession::RemoteSession(World& world, const BlockSystem& blocks, RemoteConfig config)
 	: _world(world), _blocks(blocks), _config(std::move(config)) {
-	_world.clear();                       // only the server's terrain from now on
-	_world.setPersistence(false);         // and never written to our saves/
+	_world.open(0, nullptr);              // only the server's terrain from now on, never saved
 
 	if (!_net.connect(_config.host, _config.port, _config.playerName))
 		fail(_net.error());
@@ -38,8 +37,7 @@ RemoteSession::RemoteSession(World& world, const BlockSystem& blocks, RemoteConf
 
 RemoteSession::~RemoteSession() {
 	_net.close();
-	_world.clear();                       // the next session starts from an empty world
-	_world.setPersistence(true);
+	_world.open(0, nullptr);              // the next session starts from an empty world
 }
 
 // ============================================================================

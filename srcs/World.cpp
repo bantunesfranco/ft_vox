@@ -14,6 +14,7 @@
 #include <glm/gtx/hash.hpp>
 
 #include "FrameProfiler.hpp"
+#include "RegionStore.hpp"
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
@@ -563,8 +564,7 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
         invalidateMeshLocked({affectedChunkX, affectedChunkZ});
     }
 
-    if (persistence)
-        saveChunk({chunkX, chunkZ}, {localX, worldPos.y, localZ}, block);
+    dirty.insert({chunkX, chunkZ});
 
     return true;
 }
@@ -599,6 +599,7 @@ void World::clear() {
     }
     generatingChunks.clear();
     chunks.clear();
+    dirty.clear();
     playerChunk = {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
 }
 
@@ -620,71 +621,54 @@ void World::adoptColumn(std::unique_ptr<ChunkColumn> column) {
 void World::dropColumn(const ChunkCoord& coord) {
     std::lock_guard lock(chunk_mutex);
     chunks.erase(coord);                             // pruneRenderStates() retires its meshes
+    dirty.erase(coord);
 }
 
-void World::saveChunk(const ChunkCoord& coord, const glm::ivec3& localPos, BlockId block) const {
-    const std::filesystem::path savePath = "saves/world/chunk_" + std::to_string(coord.x) + "_" + std::to_string(coord.z) + ".bin";
-
-    if (!std::filesystem::exists(savePath)) {
-        std::filesystem::create_directories(savePath.parent_path());
-    }
-
-    // Open in binary mode with append
-    std::ofstream saveFile(savePath, std::ios::binary | std::ios::app);
-    if (!saveFile.is_open()) {
-        std::cerr << "Failed to open chunk save file: " << savePath << std::endl;
-        return;
-    }
-
-    // Write the raw bytes of the glm::ivec3 (contains 3 ints = 12 bytes)
-    saveFile.write(reinterpret_cast<const char*>(&localPos), sizeof(localPos));
-
-    // Write the raw bytes of the block ID
-    saveFile.write(reinterpret_cast<const char*>(&block), sizeof(block));
-
-    saveFile.close();
+void World::open(const std::uint64_t seed, std::shared_ptr<RegionStore> newStore) {
+    clear();
+    std::lock_guard lock(chunk_mutex);
+    worldSeed = seed;
+    store = std::move(newStore);
 }
 
-std::unordered_map<glm::ivec3, BlockId> World::loadChunk(const ChunkCoord& coord) const {
-    std::unordered_map<glm::ivec3, BlockId> blocks{};
-
-    const std::filesystem::path savePath = "saves/world/chunk_" + std::to_string(coord.x) + "_" + std::to_string(coord.z) + ".bin";
-    if (!std::filesystem::exists(savePath))
-        return blocks;
-
-    std::ifstream saveFile(savePath, std::ios::binary);
-    if (!saveFile.is_open())
-        throw std::runtime_error("Failed to open chunk save file: " + savePath.string());
-
-    // Temporary variables to hold the data we read per block
-    glm::ivec3 localPos;
-    BlockId block;
-
-    // Loop directly by attempting to read the first piece of data (localPos)
-    while (saveFile.read(reinterpret_cast<char*>(&localPos), sizeof(localPos))) {
-
-        // Read the remaining parameters in the exact same order they were saved
-        if (!saveFile.read(reinterpret_cast<char*>(&block), sizeof(block))) {
-            // File might be corrupted or cut short mid-block write
-            std::cerr << "Warning: Corrupted block entry encountered in " << savePath << std::endl;
-            break;
+void World::enqueueSave(ThreadPool& threadPool, ColumnPtr column) {
+    {
+        std::lock_guard lock(saveMutex);
+        ++savesInFlight;
+    }
+    threadPool.enqueueFireAndForget([this, columnStore = store, column = std::move(column)] {
+        {
+            Trace::Scope span("save column");
+            if (!columnStore->save(*column))
+                std::cerr << "Failed to save chunk " << column->coord().x << ", " << column->coord().z << std::endl;
         }
-
-        if (localPos.x < 0 || localPos.x >= ChunkSection::SIZE
-            || localPos.y < ChunkColumn::MIN_WORLD_Y || localPos.y >= ChunkColumn::MAX_WORLD_Y
-            || localPos.z < 0 || localPos.z >= ChunkSection::SIZE
-            || block >= BLOCK_TYPE_COUNT) {
-            std::cerr << "Warning: Invalid block entry encountered in " << savePath << std::endl;
-            continue;
-        }
-
-        blocks[localPos] = block;
-    }
-
-    saveFile.close();
-    return blocks;
+        std::lock_guard lock(saveMutex);
+        --savesInFlight;
+        saveDone.notify_all();
+    });
 }
 
+void World::flush(ThreadPool& threadPool) {
+    {
+        std::lock_guard lock(chunk_mutex);
+        if (store) {
+            for (const ChunkCoord& coord : dirty) {
+                const auto it = chunks.find(coord);
+                if (it != chunks.end())
+                    enqueueSave(threadPool, it->second);
+            }
+        }
+        dirty.clear();
+    }
+    std::unique_lock lock(saveMutex);
+    saveDone.wait(lock, [this] { return savesInFlight == 0; });
+}
+
+World::~World() {
+    // Save jobs point at this World: never let one outlive it.
+    std::unique_lock lock(saveMutex);
+    saveDone.wait(lock, [this] { return savesInFlight == 0; });
+}
 
 /* ============================================================
  * Chunk streaming
@@ -809,13 +793,21 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
         const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
         threadPool.enqueueFireAndForget(
-            [this, coord, jobEpoch]
+            [this, coord, jobEpoch, columnStore = store]
             {
                 try {
-                    Trace::Scope span("generate column");
-                    auto column = std::make_unique<ChunkColumn>(coord);
-
-                    generateTerrain(*column);
+                    // A saved column is used as is; otherwise generate it.
+                    std::unique_ptr<ChunkColumn> column;
+                    if (columnStore) {
+                        Trace::Scope span("load column");
+                        column = columnStore->load(coord);
+                    }
+                    const bool generated = column == nullptr;
+                    if (generated) {
+                        Trace::Scope span("generate column");
+                        column = std::make_unique<ChunkColumn>(coord);
+                        generateTerrain(*column);
+                    }
 
                     /*
                      * Publish the fully generated column.
@@ -840,6 +832,8 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                          */
                         chunks[coord] = std::move(column);
                         generatingChunks.erase(coord);
+                        if (generated)
+                            dirty.insert(coord);
                     }
                 }
                 catch (std::exception const& e) {
@@ -881,8 +875,13 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
             if (generatingChunks.contains(coord))
                 continue;
 
-            if (chunks.erase(coord) != 0)
-                ++unloaded;
+            const auto it = chunks.find(coord);
+            if (it == chunks.end())
+                continue;
+            if (dirty.erase(coord) != 0 && store)
+                enqueueSave(threadPool, it->second);   // a snapshot: the column is gone from the map
+            chunks.erase(it);
+            ++unloaded;
         }
     }
 }
@@ -1132,7 +1131,6 @@ void World::generateTerrain(ChunkColumn& column) {
      */
 
     auto coord = column.coord();
-    auto blocks = loadChunk(coord);
     std::vector<std::uint8_t> caveMask;
     std::vector<std::uint8_t> entranceMask;
     generateCaveMasks(coord, caveMask, entranceMask);
@@ -1210,8 +1208,5 @@ void World::generateTerrain(ChunkColumn& column) {
         }
     }
 
-    // Apply edits after terrain generation so placements above natural terrain
-    // and removals of generated blocks are both restored exactly.
-    for (const auto& [localPos, block] : blocks)
-        column.setUnchecked(localPos.x, ChunkColumn::toStorageY(localPos.y), localPos.z, block);
+
 }

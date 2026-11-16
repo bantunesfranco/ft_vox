@@ -2,12 +2,15 @@
 #define WORLD_HPP
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <unordered_set>
 
 #include "Chunk.hpp"
 #include "ChunkMesher.hpp"
 #include "ThreadPool.hpp"
+
+class RegionStore;
 
 class Frustum {
 public:
@@ -87,8 +90,17 @@ public:
 	[[nodiscard]]
 	std::vector<ChunkRenderState>& getRenderStates() noexcept;
 
-	void saveChunk(const ChunkCoord& coord, const glm::ivec3& localPos, BlockId block) const;
-	std::unordered_map<glm::ivec3, BlockId> loadChunk(const ChunkCoord& coord) const;
+	// --- persistence ---------------------------------------------------------
+	// Starts a world: forgets every column (like clear()), then generates with
+	// `seed` and loads / saves whole columns through `store`. A null store
+	// never saves (multiplayer client, benchmark). Call flush() first when the
+	// previous world had a store. Main thread.
+	void open(std::uint64_t seed, std::shared_ptr<RegionStore> store);
+	// Saves every dirty column and waits until all saves (including those
+	// started by unloading) are on disk.
+	void flush(ThreadPool& threadPool);
+	[[nodiscard]] std::uint64_t seed() const noexcept { return worldSeed; }
+	~World();
 
 	// --- multiplayer hooks (main thread) ------------------------------------
 	// Forgets every column. GPU meshes retire through pruneRenderStates(), and
@@ -98,9 +110,6 @@ public:
 	void adoptColumn(std::unique_ptr<ChunkColumn> column);
 	// Removes a column; its meshes retire through pruneRenderStates().
 	void dropColumn(const ChunkCoord& coord);
-	// When false, setBlockAt() no longer writes edits to saves/ (a client of a
-	// server must not persist the server's world as its own).
-	void setPersistence(bool enabled) noexcept { persistence = enabled; }
 
 	Frustum frustum{};
 
@@ -149,7 +158,16 @@ private:
 	mutable std::mutex chunk_mutex;
 	// Bumped by clear(): a generation job started under another epoch drops its result.
 	std::atomic<std::uint64_t> epoch{0};
-	bool persistence = true;
+
+	// Persistence. `dirty`: columns generated (not loaded) or edited since
+	// their last save, under chunk_mutex.
+	std::uint64_t worldSeed = 0;
+	std::shared_ptr<RegionStore> store;
+	std::unordered_set<ChunkCoord> dirty;
+	std::mutex saveMutex;
+	std::condition_variable saveDone;
+	std::size_t savesInFlight = 0;
+	void enqueueSave(ThreadPool& threadPool, ColumnPtr column);
 
 	// Marks `coord` for remeshing; its current mesh stays visible until the
 	// new one replaces it. chunk_mutex held.

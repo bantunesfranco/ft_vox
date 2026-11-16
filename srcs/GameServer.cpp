@@ -442,7 +442,6 @@ void GameServer::setBlock(const glm::ivec3& pos, const BlockId block) {
 
 	const ChunkCoord coord = column->coord();
 	_encoded.erase(coord);
-	_terrain.saveChunk(coord, {local.x, pos.y, local.z}, block);   // same format as singleplayer
 
 	net::ByteWriter w(net::PacketId::BlockUpdate, 14);
 	w.writeI32(pos.x).writeI32(pos.y).writeI32(pos.z).writeU16(block);
