@@ -2,13 +2,16 @@
 #define THREAD_POOL_HPP
 
 #include <algorithm>
+#include <atomic>
+#include <deque>
+#include <stdexcept>
 #include <vector>
 #include <thread>
-#include <queue>
 #include <functional>
 #include <condition_variable>
 #include <mutex>
 #include <future>
+#include <type_traits>
 
 class ThreadPool {
 private:
@@ -64,9 +67,9 @@ public:
 
     // With return value: for tasks needing futures
     template<class F, class... Args>
-    auto enqueue(F&& f, Args&&... args) -> std::future<std::result_of_t<F(Args...)>>
+    auto enqueue(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F(Args...)>>
     {
-        using return_type = std::result_of_t<F(Args...)>;
+        using return_type = std::invoke_result_t<F(Args...)>;
 
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
@@ -149,7 +152,7 @@ private:
 
             // First: try own queue (no lock needed if using atomic indices)
             {
-                std::unique_lock<std::mutex> lock(perThreadQueues[threadIdx].lock);
+                std::unique_lock lock(perThreadQueues[threadIdx].lock);
                 if (!perThreadQueues[threadIdx].tasks.empty()) {
                     task = std::move(perThreadQueues[threadIdx].tasks.front());
                     perThreadQueues[threadIdx].tasks.pop_front();
@@ -185,15 +188,13 @@ private:
                         return stop || !perThreadQueues[threadIdx].tasks.empty() || hasAnyWork();
                     });
 
-                    if (stop && !hasAnyWork())
-                        return;
+                    if (stop && !hasAnyWork()) return;
 
                     continue;
                 }
             }
 
-            if (task)
-                task();
+            if (task) task();
         }
     }
 

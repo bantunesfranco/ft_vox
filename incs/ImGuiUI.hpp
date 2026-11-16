@@ -1,6 +1,7 @@
 #ifndef IMGUI_UI_HPP
 #define IMGUI_UI_HPP
 
+#include <array>
 #include <memory>
 
 #include <glad/glad.h>
@@ -26,6 +27,9 @@ private:
 	bool initialized{false};
 	GLuint guiAtlas{0};
 	GLuint blockAtlas{0};
+	// Multiplayer form, kept across frames (ImGui::InputText edits these in place).
+	std::array<char, 128> joinAddress{"127.0.0.1"};
+	std::array<char, 33>  playerName{"Player"};
 };
 
 std::unique_ptr<UI> createImGuiUI(GLFWwindow* window, GLuint guiAtlas, GLuint blockAtlas);

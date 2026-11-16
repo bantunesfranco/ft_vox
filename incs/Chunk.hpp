@@ -144,12 +144,6 @@ public:
     [[nodiscard]]
     BlockId getBlock(int x, int y, int z) const noexcept;
 
-    [[nodiscard]]
-    bool isAir(int x, int y, int z) const noexcept;
-
-    [[nodiscard]]
-    bool isOpaque(int x, int y, int z, const BlockRegistry& registry) const noexcept;
-
 private:
     /*
      * 3x3 neighborhood:

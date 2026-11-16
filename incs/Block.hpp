@@ -2,9 +2,8 @@
 #define Block_HPP
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
-
-#include "glad/glad.h"
 
 enum class BlockType : std::uint8_t {
     Air = 0,
@@ -61,9 +60,6 @@ public:
     const BlockDefinition& get(BlockType type) const noexcept;
 
     [[nodiscard]]
-    bool isAir(BlockId id) const noexcept;
-
-    [[nodiscard]]
     bool isOpaque(BlockId id) const noexcept;
 
     [[nodiscard]]
@@ -71,18 +67,6 @@ public:
 
 private:
     std::array<BlockDefinition, BLOCK_TYPE_COUNT> _definitions{};
-};
-
-
-class BlockTextureArray {
-public:
-    void load();
-
-    [[nodiscard]]
-    GLuint handle() const noexcept;
-
-private:
-    GLuint _texture = 0;
 };
 
 #endif

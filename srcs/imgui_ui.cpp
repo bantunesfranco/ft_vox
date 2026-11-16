@@ -54,8 +54,8 @@ void applyStyle() {
 
 struct AtlasRect { float x; float y; float width; float height; };
 
-ImTextureID textureId(const GLuint texture) {
-    return reinterpret_cast<ImTextureID>(static_cast<std::intptr_t>(texture));
+ImTextureID textureId(const uintptr_t texture) {
+    return ImTextureID{texture};
 }
 
 void addAtlasImage(ImDrawList* drawList, const GLuint texture, const AtlasRect rect,
@@ -150,7 +150,7 @@ void renderStartMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
     // Game Title / Logo Layout
     ImGui::SetCursorPosY(io.DisplaySize.y * 0.15f);
     ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Fallback safely to default loaded font array entry
-    float title_width = ImGui::CalcTextSize("MINECRAFT").x;
+    const float title_width = ImGui::CalcTextSize("MINECRAFT C++").x;
     ImGui::SetCursorPosX((io.DisplaySize.x - title_width) * 0.5f);
     ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "MINECRAFT C++"); // Yellow title
     ImGui::PopFont();
@@ -168,7 +168,9 @@ void renderStartMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
         actions.push_back({UiActionType::START_GAME, false, {}});
     }
     ImGui::Spacing();
-    centeredButton("Multiplayer", false);
+    if (centeredButton("Multiplayer")) {
+        actions.push_back({UiActionType::START_GAME_MP, false, {}});
+    }
     ImGui::Spacing();
     centeredButton("Options...", false);
     ImGui::Spacing();
@@ -211,17 +213,21 @@ void renderPauseMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
         return drawMenuButton(guiAtlas, label, id, ImVec2(width, 40.0f), enabled);
     };
 
+    constexpr float gap = 8.0f;
+    const float half_width = std::max(1.0f, (std::min(400.0f, menu_width - 16.0f) - gap) * 0.5f);
+    auto halfButton = [&](const char* label, const char* id, bool enabled = true) {
+        ImGui::SetCursorPosX((menu_width - half_width * 2.0f - gap) * 0.5f);
+        return drawMenuButton(guiAtlas, label, id, ImVec2(half_width, 40.0f), enabled);
+    };
+
     if (pauseButton("Back to Game", "resume"))
         actions.push_back({UiActionType::RESUME_GAME, false, {}});
     ImGui::Spacing();
 
-    // Side-by-side buttons row
-    const float half_button_width = std::max(1.0f, (menu_width - 24.0f) * 0.5f);
-    ImGui::SetCursorPosX(8.0f);
-    drawMenuButton(guiAtlas, "Achievements", "achievements", ImVec2(half_button_width, 20.0f), false);
-
-    ImGui::SameLine(16.0f + half_button_width);
-    drawMenuButton(guiAtlas, "Statistics", "statistics", ImVec2(half_button_width, 20.0f), false);
+    // Side-by-side row: two half-width buttons, the pair centered.
+    halfButton("Achievements", "achievements", false);
+    ImGui::SameLine(0.0f, gap);
+    drawMenuButton(guiAtlas, "Statistics", "statistics", ImVec2(half_width, 40.0f), false);
 
     ImGui::Spacing();
     pauseButton("Options...", "options", 400.0f, false);
@@ -230,6 +236,82 @@ void renderPauseMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
         actions.push_back({UiActionType::RETURN_TO_TITLE, false, {}});
 
     ImGui::End();
+}
+
+
+void renderMultiplayerMenu(const GLuint guiAtlas, std::array<char, 128>& address,
+    std::array<char, 33>& playerName, const UiFrameModel& model, std::vector<UiAction>& actions) {
+    ImGuiIO& io = ImGui::GetIO();
+    const float button_width = std::max(1.0f, std::min(400.0f, io.DisplaySize.x - 32.0f));
+
+    // Fullscreen Main Window (Simulates dirt background tile)
+
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(io.DisplaySize);
+
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(32, 32, 32, 255)); // Dark dirt tint fallback
+
+    ImGui::Begin("MultiplayerMenu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+
+    // Game Title / Logo Layout
+    ImGui::SetCursorPosY(io.DisplaySize.y * 0.15f);
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]); // Fallback safely to default loaded font array entry
+    float title_width = ImGui::CalcTextSize("Multiplayer").x;
+    ImGui::SetCursorPosX((io.DisplaySize.x - title_width) * 0.5f);
+    ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "Multiplayer"); // Yellow title
+    ImGui::PopFont();
+
+    // Name / address form
+    constexpr float button_height = 40.0f;
+    const float column_x = std::max(16.0f, (io.DisplaySize.x - button_width) * 0.5f);
+    ImGui::SetCursorPosY(io.DisplaySize.y * 0.32f);
+
+    ImGui::SetCursorPosX(column_x);
+    ImGui::TextUnformatted("Player name");
+    ImGui::SetCursorPosX(column_x);
+    ImGui::SetNextItemWidth(button_width);
+    ImGui::InputText("##playerName", playerName.data(), playerName.size());
+
+    ImGui::SetCursorPosX(column_x);
+    ImGui::TextUnformatted("Server address (host or host:port)");
+    ImGui::SetCursorPosX(column_x);
+    ImGui::SetNextItemWidth(button_width);
+    ImGui::InputText("##address", address.data(), address.size());
+
+    if (!model.lastError.empty()) {
+        ImGui::SetCursorPosX(column_x);
+        ImGui::PushTextWrapPos(column_x + button_width);
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", model.lastError.c_str());
+        ImGui::PopTextWrapPos();
+    }
+
+    // Menu Buttons Column
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
+
+    auto centeredButton = [&](const char* label, const bool enabled = true) {
+        ImGui::SetCursorPosX(column_x);
+        return drawMenuButton(guiAtlas, label, label, ImVec2(button_width, button_height), enabled);
+    };
+
+    const bool hasName = playerName[0] != '\0';
+    if (centeredButton("Host", hasName)) {
+        UiAction action{UiActionType::HOST_MP, false, {}};
+        action.playerName = playerName.data();
+        actions.push_back(std::move(action));
+    }
+    ImGui::Spacing();
+    if (centeredButton("Join", hasName && address[0] != '\0')) {
+        UiAction action{UiActionType::JOIN_MP, false, {}};
+        action.playerName = playerName.data();
+        action.address = address.data();
+        actions.push_back(std::move(action));
+    }
+    ImGui::Spacing();
+    if (centeredButton("Return to Title"))
+        actions.push_back({UiActionType::RETURN_TO_TITLE, false, {}});
+
+    ImGui::End();
+    ImGui::PopStyleColor();
 }
 
 void renderInventory(const GLuint guiAtlas, const GLuint blockAtlas,
@@ -351,12 +433,49 @@ void renderCrossHair(const GLuint guiAtlas) {
         ImVec2(center.x + size * 0.5f, center.y + size * 0.5f));
 }
 
+// Names over other players: a translucent plate with the text centered on
+// the projected head position, fading out with distance.
+void renderNameTags(const std::vector<UiNameTag>& tags) {
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();   // under menus, over the world
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+
+    for (const UiNameTag& tag : tags) {
+        const float fade = std::clamp(1.0f - (tag.distance - 32.0f) / 32.0f, 0.25f, 1.0f);
+        const ImVec2 size = ImGui::CalcTextSize(tag.name.c_str());
+        const ImVec2 anchor((tag.ndcX * 0.5f + 0.5f) * display.x,
+                            (0.5f - tag.ndcY * 0.5f) * display.y);  // NDC +y is up, pixels +y is down
+        const ImVec2 textPos(anchor.x - size.x * 0.5f, anchor.y - size.y);
+        const auto alpha = [fade](const float a) { return static_cast<int>(a * fade); };
+
+        drawList->AddRectFilled(ImVec2(textPos.x - 4.0f, textPos.y - 2.0f),
+            ImVec2(textPos.x + size.x + 4.0f, textPos.y + size.y + 2.0f),
+            IM_COL32(0, 0, 0, alpha(110.0f)), 2.0f);
+        drawList->AddText(textPos, IM_COL32(255, 255, 255, alpha(255.0f)), tag.name.c_str());
+    }
+}
+
+void renderStatus(const std::string& text) {
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
+    const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+    const ImVec2 pos((displaySize.x - size.x) * 0.5f, displaySize.y * 0.40f);
+    drawList->AddRectFilled(ImVec2(pos.x - 12.0f, pos.y - 8.0f),
+        ImVec2(pos.x + size.x + 12.0f, pos.y + size.y + 8.0f), IM_COL32(0, 0, 0, 160), 4.0f);
+    drawList->AddText(pos, IM_COL32(255, 255, 255, 255), text.c_str());
+}
+
 void renderDebugWindow(const UiFrameModel& model, std::vector<UiAction>& actions) {
     ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
     ImGui::Begin("Debug Window");
     ImGui::Text("FPS: %i", model.fps);
     ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)",
         model.cameraPosition[0], model.cameraPosition[1], model.cameraPosition[2]);
+
+    if (!model.players.empty()) {
+        ImGui::Text("Players online: %zu", model.players.size() + 1);
+        for (const std::string& name : model.players)
+            ImGui::BulletText("%s", name.c_str());
+    }
 
     bool wireframe = model.wireframe;
     if (ImGui::Checkbox("Wireframe", &wireframe))
@@ -406,6 +525,12 @@ std::vector<UiAction> ImGuiUI::render(const UiFrameModel& model) {
         renderStartMenu(guiAtlas, actions);
         return actions;
     }
+    if (model.state == GameState::MULTIPLAYER) {
+        renderMultiplayerMenu(guiAtlas, joinAddress, playerName, model, actions);
+        return actions;
+    }
+
+    renderNameTags(model.nameTags);
 
     if (model.state == GameState::PAUSE)
         renderPauseMenu(guiAtlas, actions);
@@ -416,6 +541,8 @@ std::vector<UiAction> ImGuiUI::render(const UiFrameModel& model) {
         renderCrossHair(guiAtlas);
     }
 
+    if (!model.statusText.empty())
+        renderStatus(model.statusText);
     if (model.showDebug)
         renderDebugWindow(model, actions);
     return actions;

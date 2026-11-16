@@ -39,6 +39,46 @@ void ChunkMesher::build(
     std::array<std::uint8_t, size * size> maskAo{};
     std::array<std::array<std::uint8_t, 4>, size * size> maskCornerAo{};
 
+    /*
+     * The section plus a one-block border, copied once into flat arrays.
+     * Every query below (the face neighbor, the AO corners) is at most one
+     * block outside the section, so after this no lookup has to find which
+     * column it falls in. Coordinates are section-local, -1..16.
+     */
+    constexpr int padded = size + 2;
+    thread_local std::array<BlockId, padded * padded * padded> blocks{};
+    thread_local std::array<std::uint8_t, padded * padded * padded> opaque{};
+    const auto cell = [](const int x, const int y, const int z) noexcept {
+        return static_cast<std::size_t>((x + 1) + (z + 1) * padded + (y + 1) * padded * padded);
+    };
+    const int baseY = sectionY * size;
+    // Buried: the section and every border cell sharing a face with it are
+    // opaque, so no face can be visible (deep stone). Border edges and
+    // corners only matter for AO of visible faces, so they are not checked.
+    bool buried = true;
+    for (int y = -1; y <= size; ++y) {
+        for (int z = -1; z <= size; ++z) {
+            const bool interiorRow = y >= 0 && y < size && z >= 0 && z < size;
+            for (int x = -1; x <= size; ++x) {
+                const bool interior = interiorRow && x >= 0 && x < size;
+                const BlockId block = interior
+                    ? section.getUnchecked(x, y, z)
+                    : neighborhood.getBlock(x, y + baseY, z);
+                const bool isOpaque = registry.isOpaque(block);
+                blocks[cell(x, y, z)] = block;
+                opaque[cell(x, y, z)] = isOpaque ? 1 : 0;
+
+                const int outside = (x < 0 || x >= size) + (y < 0 || y >= size) + (z < 0 || z >= size);
+                if (!isOpaque && outside <= 1)
+                    buried = false;
+            }
+        }
+    }
+    if (buried)
+        return;
+    const auto blockAt  = [&](const std::array<int, 3>& p) { return blocks[cell(p[0], p[1], p[2])]; };
+    const auto opaqueAt = [&](const std::array<int, 3>& p) { return opaque[cell(p[0], p[1], p[2])] != 0; };
+
     output.reserve(2048, 3072);
     transparentOutput.reserve(512, 768);
 
@@ -61,20 +101,16 @@ void ChunkMesher::build(
                         position[uAxis] = u;
                         position[vAxis] = v;
 
-                        const BlockId block = section.getUnchecked(position[0], position[1], position[2]);
+                        const BlockId block = blockAt(position);
                         if (block == AIR_BLOCK)
                             continue;
 
-                        const BlockDefinition& definition = registry.get(block);
                         std::array<int, 3> neighborPosition = position;
                         neighborPosition[axis] += sign;
-                        const BlockId neighbor = neighborhood.getBlock(
-                            neighborPosition[0],
-                            neighborPosition[1] + sectionY * size,
-                            neighborPosition[2]
-                        );
-
-                        if ((definition.transparent && neighbor == block) || registry.isOpaque(neighbor))
+                        if (opaqueAt(neighborPosition))
+                            continue;                       // hidden face: the common case
+                        const BlockDefinition& definition = registry.get(block);
+                        if (definition.transparent && blockAt(neighborPosition) == block)
                             continue;
 
                         const std::uint16_t texture = axis == 1
@@ -96,13 +132,9 @@ void ChunkMesher::build(
                             diagonal[uAxis] += uSign;
                             diagonal[vAxis] += vSign;
 
-                            const int worldY = sectionY * size;
-                            const bool sideOneOpaque = registry.isOpaque(neighborhood.getBlock(
-                                sideOne[0], sideOne[1] + worldY, sideOne[2]));
-                            const bool sideTwoOpaque = registry.isOpaque(neighborhood.getBlock(
-                                sideTwo[0], sideTwo[1] + worldY, sideTwo[2]));
-                            const bool diagonalOpaque = registry.isOpaque(neighborhood.getBlock(
-                                diagonal[0], diagonal[1] + worldY, diagonal[2]));
+                            const bool sideOneOpaque = opaqueAt(sideOne);
+                            const bool sideTwoOpaque = opaqueAt(sideTwo);
+                            const bool diagonalOpaque = opaqueAt(diagonal);
                             faceAo[corner] = sideOneOpaque && sideTwoOpaque
                                 ? 0
                                 : static_cast<std::uint8_t>(3 - static_cast<int>(sideOneOpaque)

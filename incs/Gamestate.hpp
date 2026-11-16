@@ -11,6 +11,7 @@ public:
     void toggleInventory();
     void togglePause();
     void startGameplay();
+	void openMultiplayerMenu();
 	void returnToTitle();
 
     GameState currentState{GameState::START};

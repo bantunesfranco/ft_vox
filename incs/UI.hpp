@@ -2,6 +2,8 @@
 #define UI_HPP
 
 #include <array>
+#include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -10,6 +12,9 @@
 
 enum class UiActionType {
 	START_GAME,
+	START_GAME_MP,
+	HOST_MP,
+	JOIN_MP,
 	RESUME_GAME,
 	RETURN_TO_TITLE,
 	QUIT_GAME,
@@ -19,11 +24,13 @@ enum class UiActionType {
 };
 
 struct UiAction {
-	UiActionType type;
+	UiActionType type{};
 	bool enabled{false};
 	std::array<float, 4> color{};
 	int slot{-1};
 	bool secondaryClick{false};
+	std::string address{};      // JOIN_MP: "host" or "host:port"
+	std::string playerName{};   // HOST_MP / JOIN_MP
 };
 
 struct UiItemStack {
@@ -32,6 +39,15 @@ struct UiItemStack {
 	std::string_view name{};
 
 	[[nodiscard]] bool empty() const noexcept { return count == 0 || item == ItemId::Empty; }
+};
+
+// A name drawn over another player's head. Position in normalized device
+// coordinates (-1..1, +y up), so the UI maps it to its own pixel size.
+struct UiNameTag {
+	std::string name;
+	float ndcX{0.0f};
+	float ndcY{0.0f};
+	float distance{0.0f};     // blocks from the camera, for fading
 };
 
 struct UiFrameModel {
@@ -44,6 +60,10 @@ struct UiFrameModel {
 	std::array<float, 4> clearColor{};
 	std::array<UiItemStack, 36> inventorySlots{};
 	UiItemStack cursorStack{};
+	std::string statusText{};                 // multiplayer: "Connecting...", shown centered
+	std::vector<std::string> players{};       // multiplayer: other players, for the debug window
+	std::string lastError{};                  // why the last multiplayer attempt ended
+	std::vector<UiNameTag> nameTags{};        // multiplayer: visible players, far to near
 };
 
 class UI {

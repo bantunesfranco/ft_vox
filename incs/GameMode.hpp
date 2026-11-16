@@ -3,6 +3,7 @@
 
 enum class GameState {
 	START,
+	MULTIPLAYER,
 	PAUSE,
 	INVENTORY,
 	IN_GAME,

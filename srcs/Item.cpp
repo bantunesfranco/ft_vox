@@ -13,7 +13,7 @@ constexpr std::array<ItemDefinition, static_cast<std::size_t>(ItemId::Count)> DE
 }
 
 const ItemDefinition& ItemRegistry::get(const ItemId item) noexcept {
-	const std::size_t index = static_cast<std::size_t>(item);
+	const auto index = static_cast<std::size_t>(item);
 	return DEFINITIONS[index < DEFINITIONS.size() ? index : 0];
 }
 

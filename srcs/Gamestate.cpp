@@ -22,8 +22,13 @@ void GameStateController::togglePause() {
 	}
 }
 
+void GameStateController::openMultiplayerMenu() {
+	if (currentState == GameState::START)
+		currentState = GameState::MULTIPLAYER;
+}
+
 void GameStateController::startGameplay() {
-	if (currentState != GameState::START)
+	if (currentState != GameState::START && currentState != GameState::MULTIPLAYER)
 		return;
 	currentState = GameState::IN_GAME;
 }

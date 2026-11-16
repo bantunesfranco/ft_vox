@@ -11,8 +11,9 @@
 #include <fstream>
 #include <chrono>
 
-#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
+
+#include "FrameProfiler.hpp"
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
@@ -448,10 +449,6 @@ namespace
  * Accessors
  * ============================================================ */
 
-const std::unordered_map<ChunkCoord,std::unique_ptr<ChunkColumn>>& World::getChunks() const noexcept {
-    return chunks;
-}
-
 const BlockRegistry& World::getBlockRegistry() const noexcept {
     return blockRegistry;
 }
@@ -464,39 +461,21 @@ std::vector<ChunkRenderState>& World::getRenderStates() noexcept {
     return renderStates;
 }
 
+// Retires the meshes of columns that are gone, plus meshes replaced since the
+// last call. Linear: one pass, no erase from the middle of a vector.
 std::vector<GpuMesh> World::pruneRenderStates() {
     std::vector<GpuMesh> retiredMeshes;
     std::lock_guard lock(chunk_mutex);
     retiredMeshes.swap(pendingRetiredMeshes);
 
-    for (auto it = renderStates.begin(); it != renderStates.end();) {
-        if (chunks.contains(it->coord)) {
-            ++it;
-            continue;
-        }
-
-        retiredMeshes.push_back(it->gpuMesh);
-        retiredMeshes.push_back(it->transparentGpuMesh);
-        it = renderStates.erase(it);
-    }
-
-    for (auto it = meshedSections.begin(); it != meshedSections.end();) {
-        if (chunks.contains(it->first)) {
-            ++it;
-            continue;
-        }
-
-        it = meshedSections.erase(it);
-    }
-
-    for (auto it = meshWaitFrames.begin(); it != meshWaitFrames.end();) {
-        if (chunks.contains(it->first)) {
-            ++it;
-            continue;
-        }
-
-        it = meshWaitFrames.erase(it);
-    }
+    std::erase_if(renderStates, [&](ChunkRenderState& state) {
+        if (chunks.contains(state.coord))
+            return false;
+        retiredMeshes.push_back(state.gpuMesh);
+        retiredMeshes.push_back(state.transparentGpuMesh);
+        return true;
+    });
+    std::erase_if(meshStatus, [this](const auto& entry) { return !chunks.contains(entry.first); });
 
     return retiredMeshes;
 }
@@ -556,6 +535,9 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
     if (columnIt == chunks.end() || !columnIt->second)
         return false;
 
+    // Copy-on-write: a mesh job may still be reading this column.
+    if (columnIt->second.use_count() > 1)
+        columnIt->second = std::make_shared<ChunkColumn>(*columnIt->second);
     ChunkColumn& column = *columnIt->second;
     const int storageY = ChunkColumn::toStorageY(worldPos.y);
     const BlockId currentBlock = column.getUnchecked(localX, storageY, localZ);
@@ -566,7 +548,7 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
 
     column.setUnchecked(localX, storageY, localZ, block);
 
-    static constexpr std::array<glm::ivec3, 7> affectedOffsets = {{
+    static const std::array<glm::ivec3, 7> affectedOffsets = {{
         {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
         {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
     }};
@@ -578,26 +560,66 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
 
         const int affectedChunkX = floorDiv(affected.x, ChunkSection::SIZE);
         const int affectedChunkZ = floorDiv(affected.z, ChunkSection::SIZE);
-        const ChunkCoord affectedCoord{affectedChunkX, affectedChunkZ};
-        const auto maskIt = meshedSections.find(affectedCoord);
-        if (maskIt != meshedSections.end())
-            maskIt->second = 0;
-
-        for (auto stateIt = renderStates.begin(); stateIt != renderStates.end();) {
-            if (stateIt->coord != affectedCoord) {
-                ++stateIt;
-                continue;
-            }
-
-            pendingRetiredMeshes.push_back(std::move(stateIt->gpuMesh));
-            pendingRetiredMeshes.push_back(std::move(stateIt->transparentGpuMesh));
-            stateIt = renderStates.erase(stateIt);
-        }
+        invalidateMeshLocked({affectedChunkX, affectedChunkZ});
     }
 
-    saveChunk({chunkX, chunkZ}, {localX, worldPos.y, localZ}, block);
+    if (persistence)
+        saveChunk({chunkX, chunkZ}, {localX, worldPos.y, localZ}, block);
 
     return true;
+}
+
+void World::invalidateMeshLocked(const ChunkCoord& coord) {
+    const auto it = meshStatus.find(coord);
+    if (it == meshStatus.end())
+        return;                        // never meshed: nothing to redo
+    ++it->second.version;              // a result in flight is now stale
+    it->second.meshed = false;
+}
+
+/* ============================================================
+ * Multiplayer hooks
+ * ============================================================ */
+
+void World::clear() {
+    std::lock_guard lock(chunk_mutex);
+    epoch.fetch_add(1, std::memory_order_acq_rel);   // running jobs now drop their result
+
+    for (ChunkRenderState& state : renderStates) {
+        pendingRetiredMeshes.push_back(std::move(state.gpuMesh));
+        pendingRetiredMeshes.push_back(std::move(state.transparentGpuMesh));
+    }
+    renderStates.clear();
+    meshStatus.clear();
+    meshJobsInFlight = 0;              // their results carry the old epoch: never counted back
+    readyResults.clear();
+    {
+        std::lock_guard results(resultMutex);
+        meshResults.clear();
+    }
+    generatingChunks.clear();
+    chunks.clear();
+    playerChunk = {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+}
+
+void World::adoptColumn(std::unique_ptr<ChunkColumn> column) {
+    if (!column)
+        return;
+    const ChunkCoord coord = column->coord();
+
+    std::lock_guard lock(chunk_mutex);
+    chunks[coord] = std::move(column);
+
+    // A replaced column changes its own mesh and the border faces of its
+    // neighbours; a new one can only complete neighbourhoods (cheap either way).
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+            invalidateMeshLocked({coord.x + dx, coord.z + dz});
+}
+
+void World::dropColumn(const ChunkCoord& coord) {
+    std::lock_guard lock(chunk_mutex);
+    chunks.erase(coord);                             // pruneRenderStates() retires its meshes
 }
 
 void World::saveChunk(const ChunkCoord& coord, const glm::ivec3& localPos, BlockId block) const {
@@ -785,10 +807,12 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 
         ++spawned;
 
+        const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
         threadPool.enqueueFireAndForget(
-            [this, coord]
+            [this, coord, jobEpoch]
             {
                 try {
+                    Trace::Scope span("generate column");
                     auto column = std::make_unique<ChunkColumn>(coord);
 
                     generateTerrain(*column);
@@ -801,6 +825,11 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                      */
                     {
                         std::lock_guard lock(chunk_mutex);
+
+                        // clear() ran meanwhile (session changed): this column
+                        // belongs to a world that no longer exists.
+                        if (epoch.load(std::memory_order_acquire) != jobEpoch)
+                            return;
 
                         /*
                          * The player may have moved while this job
@@ -815,6 +844,8 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                 }
                 catch (std::exception const& e) {
                     std::lock_guard lock(chunk_mutex);
+                    if (epoch.load(std::memory_order_acquire) != jobEpoch)
+                        return;
 
                     if (chunks.contains(coord))
                         chunks.erase(coord);
@@ -857,138 +888,22 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
 }
 
 /* ============================================================
- * Terrain generation
+ * Meshing
  * ============================================================ */
 
-void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward) {
-    /*
-     * Snapshot the currently loaded columns.
-     *
-     * We intentionally do NOT hold chunk_mutex while meshing.
-     * Meshing all sections can be relatively expensive.
-     *
-     * NOTE:
-     * This assumes ChunkColumn objects remain alive while they are
-     * loaded. If chunks can be erased concurrently, the snapshot
-     * should use shared_ptr instead of raw pointers.
-     */
-    struct MeshCandidate {
-        ChunkCoord coord;
-        ChunkColumn* column;
-        float priority;
-    };
-    std::vector<MeshCandidate> candidates;
-    constexpr auto MESH_BUDGET = std::chrono::milliseconds(3);
-    constexpr auto CHUNK_SIZE = static_cast<float>(ChunkSection::SIZE);
+namespace
+{
+    // Every render state of one column: one opaque mesh for the whole column
+    // (sections merged), one transparent mesh per section that has any.
+    // Pure (reads its inputs only), so it runs on worker threads.
+    std::vector<ChunkRenderState> meshColumn(
+        const ChunkColumn& column,
+        const ChunkNeighborhood& neighborhood,
+        const BlockRegistry& registry
+    ) {
+        const ChunkCoord coord = column.coord();
+        std::vector<ChunkRenderState> states;
 
-    glm::vec2 forward{playerForward.x, playerForward.z};
-    if (glm::dot(forward, forward) > 1e-6f)
-        forward = glm::normalize(forward);
-    else
-        forward = {1.0f, 0.0f};
-
-    {
-        std::lock_guard lock(chunk_mutex);
-
-        candidates.reserve(chunks.size());
-
-        for (auto& [coord, column] : chunks){
-            if (!column)
-                continue;
-
-            const auto sectionIt = meshedSections.find(coord);
-            constexpr std::uint32_t ALL_SECTIONS_MESHED =
-                (std::uint32_t{1} << ChunkColumn::SECTION_COUNT) - 1;
-            if (sectionIt != meshedSections.end() && sectionIt->second == ALL_SECTIONS_MESHED) {
-                meshWaitFrames.erase(coord);
-                continue;
-            }
-
-            const float minX = static_cast<float>(coord.x) * CHUNK_SIZE;
-            const float minZ = static_cast<float>(coord.z) * CHUNK_SIZE;
-            const float maxX = minX + CHUNK_SIZE;
-            const float maxZ = minZ + CHUNK_SIZE;
-            const float dx = std::max({minX - playerPosition.x, 0.0f, playerPosition.x - maxX});
-            const float dz = std::max({minZ - playerPosition.z, 0.0f, playerPosition.z - maxZ});
-            const float distanceInChunks = std::sqrt(dx * dx + dz * dz) / CHUNK_SIZE;
-            const float centerX = (minX + maxX) * 0.5f - playerPosition.x;
-            const float centerZ = (minZ + maxZ) * 0.5f - playerPosition.z;
-            const float forwardExtent = CHUNK_SIZE * 0.5f * (std::abs(forward.x) + std::abs(forward.y));
-            const bool intersectsForwardHalfPlane =
-                centerX * forward.x + centerZ * forward.y + forwardExtent >= 0.0f;
-            const std::uint32_t waitedFrames = ++meshWaitFrames[coord];
-
-            // A nearby safety radius comes first; forward chunks get a boost, while age prevents starvation.
-            const float safetyBonus = distanceInChunks <= 2.0f ? 100.0f : 0.0f;
-            const float viewBonus = intersectsForwardHalfPlane ? 8.0f : 0.0f;
-            const float ageBonus = std::min(static_cast<float>(waitedFrames) * 0.25f, 256.0f);
-            candidates.push_back({coord, column.get(), distanceInChunks - safetyBonus - viewBonus - ageBonus});
-        }
-    }
-
-    std::ranges::sort(candidates, [](const MeshCandidate& lhs, const MeshCandidate& rhs) {
-        if (lhs.priority != rhs.priority)
-            return lhs.priority < rhs.priority;
-        if (lhs.coord.x != rhs.coord.x)
-            return lhs.coord.x < rhs.coord.x;
-        return lhs.coord.z < rhs.coord.z;
-    });
-
-    const auto meshStart = std::chrono::steady_clock::now();
-    bool meshedAnyChunk = false;
-    for (const MeshCandidate& candidate : candidates)
-    {
-        if (meshedAnyChunk && std::chrono::steady_clock::now() - meshStart >= MESH_BUDGET)
-            break;
-
-        const ChunkCoord& coord = candidate.coord;
-        ChunkColumn* column = candidate.column;
-
-        /*
-         * Check that the complete 3x3 horizontal neighborhood exists.
-         * We include the center chunk here as well.
-         */
-        bool neighborsReady = true;
-
-        {
-            std::lock_guard lock(chunk_mutex);
-
-            for (int dz = -1; dz <= 1 && neighborsReady; ++dz) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    const ChunkCoord neighborCoord{coord.x + dx, coord.z + dz};
-
-                    if (!chunks.contains(neighborCoord)) {
-                        neighborsReady = false;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!neighborsReady)
-            continue;
-
-        /*
-         * Build the complete 3x3 neighborhood.
-         */
-        ChunkNeighborhood neighborhood;
-
-        {
-            std::lock_guard lock(chunk_mutex);
-            neighborhood.setCenter(column);
-
-            for (int dz = -1; dz <= 1; ++dz) {
-                for (int dx = -1; dx <= 1; ++dx) {
-                    const ChunkCoord neighborCoord{coord.x + dx, coord.z + dz};
-                    const auto it = chunks.find(neighborCoord);
-
-                    if (it != chunks.end() && it->second)
-                        neighborhood.setNeighbor(dx, dz, it->second.get());
-                }
-            }
-        }
-
-        std::uint32_t& sectionMask = meshedSections[coord];
         ChunkRenderState opaqueState{};
         opaqueState.coord = coord;
         opaqueState.sectionY = 0;
@@ -1006,10 +921,10 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
         for (std::uint8_t sectionY = 0; sectionY < ChunkColumn::SECTION_COUNT; ++sectionY)
         {
             ChunkMesher::build(
-                column->section(sectionY),
+                column.section(sectionY),
                 sectionY,
                 neighborhood,
-                blockRegistry,
+                registry,
                 sectionOpaqueMesh,
                 sectionTransparentMesh
             );
@@ -1030,16 +945,11 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
                     opaqueState.worldPosition.z
                 };
                 transparentState.worldMin = transparentState.worldPosition;
-                transparentState.worldMax = {
-                    transparentState.worldPosition.x + static_cast<float>(ChunkSection::SIZE),
-                    transparentState.worldPosition.y + static_cast<float>(ChunkSection::SIZE),
-                    transparentState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
-                };
+                transparentState.worldMax = transparentState.worldPosition + glm::vec3(static_cast<float>(ChunkSection::SIZE));
                 transparentState.transparentMesh = std::move(sectionTransparentMesh);
-                renderStates.push_back(std::move(transparentState));
+                sectionTransparentMesh = {};
+                states.push_back(std::move(transparentState));
             }
-
-            sectionMask |= std::uint32_t{1} << sectionY;
         }
 
         if (!opaqueState.mesh.empty()) {
@@ -1053,15 +963,167 @@ void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& 
                 static_cast<float>(ChunkColumn::toWorldY((highestOpaqueSection + 1) * ChunkSection::SIZE)),
                 opaqueState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
             };
-            renderStates.push_back(std::move(opaqueState));
+            states.push_back(std::move(opaqueState));
         }
-
-        meshWaitFrames.erase(coord);
-        meshedAnyChunk = true;
+        return states;
     }
 }
 
+void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward,
+                              ThreadPool& threadPool) {
+    applyMeshResults();
+    scheduleMeshJobs(playerPosition, playerForward, threadPool);
+}
 
+// Swaps a column's render states for freshly meshed ones. The old GPU meshes
+// are released by the next pruneRenderStates(). chunk_mutex held.
+void World::replaceRenderStates(const ChunkCoord& coord, std::vector<ChunkRenderState> states) {
+    std::erase_if(renderStates, [&](const ChunkRenderState& state) {
+        if (state.coord != coord)
+            return false;
+        pendingRetiredMeshes.push_back(state.gpuMesh);
+        pendingRetiredMeshes.push_back(state.transparentGpuMesh);
+        return true;
+    });
+    for (ChunkRenderState& state : states)
+        renderStates.push_back(std::move(state));
+}
+
+void World::applyMeshResults() {
+    {
+        std::lock_guard lock(resultMutex);
+        for (MeshResult& result : meshResults)
+            readyResults.push_back(std::move(result));
+        meshResults.clear();
+    }
+    if (readyResults.empty())
+        return;
+
+    // Each applied column is uploaded to the GPU this frame: bound the work.
+    constexpr std::size_t MAX_APPLIED_PER_FRAME = 8;
+    const std::uint64_t currentEpoch = epoch.load(std::memory_order_acquire);
+
+    std::lock_guard lock(chunk_mutex);
+    std::size_t applied = 0;
+    auto it = readyResults.begin();
+    for (; it != readyResults.end() && applied < MAX_APPLIED_PER_FRAME; ++it) {
+        if (it->epoch != currentEpoch)
+            continue;                                   // from before clear()
+        if (meshJobsInFlight > 0)
+            --meshJobsInFlight;
+        const auto status = meshStatus.find(it->coord);
+        if (status == meshStatus.end())
+            continue;                                   // column unloaded meanwhile
+        status->second.inFlight = false;
+        if (status->second.version != it->version || !chunks.contains(it->coord))
+            continue;                                   // changed meanwhile: it gets a new job
+        replaceRenderStates(it->coord, std::move(it->states));
+        status->second.meshed = true;
+        status->second.waited = 0;
+        ++applied;
+    }
+    readyResults.erase(readyResults.begin(), it);
+}
+
+void World::scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& playerForward,
+                             ThreadPool& threadPool) {
+    const std::size_t maxInFlight = std::max<std::size_t>(2, threadPool.getWorkerCount() * 2);
+    if (meshJobsInFlight >= maxInFlight)
+        return;
+
+    constexpr auto CHUNK_SIZE = static_cast<float>(ChunkSection::SIZE);
+    glm::vec2 forward{playerForward.x, playerForward.z};
+    if (glm::dot(forward, forward) > 1e-6f)
+        forward = glm::normalize(forward);
+    else
+        forward = {1.0f, 0.0f};
+
+    struct Candidate {
+        ChunkCoord coord;
+        float priority;
+    };
+    std::vector<Candidate> candidates;
+
+    std::lock_guard lock(chunk_mutex);
+    for (const auto& coord : chunks | std::views::keys) {
+        auto [statusIt, inserted] = meshStatus.try_emplace(coord);
+        MeshStatus& status = statusIt->second;
+        if (inserted)
+            status.version = ++meshVersionCounter;
+        if (status.meshed || status.inFlight)
+            continue;
+
+        // The whole 3x3 neighbourhood must exist, or border faces are wrong.
+        bool neighborsReady = true;
+        for (int dz = -1; dz <= 1 && neighborsReady; ++dz)
+            for (int dx = -1; dx <= 1 && neighborsReady; ++dx)
+                neighborsReady = chunks.contains({coord.x + dx, coord.z + dz});
+        if (!neighborsReady)
+            continue;
+
+        const float minX = static_cast<float>(coord.x) * CHUNK_SIZE;
+        const float minZ = static_cast<float>(coord.z) * CHUNK_SIZE;
+        const float maxX = minX + CHUNK_SIZE;
+        const float maxZ = minZ + CHUNK_SIZE;
+        const float dx = std::max({minX - playerPosition.x, 0.0f, playerPosition.x - maxX});
+        const float dz = std::max({minZ - playerPosition.z, 0.0f, playerPosition.z - maxZ});
+        const float distanceInChunks = std::sqrt(dx * dx + dz * dz) / CHUNK_SIZE;
+        const float centerX = (minX + maxX) * 0.5f - playerPosition.x;
+        const float centerZ = (minZ + maxZ) * 0.5f - playerPosition.z;
+        const float forwardExtent = CHUNK_SIZE * 0.5f * (std::abs(forward.x) + std::abs(forward.y));
+        const bool inFront = centerX * forward.x + centerZ * forward.y + forwardExtent >= 0.0f;
+
+        // Nearby first, then what is in front; age prevents starvation.
+        const float safetyBonus = distanceInChunks <= 2.0f ? 100.0f : 0.0f;
+        const float viewBonus = inFront ? 8.0f : 0.0f;
+        const float ageBonus = std::min(static_cast<float>(++status.waited) * 0.25f, 256.0f);
+        candidates.push_back({coord, distanceInChunks - safetyBonus - viewBonus - ageBonus});
+    }
+
+    const std::size_t slots = std::min(candidates.size(), maxInFlight - meshJobsInFlight);
+    std::ranges::partial_sort(candidates, candidates.begin() + static_cast<std::ptrdiff_t>(slots),
+        [](const Candidate& a, const Candidate& b) { return a.priority < b.priority; });
+
+    const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < slots; ++i) {
+        const ChunkCoord coord = candidates[i].coord;
+        MeshStatus& status = meshStatus[coord];
+
+        // The job's own references: these columns stay alive (and unchanged,
+        // see setBlockAt) while it runs, whatever the main thread does.
+        std::array<ColumnPtr, 9> neighbors{};
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+                neighbors[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))] = chunks.at({coord.x + dx, coord.z + dz});
+
+        status.inFlight = true;
+        ++meshJobsInFlight;
+        const std::uint64_t version = status.version;
+        threadPool.enqueueFireAndForget([this, coord, version, jobEpoch, neighbors] {
+            Trace::Scope span("mesh column");
+            MeshResult result{coord, 0, jobEpoch, {}};
+            try {
+                ChunkNeighborhood neighborhood(neighbors[4].get());
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        neighborhood.setNeighbor(dx, dz,
+                            neighbors[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))].get());
+                result.states = meshColumn(*neighbors[4], neighborhood, blockRegistry);
+                result.version = version;
+            } catch (const std::exception& e) {
+                // Version 0 never matches: the column is simply scheduled again.
+                std::cerr << "Failed to mesh chunk " << coord.x << ", " << coord.z
+                          << ": " << e.what() << std::endl;
+            }
+            std::lock_guard results(resultMutex);
+            meshResults.push_back(std::move(result));
+        });
+    }
+}
+
+/* ============================================================
+ * Terrain generation
+ * ============================================================ */
 
 void World::generateTerrain(ChunkColumn& column) {
     /*

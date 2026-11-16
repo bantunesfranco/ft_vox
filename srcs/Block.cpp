@@ -116,11 +116,6 @@ const BlockDefinition& BlockRegistry::get(BlockType type) const noexcept {
 }
 
 
-bool BlockRegistry::isAir(BlockId id) const noexcept {
-    return id == AIR_BLOCK;
-}
-
-
 bool BlockRegistry::isOpaque(BlockId id) const noexcept {
     return get(id).opaque;
 }

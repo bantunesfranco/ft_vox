@@ -176,13 +176,3 @@ BlockId ChunkNeighborhood::getBlock(int x, int y, int z) const noexcept {
 
     return column->getUnchecked(localX, y, localZ);
 }
-
-
-bool ChunkNeighborhood::isAir(int x, int y, int z) const noexcept {
-    return getBlock(x, y, z) == AIR_BLOCK;
-}
-
-
-bool ChunkNeighborhood::isOpaque(int x, int y, int z, const BlockRegistry& registry) const noexcept {
-    return registry.isOpaque(getBlock(x, y, z));
-}
