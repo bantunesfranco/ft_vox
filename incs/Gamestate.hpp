@@ -12,6 +12,8 @@ public:
     void togglePause();
     void startGameplay();
 	void openMultiplayerMenu();
+	// Switches between title-screen menus (only from a menu, only to a menu).
+	void openMenu(GameState menu);
 	void returnToTitle();
 
     GameState currentState{GameState::START};

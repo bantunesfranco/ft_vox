@@ -27,8 +27,13 @@ void GameStateController::openMultiplayerMenu() {
 		currentState = GameState::MULTIPLAYER;
 }
 
+void GameStateController::openMenu(const GameState menu) {
+	if (isMenuState(currentState) && isMenuState(menu))
+		currentState = menu;
+}
+
 void GameStateController::startGameplay() {
-	if (currentState != GameState::START && currentState != GameState::MULTIPLAYER)
+	if (!isMenuState(currentState))
 		return;
 	currentState = GameState::IN_GAME;
 }

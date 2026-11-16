@@ -11,7 +11,12 @@
 #include "ItemId.hpp"
 
 enum class UiActionType {
-	START_GAME,
+	OPEN_WORLDS,          // title -> world list
+	SELECT_WORLD,         // slot
+	PLAY_WORLD,           // slot
+	OPEN_CREATE_WORLD,
+	CREATE_WORLD,         // text1 = name, text2 = seed text
+	DELETE_WORLD,         // slot (already confirmed)
 	START_GAME_MP,
 	HOST_MP,
 	JOIN_MP,
@@ -29,8 +34,8 @@ struct UiAction {
 	std::array<float, 4> color{};
 	int slot{-1};
 	bool secondaryClick{false};
-	std::string address{};      // JOIN_MP: "host" or "host:port"
-	std::string playerName{};   // HOST_MP / JOIN_MP
+	std::string text1{};   // JOIN_MP: address ("host" or "host:port"); CREATE_WORLD: world name
+	std::string text2{};   // HOST_MP / JOIN_MP: player name; CREATE_WORLD: seed text
 };
 
 struct UiItemStack {
@@ -50,6 +55,12 @@ struct UiNameTag {
 	float distance{0.0f};     // blocks from the camera, for fading
 };
 
+struct UiWorldEntry {
+	std::string name;
+	std::string detail;       // folder, seed
+	bool readable{true};
+};
+
 struct UiFrameModel {
 	GameState state{GameState::START};
 	int selectedHotbarSlot{0};
@@ -64,6 +75,9 @@ struct UiFrameModel {
 	std::vector<std::string> players{};       // multiplayer: other players, for the debug window
 	std::string lastError{};                  // why the last multiplayer attempt ended
 	std::vector<UiNameTag> nameTags{};        // multiplayer: visible players, far to near
+	std::vector<UiWorldEntry> worlds{};       // world list, most recently played first
+	int selectedWorld{-1};
+	std::string seedText{};                   // seed of the world being played (debug window)
 };
 
 class UI {

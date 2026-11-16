@@ -14,6 +14,10 @@
 #include "GameSession.hpp"
 #include "GameServer.hpp"
 #include "FrameProfiler.hpp"
+#include "RegionStore.hpp"
+#include "WorldStore.hpp"
+#include <filesystem>
+#include <optional>
 #include <string>
 
 class App : public Engine
@@ -51,7 +55,9 @@ class App : public Engine
 	private:
 		void	setCallbackFunctions() const;
 
-		bool    startSingleplayer();
+		bool    startSingleplayer(const WorldInfo& info);
+		void    startBenchmarkWorld();
+		void    refreshWorlds();
 		bool    startMultiplayer(const UiAction& action, bool hostLocally);
 		void    resetPlayerState();
 		void    endSession();
@@ -66,6 +72,14 @@ class App : public Engine
 		std::unique_ptr<HostedServer> hostedServer;
 		std::unique_ptr<GameSession> session;
 		std::string lastSessionError;
+
+		// Worlds on disk and the one being played (singleplayer).
+		std::filesystem::path savesDir{"saves"};
+		std::vector<WorldInfo> worlds;
+		int selectedWorld = -1;
+		std::unique_ptr<WorldLock> worldLock;
+		std::shared_ptr<RegionStore> regionStore;
+		std::optional<std::uint64_t> playingSeed;
 		std::unique_ptr<UI> ui;
 		std::unique_ptr<ThreadPool> threadPool;
 
@@ -98,6 +112,7 @@ class App : public Engine
 
 		static constexpr double BENCH_WARMUP = 8.0;     // seconds, not recorded
 		static constexpr double BENCH_SPEED  = 20.0;    // blocks per second
+		static constexpr std::uint64_t BENCH_SEED = 20261116;   // fixed: runs stay comparable
 		struct BenchmarkState {
 			bool   active    = false;
 			bool   recording = false;

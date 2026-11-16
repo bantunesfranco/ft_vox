@@ -102,17 +102,59 @@ void App::setCallbackFunctions() const {
 //  Game session (singleplayer today, multiplayer later)
 // ============================================================================
 
-bool App::startSingleplayer() {
+// Plays `info`: takes the world's lock, then streams its saved / generated
+// columns through a RegionStore in the world folder.
+bool App::startSingleplayer(const WorldInfo& info) {
 	if (!camera || !threadPool)
 		return false;
 
 	endSession();                                   // never two sessions at once
+	if (!info.readable) {
+		lastSessionError = "'" + info.name + "' cannot be read: its level.bin is damaged";
+		return false;
+	}
+	std::string error;
+	auto lock = WorldLock::acquire(info.folder, error);
+	if (!lock) {
+		lastSessionError = "Cannot open '" + info.name + "': " + error;
+		return false;
+	}
+	WorldInfo played = info;
+	if (!markPlayed(played, error))
+		std::cerr << "Could not update " << info.name << ": " << error << '\n';
+
 	resetPlayerState();
+	lastSessionError.clear();
+	worldLock = std::move(lock);
+	regionStore = std::make_shared<RegionStore>(info.folder / "region");
+	world.open(info.seed, regionStore);
+	playingSeed = info.seed;
 
 	// `world`, `*threadPool` and `blockSystem` all outlive the session (it is
 	// destroyed in endSession(), before run() ends and in terminate()).
 	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos);
 	return true;
+}
+
+// The benchmark plays a fixed seed and never saves.
+void App::startBenchmarkWorld() {
+	endSession();
+	resetPlayerState();
+	world.open(BENCH_SEED, nullptr);
+	playingSeed = BENCH_SEED;
+	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos);
+	gameState.startGameplay();
+	applyGameState();
+}
+
+void App::refreshWorlds() {
+	const std::string selectedFolder = selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size())
+		? worlds[static_cast<std::size_t>(selectedWorld)].folder.string() : std::string{};
+	worlds = listWorlds(savesDir);
+	selectedWorld = worlds.empty() ? -1 : 0;
+	for (std::size_t i = 0; i < worlds.size(); ++i)
+		if (worlds[i].folder.string() == selectedFolder)
+			selectedWorld = static_cast<int>(i);
 }
 
 bool App::startMultiplayer(const UiAction& action, const bool hostLocally) {
@@ -123,7 +165,7 @@ bool App::startMultiplayer(const UiAction& action, const bool hostLocally) {
 	lastSessionError.clear();
 
 	RemoteConfig config;
-	config.playerName = action.playerName.empty() ? std::string("Player") : action.playerName;
+	config.playerName = action.text2.empty() ? std::string("Player") : action.text2;
 
 	if (hostLocally) {
 		ServerConfig serverConfig;
@@ -138,7 +180,7 @@ bool App::startMultiplayer(const UiAction& action, const bool hostLocally) {
 		}
 		config.host = "127.0.0.1";
 		config.port = serverConfig.port;
-	} else if (!parseAddress(action.address, config.host, config.port)) {
+	} else if (!parseAddress(action.text1, config.host, config.port)) {
 		lastSessionError = "Invalid address: use host or host:port";
 		return false;
 	}
@@ -157,6 +199,14 @@ void App::resetPlayerState() {
 
 void App::endSession() {
 	session.reset();              // disconnects first...
+	if (regionStore) {
+		if (threadPool)
+			world.flush(*threadPool);   // every edit and generated column on disk
+		world.open(0, nullptr);         // forget it: the next world starts empty
+		regionStore.reset();
+	}
+	worldLock.reset();
+	playingSeed.reset();
 	if (hostedServer) {
 		hostedServer->stop();     // ...then stops (and joins) a server we were hosting
 		hostedServer.reset();
@@ -336,7 +386,7 @@ void App::run() {
 			runBenchmarkScript();
 		profiler.mark(FrameProfiler::Begin);
 
-		if (gameState.currentState != GameState::START && gameState.currentState != GameState::MULTIPLAYER) {
+		if (!isMenuState(gameState.currentState)) {
 			// `world` is App's own member, borrowed by the session. It is NOT
 			// re-declared here: shadowing it would hide the member that
 			// updatePlayerMovement(), renderWorld() and the raycasts use.
@@ -401,11 +451,25 @@ void App::run() {
 		uiModel.wireframe = showWireframe;
 		uiModel.clearColor = clearColor;
 		uiModel.lastError = lastSessionError;
+		if (playingSeed)
+			uiModel.seedText = std::to_string(static_cast<std::int64_t>(*playingSeed));
+		if (gameState.currentState == GameState::WORLD_SELECT) {
+			for (const WorldInfo& info : worlds) {
+				UiWorldEntry entry;
+				entry.name = info.name;
+				entry.readable = info.readable;
+				entry.detail = info.folder.filename().string()
+					+ (info.readable ? "    seed " + std::to_string(static_cast<std::int64_t>(info.seed))
+					                 : "    (cannot be read)");
+				uiModel.worlds.push_back(std::move(entry));
+			}
+			uiModel.selectedWorld = selectedWorld;
+		}
 		if (session) {
 			uiModel.statusText = session->statusText();
 			for (const RemotePlayerView& player : session->remotePlayers())
 				uiModel.players.push_back(player.name.empty() ? "player " + std::to_string(player.id) : player.name);
-			if (gameState.currentState != GameState::START && gameState.currentState != GameState::MULTIPLAYER)
+			if (!isMenuState(gameState.currentState))
 				collectNameTags(uiModel);
 		}
 
@@ -582,7 +646,7 @@ void App::enableBenchmark(const double seconds) {
 
 void App::runBenchmarkScript() {
 	if (gameState.currentState == GameState::START) {
-		applyUiAction({UiActionType::START_GAME, false, {}});
+		startBenchmarkWorld();
 		flyMode = true;
 		bench.start = glfwGetTime();
 		return;
@@ -692,12 +756,53 @@ bool App::wantsKeyboardCapture() const {
 
 void App::applyUiAction(const UiAction& action) {
 	switch (action.type) {
-		case UiActionType::START_GAME:
-			if (!startSingleplayer())          // creates the LocalSession
+		case UiActionType::OPEN_WORLDS:
+			if (gameState.currentState == GameState::START)
+				lastSessionError.clear();
+			refreshWorlds();
+			gameState.openMenu(GameState::WORLD_SELECT);
+			break;
+		case UiActionType::SELECT_WORLD:
+			if (action.slot >= 0 && action.slot < static_cast<int>(worlds.size()))
+				selectedWorld = action.slot;
+			break;
+		case UiActionType::PLAY_WORLD:
+			if (action.slot < 0 || action.slot >= static_cast<int>(worlds.size()))
 				break;
+			if (!startSingleplayer(worlds[static_cast<std::size_t>(action.slot)]))
+				break;                         // lastSessionError says why; stay on the list
 			gameState.startGameplay();
 			applyGameState();
 			break;
+		case UiActionType::OPEN_CREATE_WORLD:
+			lastSessionError.clear();
+			gameState.openMenu(GameState::WORLD_CREATE);
+			break;
+		case UiActionType::CREATE_WORLD: {
+			std::string error;
+			const auto created = createWorld(savesDir, action.text1, action.text2, error);
+			if (!created) {
+				lastSessionError = "Cannot create the world: " + error;
+				break;
+			}
+			refreshWorlds();
+			if (!startSingleplayer(*created)) {
+				gameState.openMenu(GameState::WORLD_SELECT);
+				break;
+			}
+			gameState.startGameplay();
+			applyGameState();
+			break;
+		}
+		case UiActionType::DELETE_WORLD: {
+			if (action.slot < 0 || action.slot >= static_cast<int>(worlds.size()))
+				break;
+			std::string error;
+			if (!deleteWorld(worlds[static_cast<std::size_t>(action.slot)], error))
+				lastSessionError = "Cannot delete the world: " + error;
+			refreshWorlds();
+			break;
+		}
 		case UiActionType::START_GAME_MP:
 			lastSessionError.clear();
 			gameState.openMultiplayerMenu();

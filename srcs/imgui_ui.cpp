@@ -165,7 +165,7 @@ void renderStartMenu(const GLuint guiAtlas, std::vector<UiAction>& actions) {
     };
 
     if (centeredButton("Singleplayer")) {
-        actions.push_back({UiActionType::START_GAME, false, {}});
+        actions.push_back({UiActionType::OPEN_WORLDS, false, {}});
     }
     ImGui::Spacing();
     if (centeredButton("Multiplayer")) {
@@ -296,14 +296,14 @@ void renderMultiplayerMenu(const GLuint guiAtlas, std::array<char, 128>& address
     const bool hasName = playerName[0] != '\0';
     if (centeredButton("Host", hasName)) {
         UiAction action{UiActionType::HOST_MP, false, {}};
-        action.playerName = playerName.data();
+        action.text2 = playerName.data();
         actions.push_back(std::move(action));
     }
     ImGui::Spacing();
     if (centeredButton("Join", hasName && address[0] != '\0')) {
         UiAction action{UiActionType::JOIN_MP, false, {}};
-        action.playerName = playerName.data();
-        action.address = address.data();
+        action.text2 = playerName.data();
+        action.text1 = address.data();
         actions.push_back(std::move(action));
     }
     ImGui::Spacing();
@@ -312,6 +312,162 @@ void renderMultiplayerMenu(const GLuint guiAtlas, std::array<char, 128>& address
 
     ImGui::End();
     ImGui::PopStyleColor();
+}
+
+// Full-screen menu background + centered yellow title; End with endMenuScreen().
+void beginMenuScreen(const char* id, const char* title) {
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(32, 32, 32, 255));
+    ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+    ImGui::SetCursorPosY(io.DisplaySize.y * 0.08f);
+    ImGui::SetCursorPosX((io.DisplaySize.x - ImGui::CalcTextSize(title).x) * 0.5f);
+    ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "%s", title);
+}
+
+void endMenuScreen() {
+    ImGui::End();
+    ImGui::PopStyleColor();
+}
+
+void renderMenuError(const UiFrameModel& model, const float x, const float width) {
+    if (model.lastError.empty())
+        return;
+    ImGui::SetCursorPosX(x);
+    ImGui::PushTextWrapPos(x + width);
+    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", model.lastError.c_str());
+    ImGui::PopTextWrapPos();
+}
+
+void renderWorldSelect(const GLuint guiAtlas, const UiFrameModel& model, std::vector<UiAction>& actions) {
+    ImGuiIO& io = ImGui::GetIO();
+    const float width = std::max(1.0f, std::min(600.0f, io.DisplaySize.x - 32.0f));
+    const float x = std::max(16.0f, (io.DisplaySize.x - width) * 0.5f);
+    constexpr float gap = 8.0f;
+    const float half = (width - gap) * 0.5f;
+    constexpr float rowHeight = 40.0f;
+
+    beginMenuScreen("WorldSelect", "Select World");
+
+    // The list: name on top, folder and seed below, damaged worlds greyed out.
+    ImGui::SetCursorPos(ImVec2(x, io.DisplaySize.y * 0.14f));
+    const float listHeight = std::max(80.0f, io.DisplaySize.y * 0.56f);
+    ImGui::BeginChild("worlds", ImVec2(width, listHeight), ImGuiChildFlags_Borders);
+    if (model.worlds.empty())
+        ImGui::TextDisabled("No worlds yet. Create one!");
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    for (int i = 0; i < static_cast<int>(model.worlds.size()); ++i) {
+        const UiWorldEntry& world = model.worlds[static_cast<std::size_t>(i)];
+        ImGui::PushID(i);
+        if (ImGui::Selectable("##world", i == model.selectedWorld, ImGuiSelectableFlags_AllowDoubleClick,
+                              ImVec2(0.0f, 40.0f))) {
+            UiAction select{UiActionType::SELECT_WORLD, false, {}};
+            select.slot = i;
+            actions.push_back(select);
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && world.readable) {
+                UiAction play{UiActionType::PLAY_WORLD, false, {}};
+                play.slot = i;
+                actions.push_back(play);
+            }
+        }
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImU32 nameColor = world.readable ? IM_COL32(240, 240, 240, 255) : IM_COL32(130, 130, 130, 255);
+        drawList->AddText(ImVec2(min.x + 8.0f, min.y + 3.0f), nameColor, world.name.c_str());
+        drawList->AddText(ImVec2(min.x + 8.0f, min.y + 21.0f), IM_COL32(150, 150, 150, 255), world.detail.c_str());
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+
+    renderMenuError(model, x, width);
+
+    const bool hasSelection = model.selectedWorld >= 0
+        && model.selectedWorld < static_cast<int>(model.worlds.size());
+    const bool canPlay = hasSelection && model.worlds[static_cast<std::size_t>(model.selectedWorld)].readable;
+    const auto button = [&](const char* label, const float offset, const bool enabled) {
+        ImGui::SetCursorPosX(x + offset);
+        return drawMenuButton(guiAtlas, label, label, ImVec2(half, rowHeight), enabled);
+    };
+
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    if (button("Play Selected World", 0.0f, canPlay)) {
+        UiAction play{UiActionType::PLAY_WORLD, false, {}};
+        play.slot = model.selectedWorld;
+        actions.push_back(play);
+    }
+    ImGui::SameLine(0.0f, gap);
+    if (button("Create New World", half + gap, true))
+        actions.push_back({UiActionType::OPEN_CREATE_WORLD, false, {}});
+
+    ImGui::Spacing();
+    if (button("Delete", 0.0f, hasSelection))
+        ImGui::OpenPopup("Delete world?");
+    ImGui::SameLine(0.0f, gap);
+    if (button("Back", half + gap, true))
+        actions.push_back({UiActionType::RETURN_TO_TITLE, false, {}});
+
+    // Deleting cannot be undone: ask first.
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Delete world?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+        if (hasSelection)
+            ImGui::Text("'%s' will be lost forever! (A long time!)",
+                        model.worlds[static_cast<std::size_t>(model.selectedWorld)].name.c_str());
+        ImGui::Spacing();
+        if (drawMenuButton(guiAtlas, "Delete", "confirm-delete", ImVec2(160.0f, rowHeight), hasSelection)) {
+            UiAction remove{UiActionType::DELETE_WORLD, false, {}};
+            remove.slot = model.selectedWorld;
+            actions.push_back(remove);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine(0.0f, gap);
+        if (drawMenuButton(guiAtlas, "Cancel", "cancel-delete", ImVec2(160.0f, rowHeight)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    endMenuScreen();
+}
+
+void renderWorldCreate(const GLuint guiAtlas, std::array<char, 64>& name, std::array<char, 64>& seed,
+    const UiFrameModel& model, std::vector<UiAction>& actions) {
+    ImGuiIO& io = ImGui::GetIO();
+    const float width = std::max(1.0f, std::min(400.0f, io.DisplaySize.x - 32.0f));
+    const float x = std::max(16.0f, (io.DisplaySize.x - width) * 0.5f);
+    constexpr float gap = 8.0f;
+    const float half = (width - gap) * 0.5f;
+
+    beginMenuScreen("WorldCreate", "Create New World");
+
+    ImGui::SetCursorPosY(io.DisplaySize.y * 0.28f);
+    ImGui::SetCursorPosX(x);
+    ImGui::TextUnformatted("World Name");
+    ImGui::SetCursorPosX(x);
+    ImGui::SetNextItemWidth(width);
+    ImGui::InputText("##worldName", name.data(), name.size());
+
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::SetCursorPosX(x);
+    ImGui::TextUnformatted("Seed for the World Generator");
+    ImGui::SetCursorPosX(x);
+    ImGui::SetNextItemWidth(width);
+    ImGui::InputTextWithHint("##worldSeed", "Leave blank for a random seed", seed.data(), seed.size());
+
+    renderMenuError(model, x, width);
+
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
+    ImGui::SetCursorPosX(x);
+    if (drawMenuButton(guiAtlas, "Create New World", "create", ImVec2(half, 40.0f))) {
+        UiAction create{UiActionType::CREATE_WORLD, false, {}};
+        create.text1 = name.data();
+        create.text2 = seed.data();
+        actions.push_back(std::move(create));
+        seed.fill('\0');                    // the next world gets a fresh random seed by default
+    }
+    ImGui::SameLine(0.0f, gap);
+    if (drawMenuButton(guiAtlas, "Cancel", "cancel", ImVec2(half, 40.0f)))
+        actions.push_back({UiActionType::OPEN_WORLDS, false, {}});
+
+    endMenuScreen();
 }
 
 void renderInventory(const GLuint guiAtlas, const GLuint blockAtlas,
@@ -468,6 +624,8 @@ void renderDebugWindow(const UiFrameModel& model, std::vector<UiAction>& actions
     ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
     ImGui::Begin("Debug Window");
     ImGui::Text("FPS: %i", model.fps);
+    if (!model.seedText.empty())
+        ImGui::Text("Seed: %s", model.seedText.c_str());
     ImGui::Text("Current Camera Position: (%.2f, %.2f, %.2f)",
         model.cameraPosition[0], model.cameraPosition[1], model.cameraPosition[2]);
 
@@ -527,6 +685,14 @@ std::vector<UiAction> ImGuiUI::render(const UiFrameModel& model) {
     }
     if (model.state == GameState::MULTIPLAYER) {
         renderMultiplayerMenu(guiAtlas, joinAddress, playerName, model, actions);
+        return actions;
+    }
+    if (model.state == GameState::WORLD_SELECT) {
+        renderWorldSelect(guiAtlas, model, actions);
+        return actions;
+    }
+    if (model.state == GameState::WORLD_CREATE) {
+        renderWorldCreate(guiAtlas, newWorldName, newWorldSeed, model, actions);
         return actions;
     }
 

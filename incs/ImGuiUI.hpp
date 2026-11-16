@@ -30,6 +30,9 @@ private:
 	// Multiplayer form, kept across frames (ImGui::InputText edits these in place).
 	std::array<char, 128> joinAddress{"127.0.0.1"};
 	std::array<char, 33>  playerName{"Player"};
+	// Create-world form.
+	std::array<char, 64>  newWorldName{"New World"};
+	std::array<char, 64>  newWorldSeed{};
 };
 
 std::unique_ptr<UI> createImGuiUI(GLFWwindow* window, GLuint guiAtlas, GLuint blockAtlas);
