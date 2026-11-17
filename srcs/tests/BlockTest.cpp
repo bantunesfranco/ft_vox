@@ -1,8 +1,11 @@
 #include "SelfTest.hpp"
 #include "Block.hpp"
+#include "BlockSystem.hpp"
 #include "BlockTextures.hpp"
 #include "Item.hpp"
+#include "World.hpp"
 
+#include <memory>
 #include <set>
 
 namespace {
@@ -149,4 +152,30 @@ SELFTEST(Blocks, sprite_pixels_inside_cells) {
 		CHECK(px.w == 16 && px.h == 16);
 		CHECK(px.x + px.w <= cell.x + BlockTextures::CELL && px.y + px.h <= cell.y + BlockTextures::CELL);
 	}
+}
+
+SELFTEST(Blocks, replaceable) {
+	const BlockRegistry r;
+	CHECK(r.get(AIR_BLOCK).replaceable);
+	CHECK(r.get(WATER_BLOCK).replaceable);
+	CHECK(r.get(LAVA_BLOCK).replaceable);
+	CHECK(!r.get(BlockType::Stone).replaceable);
+	CHECK(!r.get(BlockType::Torch).replaceable);
+	CHECK(!r.get(BlockType::Cactus).replaceable);
+
+	// Building toward a stone face through lava puts the block into the lava.
+	World world;
+	world.open(1, nullptr);
+	auto column = std::make_unique<ChunkColumn>(ChunkCoord{0, 0});
+	column->setUnchecked(0, ChunkColumn::toStorageY(64), 0, toBlockId(BlockType::Stone));
+	column->setUnchecked(0, ChunkColumn::toStorageY(64), 1, LAVA_BLOCK);
+	world.adoptColumn(std::move(column));
+
+	const BlockSystem blocks;
+	const glm::vec3 eye{0.5f, 65.6f, 3.5f};
+	const glm::vec3 toward = glm::normalize(glm::vec3{0.0f, -1.1f, -2.5f});   // down onto the stone's +z face
+	CHECK(blocks.placeBlock(eye, toward, toBlockId(BlockType::Dirt), world));
+	BlockId placed = AIR_BLOCK;
+	CHECK(world.getBlockAt({0, 64, 1}, placed));
+	CHECK_EQ(placed, toBlockId(BlockType::Dirt));
 }

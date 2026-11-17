@@ -231,7 +231,7 @@ void GameServer::onPlaceBlock(Player& p, net::ByteReader& body) {
 	BlockId current = AIR_BLOCK;
 	bool allowed = p.spawned && block != AIR_BLOCK && block != BEDROCK_BLOCK
 	            && inReach(p, pos) && blockAt(pos, current)
-	            && (current == AIR_BLOCK || current == WATER_BLOCK);
+	            && _blocks.get(current).replaceable;
 	BlockId below = AIR_BLOCK;
 	if (allowed && (!blockAt(pos - glm::ivec3(0, 1, 0), below) || !placementAllowed(_blocks, block, below)))
 		allowed = false;                               // a torch needs solid ground

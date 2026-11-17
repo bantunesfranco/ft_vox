@@ -144,7 +144,7 @@ void RemoteSession::requestPlaceBlock(const glm::vec3& origin, const glm::vec3& 
 	if (target == eyeCell || PlayerCollision::overlapsBlock(origin, target))
 		return;
 	BlockId existing = AIR_BLOCK;
-	if (!_world.getBlockAt(target, existing) || (existing != AIR_BLOCK && existing != WATER_BLOCK))
+	if (!_world.getBlockAt(target, existing) || !_world.getBlockRegistry().get(existing).replaceable)
 		return;
 	BlockId below = AIR_BLOCK;
 	if (!_world.getBlockAt(target - glm::ivec3(0, 1, 0), below) || !placementAllowed(_world.getBlockRegistry(), block, below))

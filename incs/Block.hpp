@@ -83,6 +83,9 @@ struct BlockDefinition {
     // How far the sides of a solid block sit inside its cell, in 1/16 block
     // (cactus 1): what the player collides with.
     std::uint8_t collisionInset = 0;
+
+    // Building into this block's cell replaces it (air, water, lava).
+    bool replaceable = false;
 };
 
 

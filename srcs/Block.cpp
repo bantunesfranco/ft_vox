@@ -25,7 +25,8 @@ BlockRegistry::BlockRegistry() noexcept {
         .solid = false,
         .textureTop = 0,
         .textureBottom = 0,
-        .textureSide = 0
+        .textureSide = 0,
+        .replaceable = true
     };
 
     // Grass
@@ -82,7 +83,8 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureSide = 6,
         .fogColor = 0x1A4AB4,         // deep blue
         .fogDistance = 96.0f,
-        .lightFilter = 1
+        .lightFilter = 1,
+        .replaceable = true
     };
 
     _definitions[toBlockId(BlockType::Snow)] = {
@@ -143,7 +145,8 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureTop = index(Texture::LavaStill), .textureBottom = index(Texture::LavaStill),
         .textureSide = index(Texture::LavaStill),
         .fogColor = 0xC8400A, .fogDistance = 1.5f,
-        .lightEmission = 15
+        .lightEmission = 15,
+        .replaceable = true
     };
     _definitions[toBlockId(BlockType::Glowstone)] = {
         .opaque = true, .transparent = false, .solid = true,

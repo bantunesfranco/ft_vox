@@ -126,7 +126,7 @@ bool BlockSystem::placeBlock(
 		return false;
 
 	BlockId existing = AIR_BLOCK;
-	if (!world.getBlockAt(hit.adjacentPos, existing) || (existing != AIR_BLOCK && existing != WATER_BLOCK))
+	if (!world.getBlockAt(hit.adjacentPos, existing) || !world.getBlockRegistry().get(existing).replaceable)
 		return false;
 	if (PlayerCollision::overlapsBlock(origin, hit.adjacentPos))
 		return false;
