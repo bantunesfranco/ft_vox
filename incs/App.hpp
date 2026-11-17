@@ -9,6 +9,7 @@
 #include "Engine.hpp"
 #include "Gamestate.hpp"
 #include "Inventory.hpp"
+#include "PlayerPhysics.hpp"
 #include "UI.hpp"
 #include "World.hpp"
 #include "GameSession.hpp"
@@ -37,7 +38,7 @@ class App : public Engine
 		void	terminate() override;
 		void	destroyBlock();
 		void	placeBlock();
-		void	toggleSpeedBoost();
+		void	forwardPressed();       // W pressed: double tap starts sprinting
 		void	toggleFlyMode();
 		void	jump();
 
@@ -91,7 +92,7 @@ class App : public Engine
 		bool showWireframe{false};
 		GLuint textureAtlas{0};
 		GLuint guiAtlas{0};
-		bool speedBoostEnabled = false;
+		PlayerPhysics::Sprint sprint;
 		bool flyMode = false;
 		bool grounded = false;
 		bool spawnInitialized = false;

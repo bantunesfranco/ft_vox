@@ -131,3 +131,24 @@ SELFTEST(PlayerPhysics, walls_stop_movement) {
 	CHECK(body.eye.x >= 3.0f - PlayerCollision::HALF_WIDTH - 0.3f);
 	CHECK(std::abs(body.velocity.x) < 0.01f);
 }
+
+SELFTEST(PlayerPhysics, sprint_key_and_double_tap) {
+	// Sprint key with forward held starts it; without forward it does nothing.
+	Sprint key;
+	CHECK(!key.update(false, true, false));
+	CHECK(key.update(true, true, false));
+	CHECK(key.update(true, false, false));          // lasts after the key is let go
+	CHECK(!key.update(false, false, false));        // until forward is released
+
+	// Double-tapped forward starts it; slow taps do not.
+	Sprint quick;
+	quick.forwardPressed(10.0);
+	quick.forwardPressed(10.2);
+	CHECK(quick.update(true, false, false));
+	CHECK(!quick.update(true, false, true));        // sneaking stops it
+
+	Sprint slow;
+	slow.forwardPressed(10.0);
+	slow.forwardPressed(10.5);
+	CHECK(!slow.update(true, false, false));
+}

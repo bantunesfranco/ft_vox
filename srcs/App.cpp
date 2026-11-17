@@ -310,10 +310,12 @@ void App::updatePlayerMovement(const bool acceptInput) {
 	if (held(VOX_KEY_A)) moveDirection -= right;
 	if (held(VOX_KEY_D)) moveDirection += right;
 	if (flyMode) {
+		// Minecraft's flight keys: Space up, Shift down, Ctrl fast.
 		if (held(VOX_KEY_SPACE)) moveDirection.y += 1.0f;
-		if (held(VOX_KEY_LEFT_CONTROL)) moveDirection.y -= 1.0f;
+		if (held(VOX_KEY_LEFT_SHIFT)) moveDirection.y -= 1.0f;
+		const float speed = camera->moveSpeed * (held(VOX_KEY_LEFT_CONTROL) ? 10.0f : 1.0f);
 		if (glm::dot(moveDirection, moveDirection) > 0.0f)
-			camera->pos += glm::normalize(moveDirection) * camera->moveSpeed * dt;
+			camera->pos += glm::normalize(moveDirection) * speed * dt;
 		velocity = glm::vec3(0.0f);
 		jumpRequested = false;
 		return;
@@ -325,8 +327,9 @@ void App::updatePlayerMovement(const bool acceptInput) {
 		input.wish = {wish.x, wish.z};
 	}
 	input.jump = jumpRequested || held(VOX_KEY_SPACE);       // held: jumps again on landing
-	input.sprint = held(VOX_KEY_LEFT_SHIFT);
-	input.sneak = held(VOX_KEY_LEFT_CONTROL);
+	// Minecraft's keys: Shift sneaks; Ctrl or a double-tapped W sprints.
+	input.sneak = held(VOX_KEY_LEFT_SHIFT);
+	input.sprint = sprint.update(held(VOX_KEY_W), held(VOX_KEY_LEFT_CONTROL), input.sneak);
 	jumpRequested = false;
 
 	PlayerPhysics::Body body{camera->pos, velocity, grounded};
@@ -512,14 +515,8 @@ void App::placeBlock() {
 	applySessionEvents();
 }
 
-// Shift: a x10 speed toggle while flying; on foot it is held to sprint instead.
-void App::toggleSpeedBoost() {
-	if (!camera || !flyMode)
-		return;
-
-	speedBoostEnabled = !speedBoostEnabled;
-	camera->moveSpeed = camera->baseMoveSpeed * (speedBoostEnabled ? 10.0f : 1.0f);
-	camera->rotSpeed = camera->baseRotSpeed * (speedBoostEnabled ? 2.0f : 1.0f);
+void App::forwardPressed() {
+	sprint.forwardPressed(glfwGetTime());
 }
 
 void App::toggleFlyMode() {

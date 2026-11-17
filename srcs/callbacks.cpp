@@ -114,8 +114,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         app->selectHotbarSlot(static_cast<std::uint16_t>(key - VOX_KEY_1));
     } else if (gameInput && key == VOX_KEY_SPACE && action == VOX_PRESS) {
         app->jump();
-    } else if (gameInput && key == VOX_KEY_LEFT_SHIFT && action == VOX_PRESS) {
-        app->toggleSpeedBoost();
+    } else if (gameInput && key == VOX_KEY_W && action == VOX_PRESS) {
+        app->forwardPressed();
     } else if (gameInput && key == VOX_KEY_X && action == VOX_PRESS) {
         app->toggleWireframeDebug();
     } else if (gameInput && key == VOX_KEY_Z && action == VOX_PRESS) {

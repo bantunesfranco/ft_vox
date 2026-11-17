@@ -47,6 +47,23 @@ using Collides = std::function<bool(const glm::vec3& eye)>;
 
 void step(Body& body, const Input& input, float dt, const Collides& collides);
 
+// Minecraft's sprint rule: the sprint key while moving forward, or forward
+// pressed twice within DOUBLE_TAP seconds, starts it; it lasts until forward
+// is released or the player sneaks.
+class Sprint {
+public:
+	static constexpr double DOUBLE_TAP = 0.3;
+
+	void forwardPressed(double now) noexcept;
+	// Call once per frame; returns whether the player sprints this frame.
+	bool update(bool forwardHeld, bool sprintKey, bool sneak) noexcept;
+
+private:
+	bool   _sprinting = false;
+	bool   _doubleTapped = false;
+	double _lastForwardPress = -1.0;
+};
+
 } // namespace PlayerPhysics
 
 #endif

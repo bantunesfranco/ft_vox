@@ -98,4 +98,21 @@ void step(Body& body, const Input& input, const float dt, const Collides& collid
 	}
 }
 
+void Sprint::forwardPressed(const double now) noexcept {
+	if (_lastForwardPress >= 0.0 && now - _lastForwardPress <= DOUBLE_TAP)
+		_doubleTapped = true;
+	_lastForwardPress = now;
+}
+
+bool Sprint::update(const bool forwardHeld, const bool sprintKey, const bool sneak) noexcept {
+	if (!forwardHeld || sneak) {
+		_sprinting = false;
+		_doubleTapped = false;
+	} else if (sprintKey || _doubleTapped) {
+		_sprinting = true;
+		_doubleTapped = false;
+	}
+	return _sprinting;
+}
+
 } // namespace PlayerPhysics
