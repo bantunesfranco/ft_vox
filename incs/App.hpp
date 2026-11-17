@@ -41,6 +41,7 @@ class App : public Engine
 		void	forwardPressed();       // W pressed: double tap starts sprinting
 		void	toggleFlyMode();
 		void	jump();
+		void	updateFluidFog();
 
 		void togglePauseMenu();
 		void toggleInventoryMenu();
@@ -99,6 +100,7 @@ class App : public Engine
 		bool jumpRequested = false;
 		glm::vec3 velocity{0.0f};          // walking physics (PlayerPhysics), unused when flying
 		std::array<float, 4> clearColor{0.075f, 0.33f, 0.61f, 1.0f};
+		glm::vec4 fluidFog{0.0f};          // fog of the block the eye is in (rgb, w = distance; 0 = none)
 		bool hasHighlightedBlock = false;
 		glm::ivec3 highlightedBlockPos{};
 

@@ -18,6 +18,8 @@ layout(std140, binding = 0) uniform WorldUBO
     mat4 MVP;
     vec4 light;
     vec4 ambientData;
+    vec4 eye;         // xyz = camera position
+    vec4 fog;         // rgb = colour, w = distance (0 = off): eye inside water / lava
 };
 
 out vec4 FragColor;
@@ -53,5 +55,10 @@ void main()
 
     float brightness = (ambient + lightFactor) * vAO * 1.25;
 
-    FragColor = vec4(tex.rgb * brightness, tex.a);
+    vec3 color = tex.rgb * brightness;
+    if (fog.w > 0.0) {
+        float f = clamp(distance(vWorldPos, eye.xyz) / fog.w, 0.0, 1.0);
+        color = mix(color, fog.rgb, f);
+    }
+    FragColor = vec4(color, tex.a);
 }

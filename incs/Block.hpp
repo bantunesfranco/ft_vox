@@ -59,6 +59,12 @@ struct BlockDefinition {
     std::uint16_t textureTop = 0;
     std::uint16_t textureBottom = 0;
     std::uint16_t textureSide = 0;
+
+    // Fog while the camera's eye is inside this block: the world fades into
+    // `fogColor` (0xRRGGBB) over `fogDistance` blocks; 0 = no fog.
+    // Water: blue over 24 blocks (lava, once added: red over ~1.5).
+    std::uint32_t fogColor = 0;
+    float fogDistance = 0.0f;
 };
 
 

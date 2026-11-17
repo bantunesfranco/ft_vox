@@ -86,3 +86,16 @@ SELFTEST(Blocks, textures_are_atlas_sprites) {
 	CHECK(BlockTextures::sprite(1).x == 1168 && BlockTextures::sprite(1).y == 720);
 	CHECK(BlockTextures::sprite(3).x == 1680 && BlockTextures::sprite(3).y == 1312);
 }
+
+SELFTEST(Blocks, fog_inside_liquids) {
+	// With the eye inside water the world fades into blue a few blocks away;
+	// ordinary blocks have no fog.
+	const BlockRegistry registry;
+	const BlockDefinition& water = registry.get(WATER_BLOCK);
+	CHECK(water.fogDistance > 4.0f && water.fogDistance < 32.0f);
+	CHECK((water.fogColor & 0xFFu) > (water.fogColor >> 16));          // blue over red
+	for (const BlockType type : {BlockType::Air, BlockType::Stone, BlockType::Ice}) {
+		CHECK_EQ(registry.get(type).fogDistance, 0.0f);
+		CHECK_EQ(registry.get(type).fogColor, 0u);
+	}
+}

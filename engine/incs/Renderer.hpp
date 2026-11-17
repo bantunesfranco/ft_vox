@@ -23,6 +23,8 @@ struct WorldUBO {
     glm::mat4 MVP{1.0f};
     glm::vec4 light{0.0f};
     glm::vec4 ambientData{0.5f, 0.0f, 0.0f, 0.0f};
+    glm::vec4 eye{0.0f};      // xyz = camera position
+    glm::vec4 fog{0.0f};      // rgb = colour, w = distance it fades over (0 = off)
 };
 
 

@@ -10,6 +10,8 @@ layout(std140, binding = 0) uniform WorldUBO
     mat4 MVP;
     vec4 light;       // xyz = position, w = radius
     vec4 ambientData; // x = ambient
+    vec4 eye;         // xyz = camera position
+    vec4 fog;         // rgb = colour, w = distance (0 = off)
 };
 
 uniform bool uHighlightPass;

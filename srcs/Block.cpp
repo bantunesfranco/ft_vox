@@ -79,7 +79,9 @@ BlockRegistry::BlockRegistry() noexcept {
         .solid = false,
         .textureTop = 6,
         .textureBottom = 6,
-        .textureSide = 6
+        .textureSide = 6,
+        .fogColor = 0x1A4AB4,         // deep blue
+        .fogDistance = 24.0f
     };
 
     _definitions[toBlockId(BlockType::Snow)] = {

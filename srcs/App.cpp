@@ -193,6 +193,7 @@ void App::resetPlayerState() {
 	spawnInitialized = false;                       // movement waits until the spawn is known
 	jumpRequested = false;
 	velocity = glm::vec3(0.0f);
+	fluidFog = glm::vec4(0.0f);
 }
 
 void App::endSession() {
@@ -342,7 +343,11 @@ void App::updatePlayerMovement(const bool acceptInput) {
 void App::run() {
     while (windowIsOpen(window))
     {
-        glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+        // Inside water (or lava) the sky is the fog colour too.
+        if (fluidFog.w > 0.0f)
+            glClearColor(fluidFog.r, fluidFog.g, fluidFog.b, 1.0f);
+        else
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
 		profiler.beginFrame();
 		drawCalls = 0;
 
@@ -386,6 +391,9 @@ void App::run() {
 
 			WorldUBO worldUBO{};
 			Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
+			updateFluidFog();
+			worldUBO.eye = glm::vec4(camera->pos, 1.0f);
+			worldUBO.fog = fluidFog;
 			world.frustum.updateFrustum(camera->proj, camera->view);
 
 			for (auto& gpuMesh : world.pruneRenderStates())
@@ -527,6 +535,21 @@ void App::toggleFlyMode() {
 void App::jump() {
 	if (!flyMode)
 		jumpRequested = true;
+}
+
+// Fog of the block the camera's eye is in (water: blue), for the shader and the sky.
+void App::updateFluidFog() {
+	fluidFog = glm::vec4(0.0f);
+	BlockId eyeBlock = AIR_BLOCK;
+	if (!camera || !world.getBlockAt(glm::ivec3(glm::floor(camera->pos)), eyeBlock))
+		return;
+	const BlockDefinition& block = world.getBlockRegistry().get(eyeBlock);
+	if (block.fogDistance <= 0.0f)
+		return;
+	const auto channel = [&block](const int shift) {
+		return static_cast<float>((block.fogColor >> shift) & 0xFFu) / 255.0f;
+	};
+	fluidFog = glm::vec4(channel(16), channel(8), channel(0), block.fogDistance);
 }
 
 void App::updateBlockHighlight() {
