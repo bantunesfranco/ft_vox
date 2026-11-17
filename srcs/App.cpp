@@ -354,6 +354,134 @@ void App::updatePlayerMovement(const bool acceptInput) {
 	grounded = body.grounded;
 }
 
+void App::simulate() {
+	// `world` is App's own member, borrowed by the session. It is NOT
+	// re-declared here: shadowing it would hide the member that
+	// updatePlayerMovement(), renderWorld() and the raycasts use.
+	if (session) {
+		session->update(camera->pos, FPSCounter::getDeltaTime());
+		applySessionEvents();
+	}
+
+	// Singleplayer pauses in menus. Multiplayer cannot: the player keeps
+	// falling / landing and the server keeps getting positions, only
+	// input is ignored while a menu is open.
+	const bool inGame = gameState.currentState == GameState::IN_GAME;
+	const bool simulating = session && (inGame || session->isRemote());
+	if (simulating) {
+		if (const auto serverTime = session->pollTimeOfDay())
+			timeTicks = *serverTime;                                 // the server's clock wins
+		if (const auto spawn = session->pollSpawn()) {
+			camera->pos = *spawn;
+			spawnInitialized = true;
+			grounded = true;
+			jumpRequested = false;
+		}
+		if (!bench.active) {                // the benchmark flies the camera itself, at a fixed time
+			updatePlayerMovement(inGame && !ui->wantsKeyboardCapture());
+			timeTicks = std::fmod(timeTicks + FPSCounter::getDeltaTime() * TimeOfDay::TICKS_PER_SECOND,
+			                      static_cast<double>(TimeOfDay::TICKS_PER_DAY));
+		}
+		session->onLocalPlayerMoved(camera->pos, camera->yaw, camera->pitch);
+	}
+	profiler.mark(FrameProfiler::Session);
+}
+
+void App::renderFrame() {
+	WorldUBO worldUBO{};
+	Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
+	updateFluidFog();
+	worldUBO.eye = glm::vec4(camera->pos, 1.0f);
+	worldUBO.fog = fluidFog;
+	// Time of day: sky light, sky colours; the haze is the horizon colour.
+	const auto ticks = static_cast<std::uint32_t>(timeTicks);
+	worldUBO.time.x = TimeOfDay::daylight(ticks);
+	const TimeOfDay::SkyColours sky = TimeOfDay::skyColours(ticks, {clearColor[0], clearColor[1], clearColor[2]});
+	const glm::vec3 zenith = sky.zenith;
+	const glm::vec3 horizon = sky.horizon;
+	worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_RADIUS * ChunkSection::SIZE));
+	world.frustum.updateFrustum(camera->proj, camera->view);
+
+	for (auto& gpuMesh : world.pruneRenderStates())
+		renderer->releaseMesh(gpuMesh);
+	profiler.mark(FrameProfiler::Prune);
+	world.buildRenderStates(camera->pos, camera->dir, *threadPool);
+	if (gameState.currentState == GameState::IN_GAME)
+		updateBlockHighlight();
+	profiler.mark(FrameProfiler::Mesh);
+
+	renderer->beginFrame(worldUBO);
+	processMeshUploads(world);
+	profiler.mark(FrameProfiler::Upload);
+	if (fluidFog.w <= 0.0f)                    // under water the fog colour is the sky
+		renderer->drawSky(glm::inverse(camera->proj * glm::mat4(glm::mat3(camera->view))), zenith, horizon,
+		                  TimeOfDay::sunDirection(ticks));
+	toggleWireframe(showWireframe);
+	renderWorld(world);
+
+	if (gameState.currentState == GameState::IN_GAME) {
+		renderBlockHighlight();
+	}
+	renderRemotePlayers();
+	toggleWireframe(false);
+	profiler.mark(FrameProfiler::Draw);
+}
+
+UiFrameModel App::buildUiModel() const {
+	// Field-by-field: designated initializers would require the exact
+	// declaration order of UiFrameModel.
+	UiFrameModel uiModel;
+	uiModel.state = gameState.currentState;
+	uiModel.selectedHotbarSlot = inventory.selectedSlot();
+	uiModel.fps = FPSCounter::getFPS();
+	if (camera)
+		uiModel.cameraPosition = {camera->pos.x, camera->pos.y, camera->pos.z};
+	uiModel.showDebug = gameState.currentState == GameState::IN_GAME;
+	uiModel.wireframe = showWireframe;
+	uiModel.clearColor = clearColor;
+	uiModel.timeOfDay = static_cast<int>(timeTicks);
+	uiModel.lastError = lastSessionError;
+	if (playingSeed)
+		uiModel.seedText = std::to_string(static_cast<std::int64_t>(*playingSeed));
+	if (gameState.currentState == GameState::MULTIPLAYER
+	    && selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size()))
+		uiModel.hostWorldName = worlds[static_cast<std::size_t>(selectedWorld)].name;
+	if (gameState.currentState == GameState::WORLD_SELECT) {
+		for (const WorldInfo& info : worlds) {
+			UiWorldEntry entry;
+			entry.name = info.name;
+			entry.readable = info.readable;
+			entry.detail = info.folder.filename().string()
+				+ (info.readable ? "    seed " + std::to_string(static_cast<std::int64_t>(info.seed))
+				                 : "    (cannot be read)");
+			uiModel.worlds.push_back(std::move(entry));
+		}
+		uiModel.selectedWorld = selectedWorld;
+	}
+	if (session) {
+		uiModel.statusText = session->statusText();
+		for (const RemotePlayerView& player : session->remotePlayers())
+			uiModel.players.push_back(player.name.empty() ? "player " + std::to_string(player.id) : player.name);
+		if (!isMenuState(gameState.currentState))
+			collectNameTags(uiModel);
+	}
+
+	const auto& inventorySlots = inventory.slots();
+	for (std::size_t i = 0; i < inventorySlots.size(); ++i) {
+		const ItemStack& stack = inventorySlots[i];
+		if (!stack.empty())
+			uiModel.inventorySlots[i] = {stack.item, stack.count, ItemRegistry::get(stack.item).name};
+	}
+	const ItemStack& cursorStack = inventory.cursorStack();
+	if (!cursorStack.empty())
+		uiModel.cursorStack = {
+			cursorStack.item,
+			cursorStack.count,
+			ItemRegistry::get(cursorStack.item).name
+		};
+	return uiModel;
+}
+
 void App::run() {
     while (windowIsOpen(window))
     {
@@ -377,128 +505,11 @@ void App::run() {
 		profiler.mark(FrameProfiler::Begin);
 
 		if (!isMenuState(gameState.currentState)) {
-			// `world` is App's own member, borrowed by the session. It is NOT
-			// re-declared here: shadowing it would hide the member that
-			// updatePlayerMovement(), renderWorld() and the raycasts use.
-			if (session) {
-				session->update(camera->pos, FPSCounter::getDeltaTime());
-				applySessionEvents();
-			}
-
-			// Singleplayer pauses in menus. Multiplayer cannot: the player keeps
-			// falling / landing and the server keeps getting positions, only
-			// input is ignored while a menu is open.
-			const bool inGame = gameState.currentState == GameState::IN_GAME;
-			const bool simulate = session && (inGame || session->isRemote());
-			if (simulate) {
-				if (const auto serverTime = session->pollTimeOfDay())
-					timeTicks = *serverTime;                                 // the server's clock wins
-				if (const auto spawn = session->pollSpawn()) {
-					camera->pos = *spawn;
-					spawnInitialized = true;
-					grounded = true;
-					jumpRequested = false;
-				}
-				if (!bench.active) {                // the benchmark flies the camera itself, at a fixed time
-					updatePlayerMovement(inGame && !ui->wantsKeyboardCapture());
-					timeTicks = std::fmod(timeTicks + FPSCounter::getDeltaTime() * TimeOfDay::TICKS_PER_SECOND,
-					                      static_cast<double>(TimeOfDay::TICKS_PER_DAY));
-				}
-				session->onLocalPlayerMoved(camera->pos, camera->yaw, camera->pitch);
-			}
-			profiler.mark(FrameProfiler::Session);
-
-			WorldUBO worldUBO{};
-			Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
-			updateFluidFog();
-			worldUBO.eye = glm::vec4(camera->pos, 1.0f);
-			worldUBO.fog = fluidFog;
-			// Time of day: sky light, sky colours; the haze is the horizon colour.
-			const auto ticks = static_cast<std::uint32_t>(timeTicks);
-			worldUBO.time.x = TimeOfDay::daylight(ticks);
-			const TimeOfDay::SkyColours sky = TimeOfDay::skyColours(ticks, {clearColor[0], clearColor[1], clearColor[2]});
-			const glm::vec3 zenith = sky.zenith;
-			const glm::vec3 horizon = sky.horizon;
-			worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_RADIUS * ChunkSection::SIZE));
-			world.frustum.updateFrustum(camera->proj, camera->view);
-
-			for (auto& gpuMesh : world.pruneRenderStates())
-				renderer->releaseMesh(gpuMesh);
-			profiler.mark(FrameProfiler::Prune);
-			world.buildRenderStates(camera->pos, camera->dir, *threadPool);
-			if (gameState.currentState == GameState::IN_GAME)
-				updateBlockHighlight();
-			profiler.mark(FrameProfiler::Mesh);
-
-			renderer->beginFrame(worldUBO);
-			processMeshUploads(world);
-			profiler.mark(FrameProfiler::Upload);
-			if (fluidFog.w <= 0.0f)                    // under water the fog colour is the sky
-				renderer->drawSky(glm::inverse(camera->proj * glm::mat4(glm::mat3(camera->view))), zenith, horizon,
-				                  TimeOfDay::sunDirection(ticks));
-			toggleWireframe(showWireframe);
-			renderWorld(world);
-
-			if (gameState.currentState == GameState::IN_GAME) {
-				renderBlockHighlight();
-			}
-			renderRemotePlayers();
-			toggleWireframe(false);
-			profiler.mark(FrameProfiler::Draw);
+			simulate();
+			renderFrame();
 		}
 
-		// Field-by-field: designated initializers would require the exact
-		// declaration order of UiFrameModel.
-		UiFrameModel uiModel;
-		uiModel.state = gameState.currentState;
-		uiModel.selectedHotbarSlot = inventory.selectedSlot();
-		uiModel.fps = FPSCounter::getFPS();
-		if (camera)
-			uiModel.cameraPosition = {camera->pos.x, camera->pos.y, camera->pos.z};
-		uiModel.showDebug = gameState.currentState == GameState::IN_GAME;
-		uiModel.wireframe = showWireframe;
-		uiModel.clearColor = clearColor;
-		uiModel.timeOfDay = static_cast<int>(timeTicks);
-		uiModel.lastError = lastSessionError;
-		if (playingSeed)
-			uiModel.seedText = std::to_string(static_cast<std::int64_t>(*playingSeed));
-		if (gameState.currentState == GameState::MULTIPLAYER
-		    && selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size()))
-			uiModel.hostWorldName = worlds[static_cast<std::size_t>(selectedWorld)].name;
-		if (gameState.currentState == GameState::WORLD_SELECT) {
-			for (const WorldInfo& info : worlds) {
-				UiWorldEntry entry;
-				entry.name = info.name;
-				entry.readable = info.readable;
-				entry.detail = info.folder.filename().string()
-					+ (info.readable ? "    seed " + std::to_string(static_cast<std::int64_t>(info.seed))
-					                 : "    (cannot be read)");
-				uiModel.worlds.push_back(std::move(entry));
-			}
-			uiModel.selectedWorld = selectedWorld;
-		}
-		if (session) {
-			uiModel.statusText = session->statusText();
-			for (const RemotePlayerView& player : session->remotePlayers())
-				uiModel.players.push_back(player.name.empty() ? "player " + std::to_string(player.id) : player.name);
-			if (!isMenuState(gameState.currentState))
-				collectNameTags(uiModel);
-		}
-
-		const auto& inventorySlots = inventory.slots();
-		for (std::size_t i = 0; i < inventorySlots.size(); ++i) {
-			const ItemStack& stack = inventorySlots[i];
-			if (!stack.empty())
-				uiModel.inventorySlots[i] = {stack.item, stack.count, ItemRegistry::get(stack.item).name};
-		}
-		const ItemStack& cursorStack = inventory.cursorStack();
-		if (!cursorStack.empty())
-			uiModel.cursorStack = {
-				cursorStack.item,
-				cursorStack.count,
-				ItemRegistry::get(cursorStack.item).name
-			};
-		for (const UiAction& action : ui->render(uiModel))
+		for (const UiAction& action : ui->render(buildUiModel()))
 			applyUiAction(action);
 
 		ui->endFrame();
