@@ -40,13 +40,13 @@ SELFTEST(Caves, cave_fraction) {
 		for (int z = 0; z < 16; ++z)
 			for (int x = 0; x < 16; ++x) {
 				const int top = gen.surfaceHeight(c.x * 16 + x, c.z * 16 + z) - 8;
-				for (int y = DEEP_WATER_LEVEL; y < top; ++y) {
+				for (int y = DEEP_LAVA_LEVEL; y < top; ++y) {
 					const int sy = ChunkColumn::toStorageY(y);
 					if (solidOnly->getUnchecked(x, sy, z) == AIR_BLOCK || solidOnly->getUnchecked(x, sy, z) == WATER_BLOCK)
 						continue;
 					++total;
 					const BlockId b = withCaves->getUnchecked(x, sy, z);
-					carved += (b == AIR_BLOCK || b == WATER_BLOCK) ? 1 : 0;
+					carved += (b == AIR_BLOCK || b == WATER_BLOCK || b == LAVA_BLOCK) ? 1 : 0;
 				}
 			}
 	});
@@ -77,18 +77,23 @@ SELFTEST(Caves, no_air_under_water) {
 	CHECK_EQ(holes, 0);
 }
 
-SELFTEST(Caves, deep_water) {
+SELFTEST(Caves, deep_lava) {
+	// Deep caves fill with lava, as in Minecraft 1.18+; no water down there.
 	const TerrainGenerator gen(20261116);
-	long water = 0;
+	long lava = 0, water = 0;
 	forLandColumns(gen, 64, [&](const ChunkCoord c) {
 		const auto column = make(gen, c);
 		for (int z = 0; z < 16; ++z)
 			for (int x = 0; x < 16; ++x)
-				for (int y = ChunkColumn::MIN_WORLD_Y + 4; y < DEEP_WATER_LEVEL; ++y)
-					water += column->getUnchecked(x, ChunkColumn::toStorageY(y), z) == WATER_BLOCK ? 1 : 0;
+				for (int y = ChunkColumn::MIN_WORLD_Y + 4; y < DEEP_LAVA_LEVEL; ++y) {
+					const BlockId b = column->getUnchecked(x, ChunkColumn::toStorageY(y), z);
+					lava += b == LAVA_BLOCK ? 1 : 0;
+					water += b == WATER_BLOCK ? 1 : 0;
+				}
 	});
-	std::printf("     %ld deep cave water blocks\n", water);
-	CHECK(water > 0);
+	std::printf("     %ld deep cave lava blocks\n", lava);
+	CHECK(lava > 0);
+	CHECK_EQ(water, 0L);
 }
 
 SELFTEST(Caves, deterministic) {

@@ -285,7 +285,7 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 				                                        baseZ + k * CELL_CAVE);
 
 	const int lowest = ChunkColumn::toStorageY(ChunkColumn::MIN_WORLD_Y + 5);
-	const int deepWater = ChunkColumn::toStorageY(DEEP_WATER_LEVEL);
+	const int deepLava = ChunkColumn::toStorageY(DEEP_LAVA_LEVEL);
 	for (int z = 0; z < ChunkSection::SIZE; ++z)
 		for (int x = 0; x < ChunkSection::SIZE; ++x) {
 			const int top = tops[static_cast<std::size_t>(z * ChunkSection::SIZE + x)];
@@ -329,7 +329,7 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 						carve = CaveCarver::cheeseCarves(lerp(&CaveCarver::Sample::cheese), depth);
 				}
 				if (carve)
-					column.setUnchecked(x, sy, z, sy < deepWater ? WATER_BLOCK : AIR_BLOCK);
+					column.setUnchecked(x, sy, z, sy < deepLava ? LAVA_BLOCK : AIR_BLOCK);
 			}
 		}
 }

@@ -20,7 +20,7 @@
 
 namespace worldgen {
 
-constexpr int DEEP_WATER_LEVEL = -50;   // carved space below this fills with water
+constexpr int DEEP_LAVA_LEVEL = -50;    // carved space below this fills with lava
 
 class CaveCarver {
 public:
