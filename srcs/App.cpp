@@ -988,12 +988,12 @@ void App::processMeshUploads(World& _world) {
 	for (auto& renderState : _world.getRenderStates()) {
 		if (!renderState.mesh.empty() && !renderState.gpuMesh.uploaded) {
 			renderer->uploadMesh(renderState.mesh, renderState.gpuMesh);
-			renderState.mesh.clear();
+			renderState.mesh.release();
 		}
 
 		if (!renderState.transparentMesh.empty() && !renderState.transparentGpuMesh.uploaded) {
 			renderer->uploadMesh(renderState.transparentMesh, renderState.transparentGpuMesh);
-			renderState.transparentMesh.clear();
+			renderState.transparentMesh.release();
 		}
 	}
 }

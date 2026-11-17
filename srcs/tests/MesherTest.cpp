@@ -143,3 +143,15 @@ SELFTEST(Mesher, cactus_sides_inset) {
 	CHECK_EQ(notInset, 0);
 	CHECK_EQ(tops, 4);                                          // only the top of the stack
 }
+
+// An uploaded mesh keeps no CPU copy: clear() would keep the capacity.
+SELFTEST(Mesh, release_frees_capacity) {
+	MeshData mesh;
+	mesh.reserve(1000, 1000);
+	mesh.vertices.resize(10);
+	mesh.indices.resize(10);
+	mesh.release();
+	CHECK_EQ(mesh.vertices.capacity(), std::size_t{0});
+	CHECK_EQ(mesh.indices.capacity(), std::size_t{0});
+	CHECK(mesh.empty());
+}

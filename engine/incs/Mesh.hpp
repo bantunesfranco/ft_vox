@@ -84,6 +84,12 @@ struct MeshData
         indices.clear();
     }
 
+    // Like clear(), but gives the memory back (clear() keeps the capacity).
+    void release() noexcept {
+        std::vector<PackedVertex>().swap(vertices);
+        std::vector<std::uint32_t>().swap(indices);
+    }
+
     void reserve(std::size_t vertexCount, std::size_t indexCount) {
         vertices.reserve(vertexCount);
         indices.reserve(indexCount);
