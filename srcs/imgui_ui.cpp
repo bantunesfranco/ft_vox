@@ -68,17 +68,32 @@ void addAtlasImage(ImDrawList* drawList, const GLuint texture, const AtlasRect r
     drawList->AddImage(textureId(texture), min, max, uv0, uv1, tint);
 }
 
+const BlockDefinition& itemBlock(const ItemId item) {
+    static const BlockRegistry registry;
+    return registry.get(ItemRegistry::get(item).placedBlock);
+}
+
 // The item's block texture (grass: its top), where its picture is in the atlas.
 std::uint16_t itemTexture(const ItemId item) {
-    static const BlockRegistry registry;
-    const BlockDefinition& block = registry.get(ItemRegistry::get(item).placedBlock);
+    const BlockDefinition& block = itemBlock(item);
     return item == ItemId::GrassBlock ? block.textureTop : block.textureSide;
+}
+
+// A torch's sprite is a thin stick in a mostly empty tile, so its icon shows
+// just the stick's rows as a square around it, as big as the picture allows.
+AtlasRect torchIcon(const BlockTextures::PixelRect px) {
+    const float size = static_cast<float>(TORCH_BOX.max.y - TORCH_BOX.min.y);
+    const float centreX = static_cast<float>(TORCH_BOX.min.x + TORCH_BOX.max.x) * 0.5f;
+    const float top = static_cast<float>(px.h - TORCH_BOX.max.y);       // the picture's rows run top-down
+    return {static_cast<float>(px.x) + centreX - size * 0.5f, static_cast<float>(px.y) + top, size, size};
 }
 
 AtlasRect itemIcon(const ItemId item) {
     if (item == ItemId::Empty)
         return {};
     const BlockTextures::PixelRect px = BlockTextures::pixels(itemTexture(item));
+    if (itemBlock(item).model == BlockModel::Torch)
+        return torchIcon(px);
     return {static_cast<float>(px.x), static_cast<float>(px.y), static_cast<float>(px.w), static_cast<float>(px.h)};
 }
 
