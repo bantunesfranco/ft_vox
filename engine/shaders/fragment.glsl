@@ -64,7 +64,8 @@ void main()
         color = mix(color, skyFog.rgb, smoothstep(skyFog.w * 0.6, skyFog.w, d));
     }
     if (fog.w > 0.0) {
-        float f = clamp(distance(vWorldPos, eye.xyz) / fog.w, 0.0, 1.0);
+        // Clear close by, easing into the fog colour by fog.w.
+        float f = smoothstep(fog.w * 0.1, fog.w, distance(vWorldPos, eye.xyz));
         color = mix(color, fog.rgb, f);
     }
     FragColor = vec4(color, tex.a);

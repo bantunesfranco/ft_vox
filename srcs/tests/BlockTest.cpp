@@ -92,7 +92,7 @@ SELFTEST(Blocks, fog_inside_liquids) {
 	// ordinary blocks have no fog.
 	const BlockRegistry registry;
 	const BlockDefinition& water = registry.get(WATER_BLOCK);
-	CHECK(water.fogDistance > 4.0f && water.fogDistance < 32.0f);
+	CHECK(water.fogDistance >= 32.0f && water.fogDistance <= 128.0f);   // murky, not blind
 	CHECK((water.fogColor & 0xFFu) > (water.fogColor >> 16));          // blue over red
 	for (const BlockType type : {BlockType::Air, BlockType::Stone, BlockType::Ice}) {
 		CHECK_EQ(registry.get(type).fogDistance, 0.0f);
