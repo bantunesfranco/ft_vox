@@ -141,6 +141,17 @@ SELFTEST(Blocks, torch_needs_solid_ground) {
 	CHECK(placementAllowed(r, toBlockId(BlockType::Stone), AIR_BLOCK));
 }
 
+SELFTEST(Blocks, outline_box) {
+	// The highlight hugs the block's shape, in sixteenths of a block.
+	const BlockBox cube = outlineBox(BlockModel::Cube);
+	CHECK(cube.min == glm::ivec3(0, 0, 0) && cube.max == glm::ivec3(16, 16, 16));
+	const BlockBox torch = outlineBox(BlockModel::Torch);
+	CHECK(torch.min == glm::ivec3(7, 0, 7) && torch.max == glm::ivec3(9, 10, 9));
+	const BlockBox cactus = outlineBox(BlockModel::Cactus);
+	CHECK(cactus.min == glm::ivec3(1, 0, 1) && cactus.max == glm::ivec3(15, 16, 15));
+	CHECK(TORCH_BOX.min == torch.min && TORCH_BOX.max == torch.max);
+}
+
 SELFTEST(Blocks, sprite_pixels_inside_cells) {
 	// The 16 x 16 picture sits 16 px into its 48 x 48 atlas cell (the rest is
 	// padding): icons and the world must read it there, not at the cell origin.

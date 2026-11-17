@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <glm/vec3.hpp>
+
 enum class BlockType : std::uint8_t {
     Air = 0,
     Grass,
@@ -51,6 +53,19 @@ constexpr BlockId LAVA_BLOCK = toBlockId(BlockType::Lava);
 
 // How a block is drawn: a full cube, or a torch (a thin stick).
 enum class BlockModel : std::uint8_t { Cube, Torch, Cactus };
+
+// A box inside a block's cell, in sixteenths of a block.
+struct BlockBox {
+    glm::ivec3 min;
+    glm::ivec3 max;
+};
+
+// The torch's stick: a 2 x 10 x 2 box in the middle of the cell. The mesher
+// draws it and the highlight outlines it.
+constexpr BlockBox TORCH_BOX{{7, 0, 7}, {9, 10, 9}};
+
+// The box the highlight outlines for a block drawn with `model`.
+[[nodiscard]] BlockBox outlineBox(BlockModel model) noexcept;
 
 constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Count);
 

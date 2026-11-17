@@ -598,8 +598,13 @@ void App::renderBlockHighlight() {
 	if (!hasHighlightedBlock)
 		return;
 
-	const glm::vec3 minPos(highlightedBlockPos);
-	renderer->renderBoundingBox(minPos, minPos + glm::vec3(1.0f));
+	// Outline the block's own shape (a torch is a thin stick), not its whole cell.
+	BlockId id = AIR_BLOCK;
+	if (!world.getBlockAt(highlightedBlockPos, id))
+		return;
+	const BlockBox box = outlineBox(world.getBlockRegistry().get(id).model);
+	const glm::vec3 origin(highlightedBlockPos);
+	renderer->renderBoundingBox(origin + glm::vec3(box.min) / 16.0f, origin + glm::vec3(box.max) / 16.0f);
 }
 
 

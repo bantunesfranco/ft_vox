@@ -173,6 +173,15 @@ BlockRegistry::BlockRegistry() noexcept {
     };
 }
 
+BlockBox outlineBox(const BlockModel model) noexcept {
+    switch (model) {
+    case BlockModel::Torch:  return TORCH_BOX;
+    case BlockModel::Cactus: return {{1, 0, 1}, {15, 16, 15}};   // sides 1/16 inside the cell
+    case BlockModel::Cube:   break;
+    }
+    return {{0, 0, 0}, {16, 16, 16}};
+}
+
 bool placementAllowed(const BlockRegistry& registry, const BlockId block, const BlockId below) noexcept {
     if (registry.get(block).model != BlockModel::Torch)
         return true;

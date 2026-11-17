@@ -268,7 +268,11 @@ void ChunkMesher::build(
         const Textures textures{definition.textureSide, definition.textureTop, definition.textureBottom};
         if (definition.model == BlockModel::Torch) {
             // A 2 x 10 x 2 stick in the middle of the cell: four sides and a top.
-            emitBox(output, x, y, z, {7, 0, 7}, {9, 10, 9}, SIDES | TOP, textures, cellLight);
+            const auto corner = [](const glm::ivec3& v) {
+                return std::array<std::uint8_t, 3>{static_cast<std::uint8_t>(v.x), static_cast<std::uint8_t>(v.y),
+                                                   static_cast<std::uint8_t>(v.z)};
+            };
+            emitBox(output, x, y, z, corner(TORCH_BOX.min), corner(TORCH_BOX.max), SIDES | TOP, textures, cellLight);
         } else if (definition.model == BlockModel::Cactus) {
             // Minecraft's cactus: sides 1/16 inside the cell, full top and
             // bottom, none between two cacti or against an opaque block.
