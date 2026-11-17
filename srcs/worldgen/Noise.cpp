@@ -64,6 +64,20 @@ int floorToInt(const float v) noexcept {
 	return static_cast<int>(std::floor(v));
 }
 
+// hash3 one coordinate at a time, so lattice corners that share x (or x and y)
+// share that part of the hash: hash3(s, x, y, z) == hashZ(hashY(hashX(s, x), y), z).
+std::uint64_t hashX(const std::uint64_t seed, const int x) noexcept {
+	return splitmix(seed ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) * 0x9E3779B97F4A7C15ull));
+}
+
+std::uint64_t hashY(const std::uint64_t h, const int y) noexcept {
+	return splitmix(h ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(y)) * 0xC2B2AE3D27D4EB4Full));
+}
+
+std::uint32_t hashZ(const std::uint64_t h, const int z) noexcept {
+	return static_cast<std::uint32_t>(splitmix(h ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(z)) * 0x165667B19E3779F9ull)) >> 32);
+}
+
 } // namespace
 
 std::uint64_t mixSeed(const std::uint64_t seed, const std::uint64_t salt) noexcept {
@@ -71,11 +85,7 @@ std::uint64_t mixSeed(const std::uint64_t seed, const std::uint64_t salt) noexce
 }
 
 std::uint32_t hash3(const std::uint64_t seed, const int x, const int y, const int z) noexcept {
-	std::uint64_t h = seed;
-	h = splitmix(h ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) * 0x9E3779B97F4A7C15ull));
-	h = splitmix(h ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(y)) * 0xC2B2AE3D27D4EB4Full));
-	h = splitmix(h ^ (static_cast<std::uint64_t>(static_cast<std::uint32_t>(z)) * 0x165667B19E3779F9ull));
-	return static_cast<std::uint32_t>(h >> 32);
+	return hashZ(hashY(hashX(seed, x), y), z);
 }
 
 float Noise::at(const float x, const float z) const noexcept {
@@ -84,10 +94,12 @@ float Noise::at(const float x, const float z) const noexcept {
 	const float fx = x - static_cast<float>(x0);
 	const float fz = z - static_cast<float>(z0);
 
-	const float n00 = grad2(hash3(_seed, x0,     0, z0),     fx,        fz);
-	const float n10 = grad2(hash3(_seed, x0 + 1, 0, z0),     fx - 1.0f, fz);
-	const float n01 = grad2(hash3(_seed, x0,     0, z0 + 1), fx,        fz - 1.0f);
-	const float n11 = grad2(hash3(_seed, x0 + 1, 0, z0 + 1), fx - 1.0f, fz - 1.0f);
+	const std::uint64_t h0 = hashY(hashX(_seed, x0), 0);
+	const std::uint64_t h1 = hashY(hashX(_seed, x0 + 1), 0);
+	const float n00 = grad2(hashZ(h0, z0),     fx,        fz);
+	const float n10 = grad2(hashZ(h1, z0),     fx - 1.0f, fz);
+	const float n01 = grad2(hashZ(h0, z0 + 1), fx,        fz - 1.0f);
+	const float n11 = grad2(hashZ(h1, z0 + 1), fx - 1.0f, fz - 1.0f);
 
 	const float u = fade(fx);
 	const float v = fade(fz);
@@ -103,8 +115,11 @@ float Noise::at(const float x, const float y, const float z) const noexcept {
 	const float fy = y - static_cast<float>(y0);
 	const float fz = z - static_cast<float>(z0);
 
+	const std::uint64_t hx[2] = {hashX(_seed, x0), hashX(_seed, x0 + 1)};
+	const std::uint64_t hxy[2][2] = {{hashY(hx[0], y0), hashY(hx[0], y0 + 1)},
+	                                 {hashY(hx[1], y0), hashY(hx[1], y0 + 1)}};
 	const auto corner = [&](const int ix, const int iy, const int iz) {
-		return grad3(hash3(_seed, x0 + ix, y0 + iy, z0 + iz),
+		return grad3(hashZ(hxy[ix][iy], z0 + iz),
 		             fx - static_cast<float>(ix), fy - static_cast<float>(iy), fz - static_cast<float>(iz));
 	};
 	const float u = fade(fx);

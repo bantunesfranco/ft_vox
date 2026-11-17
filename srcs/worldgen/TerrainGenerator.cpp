@@ -36,17 +36,29 @@ int nodeWorldY(const int gy) noexcept { return ChunkColumn::MIN_WORLD_Y + gy * C
 float stretch(const float v) noexcept { return std::clamp(v * 1.6f, -1.0f, 1.0f); }
 
 // The one interpolation used everywhere (generate() and surfaceHeight() must
-// agree to the bit, so they share it).
+// agree to the bit, so they share it). Split in two steps: the x step depends
+// only on the cell and fx, so a block column computes it once per cell.
+struct XLerps {
+	float x00, x10, x01, x11;
+};
+
+XLerps lerpX(const float c000, const float c100, const float c010, const float c110,
+             const float c001, const float c101, const float c011, const float c111,
+             const float fx) noexcept {
+	return {c000 + (c100 - c000) * fx, c010 + (c110 - c010) * fx,
+	        c001 + (c101 - c001) * fx, c011 + (c111 - c011) * fx};
+}
+
+float lerpYZ(const XLerps& x, const float fy, const float fz) noexcept {
+	const float y0 = x.x00 + (x.x10 - x.x00) * fy;
+	const float y1 = x.x01 + (x.x11 - x.x01) * fy;
+	return y0 + (y1 - y0) * fz;
+}
+
 float trilinear(const float c000, const float c100, const float c010, const float c110,
                 const float c001, const float c101, const float c011, const float c111,
                 const float fx, const float fy, const float fz) noexcept {
-	const float x00 = c000 + (c100 - c000) * fx;
-	const float x10 = c010 + (c110 - c010) * fx;
-	const float x01 = c001 + (c101 - c001) * fx;
-	const float x11 = c011 + (c111 - c011) * fx;
-	const float y0 = x00 + (x10 - x00) * fy;
-	const float y1 = x01 + (x11 - x01) * fy;
-	return y0 + (y1 - y0) * fz;
+	return lerpYZ(lerpX(c000, c100, c010, c110, c001, c101, c011, c111, fx), fy, fz);
 }
 
 float fraction(const int local, const int cell) noexcept {
@@ -185,18 +197,19 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 		for (int x = 0; x < ChunkSection::SIZE; ++x) {
 			const int i = x / CELL_XZ, k = z / CELL_XZ;
 			const float fx = fraction(x, CELL_XZ), fz = fraction(z, CELL_XZ);
-			for (int sy = 0; sy < ChunkColumn::HEIGHT; ++sy) {
-				const int gy = sy / CELL_Y;
-				const float d = trilinear(
+			for (int gy = 0; gy + 1 < NODES_Y; ++gy) {
+				const XLerps cell = lerpX(
 					density[node(i, gy, k)],         density[node(i + 1, gy, k)],
 					density[node(i, gy + 1, k)],     density[node(i + 1, gy + 1, k)],
 					density[node(i, gy, k + 1)],     density[node(i + 1, gy, k + 1)],
-					density[node(i, gy + 1, k + 1)], density[node(i + 1, gy + 1, k + 1)],
-					fx, fraction(sy, CELL_Y), fz);
-				if (d > 0.0f)
-					column.setUnchecked(x, sy, z, STONE);
-				else if (ChunkColumn::toWorldY(sy) <= SEA_LEVEL)
-					column.setUnchecked(x, sy, z, WATER_BLOCK);
+					density[node(i, gy + 1, k + 1)], density[node(i + 1, gy + 1, k + 1)], fx);
+				for (int sy = gy * CELL_Y; sy < gy * CELL_Y + CELL_Y; ++sy) {
+					const float d = lerpYZ(cell, fraction(sy, CELL_Y), fz);
+					if (d > 0.0f)
+						column.setUnchecked(x, sy, z, STONE);
+					else if (ChunkColumn::toWorldY(sy) <= SEA_LEVEL)
+						column.setUnchecked(x, sy, z, WATER_BLOCK);
+				}
 			}
 		}
 
@@ -297,6 +310,11 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 			const int i = x / CELL_CAVE, k = z / CELL_CAVE;
 			const float fx = fraction(x, CELL_CAVE), fz = fraction(z, CELL_CAVE);
 
+			// The x step of each field's interpolation, per cell, computed when
+			// first needed (cellGy: the cell they belong to).
+			std::array<XLerps, 3> cellLerps{};
+			std::array<bool, 3> cellHas{};
+			int cellGy = -1;
 			// Top down; nothing is carved within 4 blocks under water (overhangs
 			// on the coast hold water that must not drain into a cave).
 			int sinceWater = 1000;
@@ -309,13 +327,20 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 					continue;
 				const int gy = sy / CELL_CAVE;
 				const float fy = fraction(sy, CELL_CAVE);
-				const auto lerp = [&](float CaveCarver::Sample::*field) {
-					return trilinear(
-						samples[node(i, gy, k)].*field,         samples[node(i + 1, gy, k)].*field,
-						samples[node(i, gy + 1, k)].*field,     samples[node(i + 1, gy + 1, k)].*field,
-						samples[node(i, gy, k + 1)].*field,     samples[node(i + 1, gy, k + 1)].*field,
-						samples[node(i, gy + 1, k + 1)].*field, samples[node(i + 1, gy + 1, k + 1)].*field,
-						fx, fy, fz);
+				if (gy != cellGy) {
+					cellGy = gy;
+					cellHas = {};
+				}
+				const auto lerp = [&](const std::size_t slot, float CaveCarver::Sample::*field) {
+					if (!cellHas[slot]) {
+						cellLerps[slot] = lerpX(
+							samples[node(i, gy, k)].*field,         samples[node(i + 1, gy, k)].*field,
+							samples[node(i, gy + 1, k)].*field,     samples[node(i + 1, gy + 1, k)].*field,
+							samples[node(i, gy, k + 1)].*field,     samples[node(i + 1, gy, k + 1)].*field,
+							samples[node(i, gy + 1, k + 1)].*field, samples[node(i + 1, gy + 1, k + 1)].*field, fx);
+						cellHas[slot] = true;
+					}
+					return lerpYZ(cellLerps[slot], fy, fz);
 				};
 				// The carve rule in order, interpolating only what each step needs.
 				int depth = top - sy;
@@ -323,10 +348,10 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 					depth = std::max(depth, CaveCarver::SURFACE_SEAL);   // tunnels may break through
 				bool carve = CaveCarver::ravineCarves(ravine, depth);
 				if (!carve && depth >= CaveCarver::SURFACE_SEAL) {
-					carve = CaveCarver::nearZero(lerp(&CaveCarver::Sample::tunnelA))
-					     && CaveCarver::nearZero(lerp(&CaveCarver::Sample::tunnelB));
+					carve = CaveCarver::nearZero(lerp(0, &CaveCarver::Sample::tunnelA))
+					     && CaveCarver::nearZero(lerp(1, &CaveCarver::Sample::tunnelB));
 					if (!carve)
-						carve = CaveCarver::cheeseCarves(lerp(&CaveCarver::Sample::cheese), depth);
+						carve = CaveCarver::cheeseCarves(lerp(2, &CaveCarver::Sample::cheese), depth);
 				}
 				if (carve)
 					column.setUnchecked(x, sy, z, sy < deepLava ? LAVA_BLOCK : AIR_BLOCK);
