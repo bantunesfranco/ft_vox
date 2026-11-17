@@ -50,6 +50,11 @@ bool Inventory::canAdd(const ItemId item, const std::uint16_t count) const noexc
 	return false;
 }
 
+bool Inventory::canTakeDropOf(const BlockId block) const noexcept {
+	const ItemId drop = ItemRegistry::fromBlock(block);
+	return drop == ItemId::Empty || canAdd(drop);     // leaves and ice drop nothing
+}
+
 bool Inventory::add(const ItemId item, const std::uint16_t count) noexcept {
 	if (!canAdd(item, count))
 		return false;

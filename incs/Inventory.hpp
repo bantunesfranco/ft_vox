@@ -22,6 +22,8 @@ public:
 	void cycleHotbar(int delta) noexcept;
 
 	[[nodiscard]] bool canAdd(ItemId item, std::uint16_t count = 1) const noexcept;
+	// Whether breaking `block` loses nothing: it drops no item, or its item fits.
+	[[nodiscard]] bool canTakeDropOf(BlockId block) const noexcept;
 	bool add(ItemId item, std::uint16_t count = 1) noexcept;
 	bool consumeSelected(std::uint16_t count = 1) noexcept;
 	void clickSlot(std::size_t slot, bool secondaryClick) noexcept;

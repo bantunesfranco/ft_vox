@@ -1,6 +1,7 @@
 #version 450 core
 
-layout(early_fragment_tests) in;
+// No forced early_fragment_tests: it writes depth before `discard` runs, so the
+// see-through pixels of leaves would hide everything behind them.
 
 in vec2 vUV;
 in vec3 vNormal;

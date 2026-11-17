@@ -26,8 +26,8 @@ SELFTEST(Blocks, new_blocks_registered) {
 	std::set<std::uint16_t> textures;
 	for (const BlockType type : NEW_BLOCKS) {
 		const BlockDefinition& def = registry.get(type);
-		CHECK(def.textureSide >= 9);                         // generated textures, after the atlas ones
-		CHECK(def.textureSide < BlockTextures::FIRST_GENERATED + BlockTextures::generatedCount());
+		CHECK(def.textureSide >= BlockTextures::FIRST_ADDED);   // after the original nine
+		CHECK(def.textureSide < BlockTextures::TEXTURE_COUNT);
 		textures.insert(def.textureSide);
 	}
 	CHECK(textures.size() >= 10);                            // nearly every block looks different
@@ -60,18 +60,29 @@ SELFTEST(Blocks, items_map_back) {
 	CHECK(ItemRegistry::fromBlock(toBlockId(BlockType::Ice)) == ItemId::Empty);
 }
 
-SELFTEST(Blocks, generated_textures) {
-	const auto first = BlockTextures::generate();
-	const auto second = BlockTextures::generate();
-	CHECK_EQ(first.size(), BlockTextures::generatedCount());
-	CHECK(first == second);                                   // deterministic
+SELFTEST(Blocks, textures_are_atlas_sprites) {
+	// Every texture is a cell of Minecraft's block atlas: 48 px apart, inside
+	// the 2048 x 2048 image, each used once.
+	std::set<std::pair<int, int>> cells;
+	for (std::uint16_t i = 0; i < BlockTextures::TEXTURE_COUNT; ++i) {
+		const BlockTextures::Sprite& s = BlockTextures::sprite(i);
+		CHECK(s.x % 16 == 0 && s.y % 16 == 0);
+		CHECK(s.x >= 0 && s.x + BlockTextures::CELL <= 2048);
+		CHECK(s.y >= 0 && s.y + BlockTextures::CELL <= 2048);
+		cells.insert({s.x, s.y});
+	}
+	CHECK_EQ(cells.size(), std::size_t{BlockTextures::TEXTURE_COUNT});
+
+	// Leaves are grey in the atlas and get a green tint; logs keep their colours.
+	using BlockTextures::Texture;
 	const BlockRegistry registry;
-	const auto& leaves = first[registry.get(BlockType::OakLeaves).textureSide - BlockTextures::FIRST_GENERATED];
-	int holes = 0;
-	for (const std::uint32_t pixel : leaves)
-		holes += (pixel >> 24) == 0 ? 1 : 0;
-	CHECK(holes > 10 && holes < 128);                        // see-through, but mostly leaf
-	const auto& gravel = first[registry.get(BlockType::Gravel).textureSide - BlockTextures::FIRST_GENERATED];
-	for (const std::uint32_t pixel : gravel)
-		CHECK_EQ(pixel >> 24, 255u);                          // opaque blocks have no holes
+	for (const BlockType leaves : {BlockType::OakLeaves, BlockType::BirchLeaves, BlockType::SpruceLeaves}) {
+		const std::uint32_t tint = BlockTextures::sprite(registry.get(leaves).textureSide).tint;
+		CHECK(tint != BlockTextures::NO_TINT);
+		CHECK(((tint >> 8) & 0xFFu) > (tint >> 16) && ((tint >> 8) & 0xFFu) > (tint & 0xFFu));   // green
+	}
+	CHECK_EQ(BlockTextures::sprite(registry.get(BlockType::OakLog).textureSide).tint, BlockTextures::NO_TINT);
+	// The original nine keep the coordinates they always had (dirt, stone).
+	CHECK(BlockTextures::sprite(1).x == 1168 && BlockTextures::sprite(1).y == 720);
+	CHECK(BlockTextures::sprite(3).x == 1680 && BlockTextures::sprite(3).y == 1312);
 }

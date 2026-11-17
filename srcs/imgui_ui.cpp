@@ -69,24 +69,14 @@ void addAtlasImage(ImDrawList* drawList, const GLuint texture, const AtlasRect r
 }
 
 AtlasRect itemIcon(const ItemId item) {
-    switch (item) {
-        case ItemId::GrassBlock: return {1408.0f, 528.0f, 16.0f, 16.0f};
-        case ItemId::Dirt: return {1168.0f, 720.0f, 16.0f, 16.0f};
-        case ItemId::Stone: return {1680.0f, 1312.0f, 16.0f, 16.0f};
-        case ItemId::Sand: return {1440.0f, 1216.0f, 16.0f, 16.0f};
-        case ItemId::AmethystBlock: return {512.0f, 288.0f, 16.0f, 16.0f};
-        case ItemId::Snow: return {672.0f, 1312.0f, 16.0f, 16.0f};
-        default: break;
-    }
-    // Blocks with generated textures: their side texture in the atlas.
+    if (item == ItemId::Empty)
+        return {};
+    // The block's top texture for grass (its icon), its side texture otherwise.
     static const BlockRegistry registry;
-    const BlockId block = ItemRegistry::get(item).placedBlock;
-    const std::uint16_t texture = registry.get(block).textureSide;
-    if (texture >= BlockTextures::FIRST_GENERATED) {
-        const auto spot = BlockTextures::atlasSpot(texture);
-        return {static_cast<float>(spot.x), static_cast<float>(spot.y), 16.0f, 16.0f};
-    }
-    return {};
+    const BlockDefinition& block = registry.get(ItemRegistry::get(item).placedBlock);
+    const std::uint16_t texture = item == ItemId::GrassBlock ? block.textureTop : block.textureSide;
+    const BlockTextures::Sprite& sprite = BlockTextures::sprite(texture);
+    return {static_cast<float>(sprite.x), static_cast<float>(sprite.y), 16.0f, 16.0f};
 }
 
 void drawStack(const UiItemStack& stack, const ImVec2 min, const float slotSize,

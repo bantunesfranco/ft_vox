@@ -484,16 +484,15 @@ void App::destroyBlock() {
 	if (!camera || !session)
 		return;
 
-	// Same checks as before: look at a block, make sure the player can carry the drop.
+	// Look at a block; it must not drop an item the inventory cannot hold.
 	const BlockRaycastHit hit = blockSystem.raycast(camera->pos, camera->dir, world);
 	if (!hit.valid)
 		return;
 	BlockId block = AIR_BLOCK;
 	if (!world.getBlockAt(hit.blockPos, block))
 		return;
-	const ItemId item = ItemRegistry::fromBlock(block);
-	if (item == ItemId::Empty || !inventory.canAdd(item))
-		return;
+	if (!inventory.canTakeDropOf(block))
+		return;                                   // its item would not fit
 
 	// The session removes the block; the item is added when the BlockBroken event arrives.
 	session->requestBreakBlock(hit.blockPos);
@@ -833,24 +832,21 @@ void App::loadTextures() {
 
 		std::array<glm::vec4, 64> atlasRects{};
 		atlasRects.fill(spriteRect(0, 0));
-		atlasRects[0] = spriteRect(1408, 528);  // grass_block_top
-		atlasRects[1] = spriteRect(1168, 720);  // dirt
-		atlasRects[2] = spriteRect(1408, 384);  // grass_block_side
-		atlasRects[3] = spriteRect(1680, 1312); // stone
-		atlasRects[4] = spriteRect(1440, 1216); // sand
-		atlasRects[5] = spriteRect(512, 288);   // amethyst_block
-		atlasRects[6] = spriteRect(480, 1504);  // water_still
-		atlasRects[7] = spriteRect(672, 1312);  // snow
-		atlasRects[8] = spriteRect(704, 240);   // bedrock
-
-		// Generated textures go into the empty bottom of the atlas.
-		const auto generated = BlockTextures::generate();
-		for (std::size_t i = 0; i < generated.size(); ++i) {
-			const auto index = static_cast<std::uint16_t>(BlockTextures::FIRST_GENERATED + i);
-			const auto spot = BlockTextures::atlasSpot(index);
-			glTextureSubImage2D(textureAtlas, 0, spot.x, spot.y, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, generated[i].data());
-			atlasRects[index] = glm::vec4(static_cast<float>(spot.x) / atlasSize, static_cast<float>(spot.y) / atlasSize,
-			                              16.0f / atlasSize, 16.0f / atlasSize);
+		std::vector<std::uint8_t> cell(BlockTextures::CELL * BlockTextures::CELL * 4);
+		for (std::uint16_t i = 0; i < BlockTextures::TEXTURE_COUNT; ++i) {
+			const BlockTextures::Sprite& sprite = BlockTextures::sprite(i);
+			atlasRects[i] = spriteRect(sprite.x, sprite.y);
+			if (sprite.tint == BlockTextures::NO_TINT)
+				continue;
+			// Grey sprites (leaves): multiply the whole cell by the tint, once.
+			glGetTextureSubImage(textureAtlas, 0, sprite.x, sprite.y, 0, BlockTextures::CELL, BlockTextures::CELL, 1,
+			                     GL_RGBA, GL_UNSIGNED_BYTE, static_cast<GLsizei>(cell.size()), cell.data());
+			const std::uint32_t channel[3] = {sprite.tint >> 16, (sprite.tint >> 8) & 0xFFu, sprite.tint & 0xFFu};
+			for (std::size_t p = 0; p < cell.size(); p += 4)
+				for (std::size_t c = 0; c < 3; ++c)
+					cell[p + c] = static_cast<std::uint8_t>(cell[p + c] * channel[c] / 255u);
+			glTextureSubImage2D(textureAtlas, 0, sprite.x, sprite.y, BlockTextures::CELL, BlockTextures::CELL,
+			                    GL_RGBA, GL_UNSIGNED_BYTE, cell.data());
 		}
 		glGenerateTextureMipmap(textureAtlas);
 

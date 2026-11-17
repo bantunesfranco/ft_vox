@@ -96,7 +96,9 @@ bool BlockSystem::removeBlock(
 	BlockId* removedBlock
 ) const {
 	BlockId block = AIR_BLOCK;
-	if (!world.getBlockAt(blockPosition, block) || !world.setBlockAt(blockPosition, AIR_BLOCK))
+	if (!world.getBlockAt(blockPosition, block) || block == toBlockId(BlockType::Bedrock))
+		return false;                                   // unbreakable, as on the server
+	if (!world.setBlockAt(blockPosition, AIR_BLOCK))
 		return false;
 	if (removedBlock)
 		*removedBlock = block;

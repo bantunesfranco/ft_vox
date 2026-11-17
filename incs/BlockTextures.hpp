@@ -3,23 +3,25 @@
 # define BLOCK_TEXTURES_HPP
 
 // ============================================================================
-//  BlockTextures : 16x16 pixel-art textures for blocks the atlas image does
-//  not contain (logs, leaves, gravel, ...). Generated deterministically at
-//  startup and copied into the unused bottom part of the atlas texture, so
-//  the renderer treats them like any other atlas sprite.
+//  BlockTextures : where every block texture is in textures/minecraft_atlas.png
 //
-//  Texture indices 0..8 are sprites of minecraft_atlas.png (App::loadTextures);
-//  FIRST_GENERATED.. are these, in the order of `Texture`.
+//  The atlas is a dump of Minecraft's block atlas. Coordinates come from its
+//  index (minecraft_textures_atlas_blocks.png.txt): each is a 48 x 48 cell
+//  holding the 16 x 16 sprite with its edges repeated around it, which keeps
+//  mipmaps from bleeding between sprites. App::loadTextures turns a cell into
+//  the shader's texture rect the same way for every block.
+//
+//  Texture indices 0..8 are the original blocks (grass top .. bedrock), set in
+//  that order; FIRST_ADDED.. follow `Texture`.
 // ============================================================================
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
-#include <vector>
 
 namespace BlockTextures {
 
-constexpr std::uint16_t FIRST_GENERATED = 9;
+constexpr std::uint16_t FIRST_ADDED = 9;
+constexpr int CELL = 48;                         // atlas cell size, sprite included
+constexpr std::uint32_t NO_TINT = 0xFFFFFF;
 
 enum class Texture : std::uint16_t {
 	OakLogSide, OakLogTop, BirchLogSide, BirchLogTop, SpruceLogSide, SpruceLogTop,
@@ -30,19 +32,19 @@ enum class Texture : std::uint16_t {
 };
 
 constexpr std::uint16_t index(const Texture t) noexcept {
-	return static_cast<std::uint16_t>(FIRST_GENERATED + static_cast<std::uint16_t>(t));
+	return static_cast<std::uint16_t>(FIRST_ADDED + static_cast<std::uint16_t>(t));
 }
 
-constexpr std::size_t generatedCount() noexcept { return static_cast<std::size_t>(Texture::Count); }
+constexpr std::uint16_t TEXTURE_COUNT = FIRST_ADDED + static_cast<std::uint16_t>(Texture::Count);
 
-using Pixels = std::array<std::uint32_t, 16 * 16>;   // 0xAABBGGRR (RGBA bytes in memory), row 0 = top
+struct Sprite {
+	int x;                   // atlas cell, as in Minecraft's atlas index
+	int y;
+	std::uint32_t tint;      // 0xRRGGBB multiplied into the pixels once at load (leaves are grey)
+};
 
-// Every generated texture, in `Texture` order.
-std::vector<Pixels> generate();
-
-// Where a generated texture lives in the atlas image (top-left pixel).
-struct AtlasSpot { int x; int y; };
-AtlasSpot atlasSpot(std::uint16_t textureIndex);
+// Texture index 0 .. TEXTURE_COUNT - 1.
+[[nodiscard]] const Sprite& sprite(std::uint16_t textureIndex) noexcept;
 
 } // namespace BlockTextures
 
