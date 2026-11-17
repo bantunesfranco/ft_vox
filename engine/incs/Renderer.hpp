@@ -163,6 +163,11 @@ public:
     void beginTransparentPass() const;
     void endTransparentPass() const;
 
+    // Bytes of the shared vertex / index buffers handed out (the high-water mark
+    // of the allocator, free gaps below it included), not their capacity.
+    [[nodiscard]] std::size_t gpuVertexBytes() const noexcept { return _vertexBufferUsed; }
+    [[nodiscard]] std::size_t gpuIndexBytes() const noexcept { return _indexBufferUsed; }
+
     void setTextureAtlas(GLuint textureAtlas) noexcept;
     void setAtlasRects(const std::array<glm::vec4, 64>& rects);
 

@@ -81,6 +81,15 @@ public:
 	// Removes a column; its meshes retire through pruneRenderStates().
 	void dropColumn(const ChunkCoord& coord);
 
+	// What the world holds in memory, for the benchmark report.
+	struct MemoryStats {
+		std::size_t columns       = 0;
+		std::size_t blockBytes    = 0;   // block storage of every column
+		std::size_t lightBytes    = 0;   // heap of every stored light
+		std::size_t meshCpuBytes  = 0;   // vertex + index capacity of every render state's meshes
+	};
+	[[nodiscard]] MemoryStats memoryStats() const;
+
 	Frustum frustum{};
 
 private:

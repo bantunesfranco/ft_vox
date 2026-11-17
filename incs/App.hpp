@@ -114,6 +114,7 @@ class App : public Engine
 		void	renderBlockHighlight();
 		void	renderRemotePlayers();
 		void	runBenchmarkScript();
+		void	printBenchmarkMemory() const;
 		void	simulate();            // session, movement, clock: one frame of play (not in menus)
 		void	renderFrame();         // the 3D scene: UBO, sky, prune/build/upload, draw
 		[[nodiscard]] UiFrameModel buildUiModel() const;

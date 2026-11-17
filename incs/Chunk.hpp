@@ -121,6 +121,10 @@ public:
 
     void setUnchecked(int x, int y, int z, BlockId block) noexcept;
 
+    // Bytes held by block storage.
+    [[nodiscard]]
+    std::size_t heapBytes() const noexcept;
+
 private:
     ChunkCoord _coord{};
 

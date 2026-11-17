@@ -20,6 +20,7 @@
 #include "PlayerPhysics.hpp"
 #include "PlayerStore.hpp"
 #include "RemoteSession.hpp"
+#include "ProcessMemory.hpp"
 
 #include <charconv>
 
@@ -520,6 +521,7 @@ void App::run() {
     }
 	if (bench.active) {
 		profiler.report();
+		printBenchmarkMemory();
 		if (Trace::instance().write("bench_trace.json"))
 			std::printf("trace written to bench_trace.json (open it in ui.perfetto.dev)\n");
 	}
@@ -669,6 +671,26 @@ void App::enableBenchmark(const double seconds, const glm::vec2 startXZ, const s
 	Trace::instance().setMainThread();
 }
 
+// The memory and job lines that follow the frame report.
+void App::printBenchmarkMemory() const {
+	constexpr double MB = 1024.0 * 1024.0;
+	const auto mb = [](const std::size_t bytes) { return static_cast<double>(bytes) / MB; };
+	const World::MemoryStats w = world.memoryStats();
+	std::printf("memory: %zu columns, blocks %.1f MB, light %.1f MB, meshes (cpu) %.1f MB, "
+	            "gpu vertices %.1f MB, gpu indices %.1f MB, process %.1f MB (peak %.1f MB)\n",
+	            w.columns, mb(w.blockBytes), mb(w.lightBytes), mb(w.meshCpuBytes),
+	            mb(renderer->gpuVertexBytes()), mb(renderer->gpuIndexBytes()),
+	            mb(ProcessMemory::currentBytes()), mb(ProcessMemory::peakBytes()));
+
+	Trace& trace = Trace::instance();
+	const Trace::Average generate = trace.average("generate column");
+	const Trace::Average light    = trace.average("light column");
+	const Trace::Average mesh     = trace.average("mesh column");
+	std::printf("jobs ms: generate %.2f (n=%zu), light %.2f (n=%zu), mesh %.2f (n=%zu)\n",
+	            generate.ms, generate.count, light.ms, light.count, mesh.ms, mesh.count);
+	std::fflush(stdout);
+}
+
 void App::runBenchmarkScript() {
 	if (gameState.currentState == GameState::START) {
 		startBenchmarkWorld();
@@ -689,6 +711,7 @@ void App::runBenchmarkScript() {
 		return;                                // this frame is not recorded (PNG encoding)
 	}
 	bench.recording = t >= BENCH_WARMUP;
+	Trace::instance().setRecording(bench.recording);
 
 	const double flying = std::max(0.0, t - BENCH_WARMUP);
 	camera->pos   = glm::vec3(bench.startXZ.x + static_cast<float>(flying * BENCH_SPEED), bench.height, bench.startXZ.y);

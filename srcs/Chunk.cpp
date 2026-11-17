@@ -40,6 +40,10 @@ std::array<BlockId, ChunkSection::BLOCK_COUNT>& ChunkSection::blocks() noexcept 
 
 ChunkColumn::ChunkColumn(ChunkCoord coord) noexcept : _coord(coord) {}
 
+std::size_t ChunkColumn::heapBytes() const noexcept {
+    return SECTION_COUNT * ChunkSection::BLOCK_COUNT * sizeof(BlockId);
+}
+
 const ChunkCoord& ChunkColumn::coord() const noexcept {
     return _coord;
 }

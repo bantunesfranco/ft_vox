@@ -182,6 +182,22 @@ const BlockRegistry& World::getBlockRegistry() const noexcept {
     return blockRegistry;
 }
 
+World::MemoryStats World::memoryStats() const {
+    const auto capacityBytes = [](const MeshData& mesh) {
+        return mesh.vertices.capacity() * sizeof(PackedVertex) + mesh.indices.capacity() * sizeof(std::uint32_t);
+    };
+    std::lock_guard lock(chunk_mutex);
+    MemoryStats stats;
+    stats.columns = chunks.size();
+    for (const ColumnPtr& column : chunks | std::views::values)
+        stats.blockBytes += column->heapBytes();
+    for (const auto& light : lights | std::views::values)
+        stats.lightBytes += light->heapBytes();
+    for (const ChunkRenderState& state : renderStates)
+        stats.meshCpuBytes += capacityBytes(state.mesh) + capacityBytes(state.transparentMesh);
+    return stats;
+}
+
 const std::vector<ChunkRenderState>& World::getRenderStates() const noexcept {
     return renderStates;
 }

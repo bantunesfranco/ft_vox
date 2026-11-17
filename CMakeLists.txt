@@ -150,5 +150,6 @@ if(APPLE)
     # OpenGL is deprecated on macOS; silence it so -Werror doesn't fail the build
     target_compile_definitions(ImGui PRIVATE GL_SILENCE_DEPRECATION)
 elseif(WIN32)
+    target_link_libraries(ft_vox PRIVATE psapi)   # GetProcessMemoryInfo (ProcessMemory)
     set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ft_vox)
 endif()

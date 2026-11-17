@@ -20,9 +20,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -51,12 +53,31 @@ public:
 	void enable() noexcept { _enabled = true; _origin = Clock::now(); }
 	[[nodiscard]] bool enabled() const noexcept { return _enabled; }
 
+	// While on, every span also adds to a per-name total (see average), so a
+	// report can quote job times without reading the trace. Off for warm-up.
+	void setRecording(const bool on) noexcept { _recording = on; }
+
 	void add(const char* name, const Clock::time_point start, const Clock::time_point end) {
 		if (!_enabled)
 			return;
 		const Event e{name, us(start), us(end) - us(start), threadId()};
 		std::lock_guard lock(_mutex);
 		_events.push_back(e);
+		if (_recording)
+			addToTotal(name, e.durUs);
+	}
+
+	struct Average {
+		double      ms    = 0.0;
+		std::size_t count = 0;
+	};
+	// Mean duration of the spans called `name` while recording.
+	[[nodiscard]] Average average(const char* name) {
+		std::lock_guard lock(_mutex);
+		for (const Total& t : _totals)
+			if (t.name == name || std::strcmp(t.name, name) == 0)
+				return {static_cast<double>(t.us) / 1000.0 / static_cast<double>(t.count), t.count};
+		return {};
 	}
 
 	// RAII span: `Trace::Scope s("generate");`
@@ -98,15 +119,32 @@ private:
 	[[nodiscard]] std::int64_t us(const Clock::time_point t) const noexcept {
 		return std::chrono::duration_cast<std::chrono::microseconds>(t - _origin).count();
 	}
+	struct Total {
+		const char*   name;      // string literal
+		std::int64_t  us;
+		std::size_t   count;
+	};
+	// _mutex held. Few distinct names: a linear scan, and an allocation only for a new one.
+	void addToTotal(const char* name, const std::int64_t durUs) {
+		for (Total& t : _totals)
+			if (t.name == name || std::strcmp(t.name, name) == 0) {
+				t.us += durUs;
+				++t.count;
+				return;
+			}
+		_totals.push_back({name, durUs, 1});
+	}
 	static std::uint64_t threadId() noexcept {
 		return static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFFFFFu);
 	}
 
 	bool               _enabled = false;
+	std::atomic<bool>  _recording{false};
 	Clock::time_point  _origin{};
 	std::uint64_t      _mainTid = 0;
 	std::mutex         _mutex;
 	std::vector<Event> _events;
+	std::vector<Total> _totals;
 };
 
 // ---- FrameProfiler : per-phase main thread timings ------------------------------------
