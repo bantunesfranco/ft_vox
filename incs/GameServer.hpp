@@ -109,7 +109,7 @@ private:
 		bool         spawned = false;     // LoginOk sent
 		std::optional<glm::vec3> savedEye;   // from the player's file, until spawned there
 		Inventory     inventory;            // authoritative; the starting items for a new player
-		std::uint32_t ackSeq = 0;           // seq of the last InventoryAction applied (or rejected)
+		std::uint32_t ackSeq = 0;           // seq of the last InventoryAction applied
 		ChunkCoord   center{INT_MAX, INT_MAX};
 		std::vector<ChunkCoord>        wanted;   // within viewRadius, nearest first
 		std::unordered_set<ChunkCoord> sent;     // columns this client holds

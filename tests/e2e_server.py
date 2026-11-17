@@ -231,13 +231,16 @@ ok(len(reply) >= 7 and struct.unpack_from("<H", reply, 4)[0] == IDS["Disconnect"
 
 c = Client("carol")
 c.pump(10, lambda n, p: n == "LoginOk")
-c.send("InventoryAction", struct.pack("<IBBB", 1, 0, 200, 0))   # slot out of range: rejected, acked
-inv = last_inventory(c.pump(2, lambda n, p: n == "InventoryContents" and struct.unpack_from("<I", p)[0] == 1))
-ok(inv is not None and inv[0] == 1 and inv[1] == 0, "out-of-range slot rejected but acked")
-c.send("InventoryAction", struct.pack("<IBBB", 2, 3, 0, 0))     # kind 3 does not exist
+c.send("InventoryAction", struct.pack("<IBBB", 1, 0, 200, 0))   # slot out of range
 msgs = c.pump(2, lambda n, p: n in ("Disconnect", "CLOSED"))
 disc = [p for n, p in msgs if n == "Disconnect"]
-ok(disc and disc[0][0] == 2, "bad InventoryAction kind -> Disconnect(ProtocolViolation)")
+ok(disc and disc[0][0] == PROTOCOL_VIOLATION, "out-of-range InventoryAction slot -> Disconnect(ProtocolViolation)")
+d = Client("dave")
+d.pump(10, lambda n, p: n == "LoginOk")
+d.send("InventoryAction", struct.pack("<IBBB", 2, 3, 0, 0))     # kind 3 does not exist
+msgs = d.pump(2, lambda n, p: n in ("Disconnect", "CLOSED"))
+disc = [p for n, p in msgs if n == "Disconnect"]
+ok(disc and disc[0][0] == PROTOCOL_VIOLATION, "bad InventoryAction kind -> Disconnect(ProtocolViolation)")
 
 # ---- 5. leave ------------------------------------------------------------------
 b.send("Disconnect", b"\x00")

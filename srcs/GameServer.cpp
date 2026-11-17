@@ -320,9 +320,12 @@ void GameServer::onInventoryAction(Player& p, net::ByteReader& body) {
 		violation(p, "bad InventoryAction");
 		return;
 	}
-	// An out-of-range slot is rejected by the rules, not kicked: it is still acked,
-	// and the contents sent back correct the client's prediction.
-	(void)applyAction(p.inventory, {static_cast<InventoryAction::Kind>(kind), slot, secondary != 0});
+	// The client range-checks its slots, so one the rules reject (out of range)
+	// is malformed too.
+	if (!applyAction(p.inventory, {static_cast<InventoryAction::Kind>(kind), slot, secondary != 0})) {
+		violation(p, "bad InventoryAction slot");
+		return;
+	}
 	p.ackSeq = seq;
 	if (p.spawned)
 		sendInventoryTo(p);                            // before LoginOk: spawn() sends it
