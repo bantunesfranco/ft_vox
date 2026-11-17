@@ -49,6 +49,11 @@ using Collides = std::function<bool(const glm::vec3& eye)>;
 // inside the cell in 1/16 block (0 = full cube, 1 = cactus), or -1 to pass through.
 [[nodiscard]] bool boxHitsShapes(const glm::vec3& eye, const std::function<int(const glm::ivec3&)>& inset);
 
+// The player's eye lifted straight up, to the first clear spot within `maxLift` blocks, for a
+// spawn or login inside terrain. Unchanged when already clear; lifted by `maxLift` when none is.
+[[nodiscard]] glm::vec3 liftOutOfBlocks(glm::vec3 eye, const std::function<bool(const glm::ivec3&)>& solid,
+                                        int maxLift = 256);
+
 void step(Body& body, const Input& input, float dt, const Collides& collides);
 
 // Minecraft's sprint rule: the sprint key while moving forward, or forward

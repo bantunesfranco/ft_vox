@@ -170,3 +170,21 @@ SELFTEST(PlayerPhysics, cactus_sides_are_inset) {
 	CHECK(body.eye.x <= face + 0.01f);
 	CHECK(body.eye.x >= face - 0.02f);
 }
+
+SELFTEST(PlayerPhysics, lift_out_of_blocks) {
+	const glm::vec3 eye(0.5f, 66.62f, 0.5f);
+	const auto near = [](const float a, const float b) { return std::abs(a - b) < 1e-3f; };
+
+	// Feet at 65.0 stand on top of block 64: nothing to lift.
+	const glm::vec3 clear = liftOutOfBlocks(eye, [](const glm::ivec3& b) { return b.y <= 64; });
+	CHECK(clear == eye);
+
+	// Buried up to block 70: the feet end on top of it.
+	const glm::vec3 lifted = liftOutOfBlocks(eye, [](const glm::ivec3& b) { return b.y <= 70; });
+	CHECK(near(lifted.y, 72.62f));
+	CHECK(lifted.x == eye.x && lifted.z == eye.z);
+
+	// Solid everywhere: lifted by exactly maxLift.
+	const glm::vec3 stuck = liftOutOfBlocks(eye, [](const glm::ivec3&) { return true; }, 3);
+	CHECK(near(stuck.y, 69.62f));
+}

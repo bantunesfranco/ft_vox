@@ -122,3 +122,22 @@ SELFTEST(Inventory, apply_action_bounds) {
 	CHECK(inventory.slots()[0].item == ItemId::AmethystBlock);
 	CHECK_EQ(inventory.slots()[0].count, 64);
 }
+
+SELFTEST(Inventory, encode_layout) {
+	std::array<ItemStack, Inventory::SLOT_COUNT> slots{};
+	slots[0] = {ItemId::Dirt, 0x0102};
+	const Inventory inventory = Inventory::fromState(slots, {ItemId::Stone, 7}, 5);
+	const std::vector<std::uint8_t> bytes = encoded(inventory);
+	CHECK_EQ(bytes.size(), Inventory::ENCODED_SIZE);
+
+	const auto item = [](const ItemId id) { return static_cast<std::uint16_t>(id); };
+	CHECK_EQ(bytes[0], 5);                                                    // selected
+	CHECK_EQ(bytes[1], item(ItemId::Dirt) & 0xFF);                            // slot 0 item, little-endian
+	CHECK_EQ(bytes[2], item(ItemId::Dirt) >> 8);
+	CHECK_EQ(bytes[3], 0x02);                                                 // slot 0 count, little-endian
+	CHECK_EQ(bytes[4], 0x01);
+	CHECK_EQ(bytes[145], item(ItemId::Stone) & 0xFF);                         // cursor item
+	CHECK_EQ(bytes[146], item(ItemId::Stone) >> 8);
+	CHECK_EQ(bytes[147], 7);                                                  // cursor count
+	CHECK_EQ(bytes[148], 0);
+}

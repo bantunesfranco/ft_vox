@@ -1,5 +1,7 @@
 #include "WorldStore.hpp"
 
+#include "LittleEndian.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -48,36 +50,15 @@ std::uint64_t fnv1a(const std::string_view text) {
 
 // ---- level.bin ------------------------------------------------------------------
 
-template <typename T>
-void putLE(std::string& out, T value) {
-	auto u = static_cast<std::make_unsigned_t<T>>(value);
-	for (std::size_t i = 0; i < sizeof(T); ++i) {
-		out.push_back(static_cast<char>(u & 0xFF));
-		u = static_cast<decltype(u)>(u >> 8);
-	}
-}
-
-template <typename T>
-bool getLE(const std::string& in, std::size_t& pos, T& value) {
-	if (in.size() - pos < sizeof(T) || pos > in.size())
-		return false;
-	std::make_unsigned_t<T> u = 0;
-	for (std::size_t i = 0; i < sizeof(T); ++i)
-		u = static_cast<decltype(u)>(u | (static_cast<decltype(u)>(static_cast<unsigned char>(in[pos + i])) << (8 * i)));
-	pos += sizeof(T);
-	value = static_cast<T>(u);
-	return true;
-}
-
 bool writeLevel(const WorldInfo& world, std::string& error) {
 	std::string data(LEVEL_MAGIC.begin(), LEVEL_MAGIC.end());
-	putLE(data, LEVEL_VERSION);
-	putLE(data, world.seed);
-	putLE(data, world.lastPlayed);
+	le::put(data, LEVEL_VERSION);
+	le::put(data, world.seed);
+	le::put(data, world.lastPlayed);
 	const std::size_t nameBytes = std::min<std::size_t>(world.name.size(), 0xFFFF);
-	putLE(data, static_cast<std::uint16_t>(nameBytes));
+	le::put(data, static_cast<std::uint16_t>(nameBytes));
 	data.append(world.name, 0, nameBytes);
-	putLE(data, world.timeOfDay);
+	le::put(data, world.timeOfDay);
 
 	// Write a temp file, then replace: a crash never leaves a half-written level.bin.
 	const fs::path tmp = world.folder / "level.bin.tmp";
@@ -108,14 +89,14 @@ bool readLevel(const fs::path& folder, WorldInfo& world) {
 	std::size_t pos = LEVEL_MAGIC.size();
 	std::uint32_t version = 0;
 	std::uint16_t nameBytes = 0;
-	if (!getLE(data, pos, version) || (version != 1 && version != LEVEL_VERSION)
-	    || !getLE(data, pos, world.seed) || !getLE(data, pos, world.lastPlayed)
-	    || !getLE(data, pos, nameBytes) || data.size() - pos < nameBytes)
+	if (!le::get(data, pos, version) || (version != 1 && version != LEVEL_VERSION)
+	    || !le::get(data, pos, world.seed) || !le::get(data, pos, world.lastPlayed)
+	    || !le::get(data, pos, nameBytes) || data.size() - pos < nameBytes)
 		return false;
 	world.name.assign(data, pos, nameBytes);
 	pos += nameBytes;
 	world.timeOfDay = TimeOfDay::NEW_WORLD;           // version 1 had no clock
-	if (version >= 2 && !getLE(data, pos, world.timeOfDay))
+	if (version >= 2 && !le::get(data, pos, world.timeOfDay))
 		return false;
 	world.timeOfDay %= TimeOfDay::TICKS_PER_DAY;
 	return pos == data.size();

@@ -36,6 +36,18 @@ bool boxHitsBlocks(const glm::vec3& eye, const std::function<bool(const glm::ive
 	return boxHitsShapes(eye, [&solid](const glm::ivec3& p) { return solid(p) ? 0 : -1; });
 }
 
+glm::vec3 liftOutOfBlocks(glm::vec3 eye, const std::function<bool(const glm::ivec3&)>& solid, const int maxLift) {
+	if (!boxHitsBlocks(eye, solid))
+		return eye;
+	const float base = eye.y;
+	for (int k = 1; k <= maxLift; ++k) {
+		eye.y = base + static_cast<float>(k);
+		if (!boxHitsBlocks(eye, solid))
+			return eye;
+	}
+	return eye;                                           // eye.y is now base + maxLift
+}
+
 namespace {
 
 constexpr float GROUND_PROBE = 0.04f;   // how far below the feet counts as standing
