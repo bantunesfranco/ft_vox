@@ -97,8 +97,12 @@ bool savePlayer(const fs::path& file, PlayerRecord record, std::string& error) {
 
 std::optional<PlayerRecord> loadPlayer(const fs::path& file) {
 	std::ifstream in(file, std::ios::binary);
-	if (!in)
-		return std::nullopt;                              // missing: a new player, nothing to report
+	if (!in) {
+		std::error_code ec;
+		if (fs::exists(file, ec))
+			logDamaged(file, "cannot be opened");         // there but unreadable (e.g. locked); missing stays silent
+		return std::nullopt;
+	}
 	const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 
 	if (data.size() < PLAYER_MAGIC.size() || !std::equal(PLAYER_MAGIC.begin(), PLAYER_MAGIC.end(), data.begin())) {

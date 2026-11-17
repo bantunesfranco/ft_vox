@@ -74,6 +74,7 @@ SELFTEST(PlayerStore, file_names) {
 	const fs::path world = "w";
 	CHECK(playerFile(world, "Bob") == world / "players" / "426f62.bin");
 	CHECK(playerFile(world, "a b") == world / "players" / "612062.bin");
+	CHECK(playerFile(world, "ÿ") == world / "players" / "ff.bin");   // bytes hex-encode unsigned
 	CHECK(singleplayerFile(world) == world / "player.bin");
 }
 
@@ -101,6 +102,12 @@ SELFTEST(PlayerStore, damaged_files_are_new_players) {
 	const auto nan = std::bit_cast<std::uint32_t>(std::numeric_limits<float>::quiet_NaN());
 	for (int i = 0; i < 4; ++i)
 		damaged[8 + static_cast<std::size_t>(i)] = static_cast<char>((nan >> (8 * i)) & 0xFF);
+	CHECK(!loadBytes(dir.path(), damaged).has_value());
+
+	damaged = good;                                       // yaw = +Inf (the 4th float, at offset 20)
+	const auto inf = std::bit_cast<std::uint32_t>(std::numeric_limits<float>::infinity());
+	for (int i = 0; i < 4; ++i)
+		damaged[20 + static_cast<std::size_t>(i)] = static_cast<char>((inf >> (8 * i)) & 0xFF);
 	CHECK(!loadBytes(dir.path(), damaged).has_value());
 
 	damaged = good;                                       // inventory byte 0 is "selected"
