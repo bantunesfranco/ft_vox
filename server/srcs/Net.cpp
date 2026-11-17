@@ -23,6 +23,8 @@ const char* toString(const DisconnectReason r) {
         case DisconnectReason::ServerFull:        return "server is full";
         case DisconnectReason::ServerShutdown:    return "server shutting down";
         case DisconnectReason::KickedByGame:      return "kicked by game";
+        case DisconnectReason::NameTaken:         return "name already in use";
+        case DisconnectReason::VersionMismatch:   return "version mismatch: server and client builds differ";
     }
     return "unknown";   // no `default:` above, so -Wswitch flags new enumerators
 }

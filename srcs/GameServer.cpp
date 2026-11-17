@@ -163,14 +163,14 @@ bool GameServer::onConnect(const net::ConnId id, const net::PeerInfo& peer) {
 	return true;
 }
 
-bool GameServer::onLogin(const net::ConnId id, const std::string& name) {
+std::optional<net::DisconnectReason> GameServer::onLogin(const net::ConnId id, const std::string& name) {
 	const auto it = _players.find(id);
 	if (it == _players.end() || !validName(name))
-		return false;
+		return net::DisconnectReason::ProtocolViolation;
 	for (const auto& [otherId, other] : _players) {
 		if (otherId != id && other.name == name) {
 			log("refused %s: already playing", name.c_str());
-			return false;
+			return net::DisconnectReason::NameTaken;
 		}
 	}
 	Player& p = it->second;
@@ -184,7 +184,7 @@ bool GameServer::onLogin(const net::ConnId id, const std::string& name) {
 		p.inventory = record->inventory;
 	}
 	log("%s joined (player %u%s)", name.c_str(), static_cast<unsigned>(id), p.savedEye ? "" : ", new");
-	return true;               // spawned (LoginOk) once the columns it spawns in exist
+	return std::nullopt;       // accepted; spawned (LoginOk) once the columns it spawns in exist
 }
 
 void GameServer::onDisconnect(const net::ConnId id, const net::DisconnectReason why) {

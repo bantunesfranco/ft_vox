@@ -309,8 +309,12 @@ struct Transport::Impl {
 		switch (c.state) {
 			case ConnState::Handshake: {
 				const auto version = body.read<uint32_t>();
-				if (!body.ok() || !body.atEnd() || version != PROTOCOL_VERSION) {
+				if (!body.ok() || !body.atEnd()) {
 					closeConnection(c, DisconnectReason::ProtocolViolation);
+					return;
+				}
+				if (version != PROTOCOL_VERSION) {
+					closeConnection(c, DisconnectReason::VersionMismatch);
 					return;
 				}
 				setState(c, ConnState::Login);
@@ -322,8 +326,8 @@ struct Transport::Impl {
 					closeConnection(c, DisconnectReason::ProtocolViolation);
 					return;
 				}
-				if (!handler.onLogin(c.id(), name)) {
-					closeConnection(c, DisconnectReason::ProtocolViolation);
+				if (const auto refused = handler.onLogin(c.id(), name)) {
+					closeConnection(c, *refused);
 					return;
 				}
 				if (!c.closing) setState(c, ConnState::Play);   // R4: onLogin may have kicked

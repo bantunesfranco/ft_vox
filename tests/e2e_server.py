@@ -7,6 +7,7 @@ IDS = dict(Hello=0x0001, Login=0x0002, PlayerMove=0x0010, BreakBlock=0x0020, Pla
            InventoryAction=0x0030, InventoryContents=0x0150)
 NAMES = {v: k for k, v in IDS.items()}
 EYE = 1.62
+PROTOCOL_VIOLATION, NAME_TAKEN, VERSION_MISMATCH = 2, 9, 10   # net::DisconnectReason
 
 def ok(cond, msg):
     print(("PASS " if cond else "FAIL ") + msg, flush=True)
@@ -218,14 +219,15 @@ ok(pa and struct.unpack_from("<H", pa[0], 12)[0] == 0, "place inside a player re
 # ---- 4b. one login per name, malformed InventoryAction -----------------------
 dup = Client("alice")
 msgs = dup.pump(3, lambda n, p: n in ("Disconnect", "CLOSED"))
-ok(any(n in ("Disconnect", "CLOSED") for n, p in msgs) and not any(n == "LoginOk" for n, p in msgs),
-   "duplicate name refused (Disconnect)")
+disc = [p for n, p in msgs if n == "Disconnect"]
+ok(disc and disc[0][0] == NAME_TAKEN and not any(n == "LoginOk" for n, p in msgs),
+   "duplicate name refused (Disconnect(NameTaken))")
 
 old = socket.create_connection(("127.0.0.1", PORT)); old.settimeout(3)
 old.sendall(struct.pack("<IHI", 6, IDS["Hello"], 1))               # a protocol 1 client
 reply = old.recv(64); old.close()
-ok(len(reply) >= 7 and struct.unpack_from("<H", reply, 4)[0] == IDS["Disconnect"] and reply[6] == 2,
-   "protocol 1 Hello refused (Disconnect(ProtocolViolation))")
+ok(len(reply) >= 7 and struct.unpack_from("<H", reply, 4)[0] == IDS["Disconnect"] and reply[6] == VERSION_MISMATCH,
+   "protocol 1 Hello refused (Disconnect(VersionMismatch))")
 
 c = Client("carol")
 c.pump(10, lambda n, p: n == "LoginOk")
@@ -248,5 +250,5 @@ ok(any(left(n, p) for n, p in msgs), "alice is told bob left")
 a.send("BreakBlock", struct.pack("<ii", 1, 2))          # truncated
 msgs = a.pump(2, lambda n, p: n in ("Disconnect", "CLOSED"))
 disc = [p for n, p in msgs if n == "Disconnect"]
-ok(disc and disc[0][0] == 2, "truncated packet -> Disconnect(ProtocolViolation)")
+ok(disc and disc[0][0] == PROTOCOL_VIOLATION, "truncated packet -> Disconnect(ProtocolViolation)")
 print("ALL PASSED")

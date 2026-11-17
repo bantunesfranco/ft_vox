@@ -27,6 +27,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -134,6 +135,8 @@ enum class DisconnectReason : uint8_t {
 	ServerFull,
 	ServerShutdown,
 	KickedByGame,        // requested through Transport::disconnect()
+	NameTaken,           // a player with that name is already playing
+	VersionMismatch,     // Hello carried another PROTOCOL_VERSION
 };
 
 const char* toString(DisconnectReason r);
@@ -388,8 +391,8 @@ public:
 	virtual bool onConnect(ConnId id, const PeerInfo& peer) = 0;
 
 	// The client completed Hello + Login. `name` is already length-validated.
-	// Return false to reject (connection closed with ProtocolViolation).
-	virtual bool onLogin(ConnId id, const std::string& name) = 0;
+	// Return std::nullopt to accept, or the reason the connection is closed with.
+	virtual std::optional<DisconnectReason> onLogin(ConnId id, const std::string& name) = 0;
 
 	// A gameplay packet arrived in Play state. Only record intent here;
 	// simulate in onTick(). If body.ok() is false after return, the transport

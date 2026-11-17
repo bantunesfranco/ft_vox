@@ -86,7 +86,7 @@ public:
 
 	// --- ITransportHandler ------------------------------------------------------
 	bool onConnect(net::ConnId id, const net::PeerInfo& peer) override;
-	bool onLogin(net::ConnId id, const std::string& name) override;
+	std::optional<net::DisconnectReason> onLogin(net::ConnId id, const std::string& name) override;
 	void onPacket(net::ConnId id, net::PacketId type, net::ByteReader& body) override;
 	void onDisconnect(net::ConnId id, net::DisconnectReason why) override;
 	void onTick(std::uint64_t tick) override;
