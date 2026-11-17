@@ -8,7 +8,6 @@
 #include "BlockSystem.hpp"
 #include "Engine.hpp"
 #include "Gamestate.hpp"
-#include "Inventory.hpp"
 #include "PlayerPhysics.hpp"
 #include "UI.hpp"
 #include "World.hpp"
@@ -87,7 +86,6 @@ class App : public Engine
 		std::unique_ptr<ThreadPool> threadPool;
 
 		GameStateController gameState;
-		Inventory inventory;
 		World world;
 		BlockSystem blockSystem;
 

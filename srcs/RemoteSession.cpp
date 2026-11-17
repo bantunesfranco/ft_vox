@@ -77,7 +77,7 @@ std::optional<std::uint32_t> RemoteSession::pollTimeOfDay() {
 	return std::exchange(_timeOfDay, std::nullopt);
 }
 
-std::optional<glm::vec3> RemoteSession::pollSpawn() {
+std::optional<SpawnPoint> RemoteSession::pollSpawn() {
 	return std::exchange(_spawn, std::nullopt);
 }
 
@@ -119,6 +119,8 @@ void RemoteSession::requestBreakBlock(const glm::ivec3& pos) {
 	BlockId current = AIR_BLOCK;
 	if (!_world.getBlockAt(pos, current) || current == AIR_BLOCK)
 		return;
+	if (!_inventory.view().canTakeDropOf(current))
+		return;                              // its item would not fit
 
 	net::ByteWriter w(net::PacketId::BreakBlock, 12);
 	w.writeI32(pos.x).writeI32(pos.y).writeI32(pos.z);
@@ -126,8 +128,12 @@ void RemoteSession::requestBreakBlock(const glm::ivec3& pos) {
 	_pendingEdits.push_back({PendingEdit::Kind::Break, pos, current, net::Clock::now()});
 }
 
-void RemoteSession::requestPlaceBlock(const glm::vec3& origin, const glm::vec3& direction, const BlockId block) {
-	if (_phase != Phase::Playing || block == AIR_BLOCK || block >= BLOCK_TYPE_COUNT)
+void RemoteSession::requestPlaceBlock(const glm::vec3& origin, const glm::vec3& direction) {
+	const ItemStack& selected = _inventory.view().selectedStack();
+	if (_phase != Phase::Playing || selected.empty())
+		return;
+	const BlockId block = ItemRegistry::get(selected.item).placedBlock;
+	if (block == AIR_BLOCK || block >= BLOCK_TYPE_COUNT)
 		return;
 
 	// Same local checks as BlockSystem::placeBlock, so obviously invalid
@@ -157,6 +163,10 @@ void RemoteSession::requestPlaceBlock(const glm::vec3& origin, const glm::vec3& 
 	w.writeI32(target.x).writeI32(target.y).writeI32(target.z).writeU16(block);
 	_net.send(w.finish());
 	_pendingEdits.push_back({PendingEdit::Kind::Place, target, block, net::Clock::now()});
+}
+
+void RemoteSession::inventoryAction(const InventoryAction& action) {
+	(void)_inventory.apply(action);          // shown at once; not sent to the server yet
 }
 
 void RemoteSession::onLocalPlayerMoved(const glm::vec3& eyePos, const float yaw, const float pitch) {
@@ -216,7 +226,7 @@ void RemoteSession::onLoginOk(net::ByteReader& body) {
 	if (!body.ok() || !finite(spawn))
 		return;                              // handlePacket reports it
 	_playerId = id;
-	_spawn    = spawn;
+	_spawn    = SpawnPoint{spawn, 0.0f, 0.0f};   // LoginOk carries no look yet
 	_phase    = Phase::Playing;
 	_remote.erase(id);                       // in case a join for ourselves slipped in
 }

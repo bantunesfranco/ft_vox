@@ -18,6 +18,7 @@
 #include "BlockTextures.hpp"
 #include "Protocol.hpp"
 #include "PlayerPhysics.hpp"
+#include "PlayerStore.hpp"
 #include "RemoteSession.hpp"
 
 #include <charconv>
@@ -26,6 +27,17 @@
 #include "stb_image_write.h"
 
 namespace {
+// Camera::dir for a yaw and pitch in degrees.
+glm::vec3 lookDirection(const float yawDegrees, const float pitchDegrees) {
+	const float pitch = glm::radians(pitchDegrees);
+	const float yaw = glm::radians(yawDegrees);
+	return glm::normalize(glm::vec3{
+		std::cos(yaw) * std::cos(pitch),
+		std::sin(pitch),
+		std::sin(yaw) * std::cos(pitch)
+	});
+}
+
 bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
 	// Below the world is solid, above it empty; unloaded blocks count as solid.
 	const BlockRegistry& registry = world.getBlockRegistry();
@@ -126,7 +138,8 @@ bool App::startSingleplayer(const WorldInfo& info) {
 	// destroyed in endSession(), before run() ends and in terminate()).
 	const glm::ivec2 spawn = world.spawnPoint();
 	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem,
-		glm::vec3(static_cast<float>(spawn.x) + 0.5f, 0.0f, static_cast<float>(spawn.y) + 0.5f));
+		glm::vec3(static_cast<float>(spawn.x) + 0.5f, 0.0f, static_cast<float>(spawn.y) + 0.5f),
+		singleplayerFile(info.folder));
 	return true;
 }
 
@@ -139,7 +152,7 @@ void App::startBenchmarkWorld() {
 	const int ground = world.generatedSurfaceHeight(static_cast<int>(bench.startXZ.x), static_cast<int>(bench.startXZ.y));
 	bench.height = static_cast<float>(std::max(ground, 62) + 35);
 	timeTicks = bench.ticks;
-	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos);
+	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos, std::nullopt);
 	gameState.startGameplay();
 	applyGameState();
 }
@@ -237,11 +250,8 @@ void App::applySessionEvents() {
 	for (const SessionEvent& event : session->drainEvents()) {   // by value: safe even if the session is reset below
 		switch (event.type) {
 			case SessionEvent::Type::BlockBroken:
-				inventory.add(ItemRegistry::fromBlock(event.block));
-				break;
 			case SessionEvent::Type::BlockPlaced:
-				inventory.consumeSelected();
-				break;
+				break;                               // the session has already updated the inventory
 			case SessionEvent::Type::Disconnected: {
 				std::cerr << "Session ended: " << event.reason << '\n';
 				const bool wasRemote = session->isRemote();
@@ -291,15 +301,8 @@ void App::updatePlayerMovement(const bool acceptInput) {
 		camera->yaw += camera->rotSpeed * dt;
 		rotated = true;
 	}
-	if (rotated) {
-		const float pitch = glm::radians(camera->pitch);
-		const float yaw = glm::radians(camera->yaw);
-		camera->dir = glm::normalize(glm::vec3{
-			std::cos(yaw) * std::cos(pitch),
-			std::sin(pitch),
-			std::sin(yaw) * std::cos(pitch)
-		});
-	}
+	if (rotated)
+		camera->dir = lookDirection(camera->yaw, camera->pitch);
 
 	if (!spawnInitialized)
 		return;
@@ -372,7 +375,10 @@ void App::simulate() {
 		if (const auto serverTime = session->pollTimeOfDay())
 			timeTicks = *serverTime;                                 // the server's clock wins
 		if (const auto spawn = session->pollSpawn()) {
-			camera->pos = *spawn;
+			camera->pos = spawn->eye;
+			camera->yaw = spawn->yaw;
+			camera->pitch = spawn->pitch;
+			camera->dir = lookDirection(camera->yaw, camera->pitch);
 			spawnInitialized = true;
 			grounded = true;
 			jumpRequested = false;
@@ -432,7 +438,7 @@ UiFrameModel App::buildUiModel() const {
 	// declaration order of UiFrameModel.
 	UiFrameModel uiModel;
 	uiModel.state = gameState.currentState;
-	uiModel.selectedHotbarSlot = inventory.selectedSlot();
+	uiModel.selectedHotbarSlot = selectedHotbarSlot();
 	uiModel.fps = FPSCounter::getFPS();
 	if (camera)
 		uiModel.cameraPosition = {camera->pos.x, camera->pos.y, camera->pos.z};
@@ -466,6 +472,9 @@ UiFrameModel App::buildUiModel() const {
 			collectNameTags(uiModel);
 	}
 
+	if (!session)
+		return uiModel;                          // no player: the slots stay empty
+	const Inventory& inventory = session->inventory();
 	const auto& inventorySlots = inventory.slots();
 	for (std::size_t i = 0; i < inventorySlots.size(); ++i) {
 		const ItemStack& stack = inventorySlots[i];
@@ -533,17 +542,11 @@ void App::destroyBlock() {
 	if (!camera || !session)
 		return;
 
-	// Look at a block; it must not drop an item the inventory cannot hold.
 	const BlockRaycastHit hit = blockSystem.raycast(camera->pos, camera->dir, world);
 	if (!hit.valid)
 		return;
-	BlockId block = AIR_BLOCK;
-	if (!world.getBlockAt(hit.blockPos, block))
-		return;
-	if (!inventory.canTakeDropOf(block))
-		return;                                   // its item would not fit
 
-	// The session removes the block; the item is added when the BlockBroken event arrives.
+	// The session refuses a block whose item would not fit, removes it and adds the item.
 	session->requestBreakBlock(hit.blockPos);
 	applySessionEvents();     // singleplayer: answered already, so applied now
 }
@@ -551,15 +554,8 @@ void App::destroyBlock() {
 void App::placeBlock() {
 	if (!camera || !session)
 		return;
-	const ItemStack& selected = inventory.selectedStack();
-	if (selected.empty())
-		return;
-	const BlockId block = ItemRegistry::get(selected.item).placedBlock;
-	if (block == AIR_BLOCK)
-		return;
-
-	// The item is consumed when the BlockPlaced event arrives (only if it really was placed).
-	session->requestPlaceBlock(camera->pos, camera->dir, block);
+	// The session places its selected slot's block and consumes it (only if it really was placed).
+	session->requestPlaceBlock(camera->pos, camera->dir);
 	applySessionEvents();
 }
 
@@ -747,34 +743,40 @@ void App::applyGameState() {
 void App::togglePauseMenu() {
 	const bool wasInventory = gameState.currentState == GameState::INVENTORY;
 	gameState.togglePause();
-	if (wasInventory)
-		inventory.returnCursorStack();
+	if (wasInventory && session)
+		session->inventoryAction({InventoryAction::Kind::Close, 0, false});   // the cursor stack goes back
 	applyGameState();
 }
 
 void App::toggleInventoryMenu() {
 	const bool wasInventory = gameState.currentState == GameState::INVENTORY;
 	gameState.toggleInventory();
-	if (wasInventory)
-		inventory.returnCursorStack();
+	if (wasInventory && session)
+		session->inventoryAction({InventoryAction::Kind::Close, 0, false});   // the cursor stack goes back
 	applyGameState();
 }
 
 void App::selectHotbarSlot(const uint16_t slot) {
-	inventory.selectHotbarSlot(slot);
+	if (session && slot < Inventory::HOTBAR_SIZE)
+		session->inventoryAction({InventoryAction::Kind::Select, static_cast<std::uint8_t>(slot), false});
 }
 
+// Same arithmetic as Inventory::cycleHotbar, sent as a selection.
 void App::cycleHotbar(const int delta) {
-	inventory.cycleHotbar(delta);
+	if (!session)
+		return;
+	const int size = static_cast<int>(Inventory::HOTBAR_SIZE);
+	const int next = (static_cast<int>(session->inventory().selectedSlot()) + delta % size + size) % size;
+	selectHotbarSlot(static_cast<uint16_t>(next));
 }
 
 void App::clickInventorySlot(const int slot, const bool secondaryClick) {
-	if (slot >= 0)
-		inventory.clickSlot(static_cast<std::size_t>(slot), secondaryClick);
+	if (session && slot >= 0 && slot < static_cast<int>(Inventory::SLOT_COUNT))
+		session->inventoryAction({InventoryAction::Kind::Click, static_cast<std::uint8_t>(slot), secondaryClick});
 }
 
 uint16_t App::selectedHotbarSlot() const {
-	return inventory.selectedSlot();
+	return session ? session->inventory().selectedSlot() : 0;
 }
 
 void App::toggleWireframeDebug() {

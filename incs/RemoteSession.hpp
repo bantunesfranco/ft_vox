@@ -37,6 +37,7 @@
 
 #include "GameSession.hpp"
 #include "NetClient.hpp"
+#include "PredictedInventory.hpp"
 
 class World;
 class BlockSystem;
@@ -59,13 +60,18 @@ public:
 	// --- GameSession ---------------------------------------------------------
 
 	void update(const glm::vec3& playerPos, float dt) override;
-	[[nodiscard]] std::optional<glm::vec3> pollSpawn() override;     // from LoginOk, once
+	[[nodiscard]] std::optional<SpawnPoint> pollSpawn() override;    // from LoginOk, once
 	[[nodiscard]] std::optional<std::uint32_t> pollTimeOfDay() override;
 
 	void requestBreakBlock(const glm::ivec3& pos) override;          // sends BreakBlock
 	void requestPlaceBlock(const glm::vec3& origin,
-	                       const glm::vec3& direction,
-	                       BlockId block) override;                   // raycasts locally, sends PlaceBlock
+	                       const glm::vec3& direction) override;      // raycasts locally, sends PlaceBlock
+
+	// The predicted inventory: actions show at once (for now they stay local;
+	// the server's copy is not synchronised yet, so breaks and places do not
+	// change it).
+	[[nodiscard]] const Inventory& inventory() const override { return _inventory.view(); }
+	void inventoryAction(const InventoryAction& action) override;
 
 	void onLocalPlayerMoved(const glm::vec3& eyePos, float yaw, float pitch) override;   // rate limited
 
@@ -113,7 +119,8 @@ private:
 	std::uint32_t      _playerId = 0;
 	glm::vec3          _lastPlayerPos{};          // for the "Loading terrain" status
 
-	std::optional<glm::vec3>  _spawn;
+	std::optional<SpawnPoint> _spawn;
+	PredictedInventory        _inventory;
 
 	std::optional<std::uint32_t> _timeOfDay;    // last TimeUpdate, until polled
 	std::vector<SessionEvent> _events;

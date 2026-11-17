@@ -18,20 +18,25 @@
 //
 //      session->update(camera->pos, dt);
 //      if (auto spawn = session->pollSpawn())
-//          camera->pos = *spawn;
+//          camera->pos = spawn->eye; ... spawn->yaw, spawn->pitch ...
 //      ... input / movement ...
 //      session->onLocalPlayerMoved(eyePos, yaw, pitch);  // after moving the player
 //      session->requestBreakBlock(hit.blockPos);         // from destroyBlock()
-//      session->requestPlaceBlock(origin, dir, block);   // from placeBlock()
+//      session->requestPlaceBlock(origin, dir);          // from placeBlock()
+//      session->inventoryAction(action);                 // hotbar / inventory screen input
 //      for (const SessionEvent& e : session->drainEvents()) { ... }
 //
 //  Requests may complete LATER. In singleplayer an edit is applied before the
 //  request returns; in multiplayer it is applied when the server answers. So
-//  never assume the world changed right after a request: react to the events
-//  (add the item on BlockBroken, consume it on BlockPlaced).
+//  never assume the world changed right after a request: react to the events.
+//
+//  The session owns the player's inventory: the item of a broken block is
+//  added and a placed block's item consumed inside the session. App only
+//  reads inventory() and sends actions.
 // ============================================================================
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -39,6 +44,7 @@
 #include <glm/glm.hpp>
 
 #include "Block.hpp"        // BlockId
+#include "Inventory.hpp"
 
 // Another player, as the game should draw it this frame (already smoothed).
 struct RemotePlayerView {
@@ -49,11 +55,18 @@ struct RemotePlayerView {
 	float         pitch = 0.0f;
 };
 
+// Where the local player starts, and where it looks (degrees, as Camera stores them).
+struct SpawnPoint {
+	glm::vec3 eye{};
+	float     yaw   = 0.0f;
+	float     pitch = 0.0f;
+};
+
 // Something that happened that the game must react to.
 struct SessionEvent {
 	enum class Type : std::uint8_t {
-		BlockBroken,        // `block` was removed at `pos`        -> give the player the item
-		BlockPlaced,        // `block` was placed at `pos`         -> consume it from the hotbar
+		BlockBroken,        // `block` was removed at `pos` (its item is already in the inventory)
+		BlockPlaced,        // `block` was placed at `pos`  (its item is already consumed)
 		Disconnected,       // the session ended; `reason` says why -> back to the title screen
 	};
 
@@ -75,27 +88,32 @@ public:
 	// generates chunks around it. Multiplayer: processes network traffic.
 	virtual void update(const glm::vec3& playerPos, float dt) = 0;
 
-	// The eye position to start at, returned EXACTLY ONCE, as soon as it is known
+	// Where to start, returned EXACTLY ONCE, as soon as it is known
 	// (singleplayer: the terrain under the start position has loaded;
 	// multiplayer: the server said where to spawn). Empty until then and after.
-	[[nodiscard]] virtual std::optional<glm::vec3> pollSpawn() = 0;
+	[[nodiscard]] virtual std::optional<SpawnPoint> pollSpawn() = 0;
 
 	// Multiplayer: the server's time of day (ticks), once per update received.
 	[[nodiscard]] virtual std::optional<std::uint32_t> pollTimeOfDay() { return std::nullopt; }
 
-	// Ask to remove the block at `pos` (a BlockRaycastHit::blockPos).
+	// Ask to remove the block at `pos` (a BlockRaycastHit::blockPos). Nothing is
+	// requested when the inventory could not take the block's item.
 	// Result arrives as SessionEvent::BlockBroken.
 	virtual void requestBreakBlock(const glm::ivec3& pos) = 0;
 
-	// Ask to place `block` where the ray (origin, direction) hits the world.
-	// Result arrives as SessionEvent::BlockPlaced.
-	virtual void requestPlaceBlock(const glm::vec3& origin,
-	                               const glm::vec3& direction,
-	                               BlockId block) = 0;
+	// Ask to place the selected slot's block where the ray (origin, direction)
+	// hits the world. Result arrives as SessionEvent::BlockPlaced.
+	virtual void requestPlaceBlock(const glm::vec3& origin, const glm::vec3& direction) = 0;
+
+	// The local player's inventory, as the UI should show it.
+	[[nodiscard]] virtual const Inventory& inventory() const = 0;
+
+	// A hotbar selection, a click in the inventory screen, or closing it.
+	virtual void inventoryAction(const InventoryAction& action) = 0;
 
 	// Tell the session where the local player is. Called after movement each
-	// frame. No-op in singleplayer; multiplayer sends it to the server (rate
-	// limited internally).
+	// frame. Singleplayer keeps it for the player save; multiplayer sends it to
+	// the server (rate limited internally).
 	virtual void onLocalPlayerMoved(const glm::vec3& eyePos, float yaw, float pitch) = 0;
 
 	// Returns and clears everything that happened since the last call, oldest first.
@@ -124,12 +142,12 @@ protected:
 //
 //  Drives the World App already owns: generates chunks around the player on
 //  the ThreadPool, edits blocks through BlockSystem, and answers every request
-//  immediately. It borrows everything, owns nothing, and never touches the
-//  network layer.
+//  immediately. It borrows the world and never touches the network layer.
 //
-//  Inventory handling stays in App: it reacts to the BlockBroken / BlockPlaced
-//  events (the inventory.canAdd() check happens in App::destroyBlock, before
-//  the request is made).
+//  It owns the player: its inventory and, with a player file, its saved
+//  position, look and inventory. The player is saved every SAVE_INTERVAL
+//  seconds of update() time and when the session is destroyed, but only once
+//  it has spawned (a world left while loading keeps its previous save).
 // ============================================================================
 
 class World;
@@ -138,21 +156,29 @@ class BlockSystem;
 
 class LocalSession final : public GameSession {
 public:
+	static constexpr float SAVE_INTERVAL = 60.0f;   // seconds of update() time
+
 	// All three references must outlive the session.
-	// `startPos` is the camera position when the game starts; its x and z decide
-	// where the player spawns (the height comes from the terrain).
+	// `startPos`: its x and z decide where a new player spawns (the height comes
+	// from the terrain). `playerFile`: where the player is loaded from and saved
+	// to; when it holds a record, the player resumes from it instead (missing
+	// or damaged: a new player). nullopt never saves (the benchmark).
 	LocalSession(World& world,
 	             ThreadPool& threadPool,
 	             const BlockSystem& blocks,
-	             const glm::vec3& startPos);
+	             const glm::vec3& startPos,
+	             std::optional<std::filesystem::path> playerFile);
+	// Saves the player (see above). Never throws.
+	~LocalSession() override;
 
 	void update(const glm::vec3& playerPos, float dt) override;
-	[[nodiscard]] std::optional<glm::vec3> pollSpawn() override;
+	[[nodiscard]] std::optional<SpawnPoint> pollSpawn() override;
 
 	void requestBreakBlock(const glm::ivec3& pos) override;
-	void requestPlaceBlock(const glm::vec3& origin,
-	                       const glm::vec3& direction,
-	                       BlockId block) override;
+	void requestPlaceBlock(const glm::vec3& origin, const glm::vec3& direction) override;
+
+	[[nodiscard]] const Inventory& inventory() const override { return _inventory; }
+	void inventoryAction(const InventoryAction& action) override;
 
 	void onLocalPlayerMoved(const glm::vec3& eyePos, float yaw, float pitch) override;
 
@@ -160,6 +186,9 @@ public:
 	[[nodiscard]] bool isRemote() const noexcept override { return false; }
 
 private:
+	[[nodiscard]] glm::vec3 spawnTarget() const;   // where the spawn will be, roughly
+	void savePlayerFile() const;                   // logs a failure to stderr
+
 	World&             _world;
 	ThreadPool&        _threadPool;
 	const BlockSystem& _blocks;
@@ -167,6 +196,12 @@ private:
 	glm::vec2          _spawnXZ;
 	bool               _spawnDone = false;
 	std::vector<SessionEvent> _events;
+
+	Inventory                            _inventory;
+	std::optional<std::filesystem::path> _playerFile;
+	std::optional<SpawnPoint>            _savedSpawn;   // from the player file
+	SpawnPoint                           _player;       // the latest position and look
+	float                                _sinceSave = 0.0f;
 };
 
 // RemoteSession (multiplayer) lives in RemoteSession.hpp.
