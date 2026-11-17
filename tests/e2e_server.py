@@ -3,7 +3,7 @@ import socket, struct, sys, time
 PORT = int(sys.argv[1])
 IDS = dict(Hello=0x0001, Login=0x0002, PlayerMove=0x0010, BreakBlock=0x0020, PlaceBlock=0x0021,
            LoginOk=0x0102, EntityMove=0x0110, PlayerJoin=0x0111, PlayerLeave=0x0112,
-           BlockUpdate=0x0120, ChunkData=0x0130, UnloadChunk=0x0131, KeepAlive=0x0F00, Disconnect=0x0FFF)
+           BlockUpdate=0x0120, ChunkData=0x0130, UnloadChunk=0x0131, TimeUpdate=0x0140, KeepAlive=0x0F00, Disconnect=0x0FFF)
 NAMES = {v: k for k, v in IDS.items()}
 EYE = 1.62
 
@@ -80,9 +80,15 @@ login = [p for n, p in msgs if n == "LoginOk"]
 ok(len(login) == 1, "alice receives LoginOk")
 aid, sx, sy, sz = struct.unpack("<Ifff", login[0])
 print(f"     alice id={aid} spawn=({sx:.2f}, {sy:.2f}, {sz:.2f})")
+after = [p for n, p in msgs if n == "TimeUpdate"] or         [p for n, p in a.pump(1, lambda n, p: n == "TimeUpdate") if len(p) == 4]
+ok(len(after) >= 1 and 0 <= struct.unpack("<I", after[0])[0] < 24000,
+   "TimeUpdate received right after LoginOk")
+first_time, = struct.unpack("<I", after[0])
 
 # ---- 2. chunk streaming + codec ---------------------------------------------
-a.pump(6)
+streamed = a.pump(6)
+later = [struct.unpack("<I", p)[0] for n, p in streamed if n == "TimeUpdate"]
+ok(later and (later[-1] - first_time) % 24000 > 0, f"the clock runs ({first_time} -> {later[-1] if later else '?'})")
 import math
 spawn_chunk = (math.floor(sx / 16), math.floor(sz / 16))
 ok(spawn_chunk in a.chunks, f"spawn column streamed and decoded ({len(a.chunks)} columns so far)")

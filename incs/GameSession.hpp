@@ -80,6 +80,9 @@ public:
 	// multiplayer: the server said where to spawn). Empty until then and after.
 	[[nodiscard]] virtual std::optional<glm::vec3> pollSpawn() = 0;
 
+	// Multiplayer: the server's time of day (ticks), once per update received.
+	[[nodiscard]] virtual std::optional<std::uint32_t> pollTimeOfDay() { return std::nullopt; }
+
 	// Ask to remove the block at `pos` (a BlockRaycastHit::blockPos).
 	// Result arrives as SessionEvent::BlockBroken.
 	virtual void requestBreakBlock(const glm::ivec3& pos) = 0;

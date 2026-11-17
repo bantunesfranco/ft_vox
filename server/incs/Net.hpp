@@ -115,6 +115,7 @@ enum class PacketId : uint16_t {
 	ChunkDelta   = 0x0121,   // batched per-chunk changes
 	ChunkData    = 0x0130,   // encoded chunk
 	UnloadChunk  = 0x0131,
+	TimeUpdate   = 0x0140,   // u32 time of day (ticks); clients ignore it if unknown
 
 	// both directions
 	KeepAlive    = 0x0F00,

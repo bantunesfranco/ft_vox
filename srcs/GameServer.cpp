@@ -69,6 +69,8 @@ bool GameServer::start(std::string& error) {
 		return false;
 	}
 	_seed  = world->seed;
+	_world = *world;
+	_timeOfDay = world->timeOfDay % TimeOfDay::TICKS_PER_DAY;
 	_store = std::make_shared<RegionStore>(world->folder / "region");
 	_generator = std::make_shared<worldgen::TerrainGenerator>(_seed);
 	_spawnXZ = _generator->findSpawn();
@@ -88,6 +90,10 @@ void GameServer::run() {
 		return;
 	_transport->run();
 	saveAllAndWait();
+	_world.timeOfDay = _timeOfDay;
+	std::string error;
+	if (!markPlayed(_world, error))
+		log("could not save the time of day: %s", error.c_str());
 	log("saved, stopped");
 }
 
@@ -247,7 +253,14 @@ void GameServer::onPlaceBlock(Player& p, net::ByteReader& body) {
 //  Tick
 // ============================================================================
 
+void GameServer::sendTimeTo(const net::ConnId conn) {
+	net::ByteWriter time(net::PacketId::TimeUpdate, 4);
+	time.writeU32(_timeOfDay);
+	_transport->send(conn, time.finish());
+}
+
 void GameServer::onTick(const std::uint64_t tick) {
+	_timeOfDay = (_timeOfDay + 1) % TimeOfDay::TICKS_PER_DAY;
 	spawnWaitingPlayers();
 	for (auto& p : _players | std::views::values) {
 		if (!p.spawned)
@@ -265,6 +278,10 @@ void GameServer::onTick(const std::uint64_t tick) {
 				all.push_back(id);
 		_transport->broadcast(all, net::ByteWriter(net::PacketId::KeepAlive, 0).finish());
 	}
+	if (tick % kTimeUpdateTicks == 0)
+		for (const auto& [id, p] : _players)
+			if (p.spawned)
+				sendTimeTo(id);
 	if (tick % kEvictEveryTicks == 0)
 		evictColumns();
 }
@@ -312,6 +329,7 @@ void GameServer::spawn(Player& p) {
 	net::ByteWriter ok(net::PacketId::LoginOk, 16);
 	ok.writeU32(p.conn).writeF32(p.pos.x).writeF32(p.pos.y).writeF32(p.pos.z);
 	_transport->send(p.conn, ok.finish());
+	sendTimeTo(p.conn);                    // night shows at once, not after the first update
 
 	// Everyone already here, to the newcomer...
 	for (const auto& other : _players | std::views::values) {

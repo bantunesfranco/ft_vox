@@ -6,6 +6,8 @@
 #include <memory>
 #include <utility>
 
+#include "TimeOfDay.hpp"
+
 #include "BlockSystem.hpp"
 #include "ChunkCodec.hpp"
 #include "PlayerCollision.hpp"
@@ -69,6 +71,10 @@ void RemoteSession::update(const glm::vec3& playerPos, const float dt) {
 
 	updateRemotePlayers(dt);
 	expirePendingEdits();
+}
+
+std::optional<std::uint32_t> RemoteSession::pollTimeOfDay() {
+	return std::exchange(_timeOfDay, std::nullopt);
 }
 
 std::optional<glm::vec3> RemoteSession::pollSpawn() {
@@ -140,6 +146,9 @@ void RemoteSession::requestPlaceBlock(const glm::vec3& origin, const glm::vec3& 
 	BlockId existing = AIR_BLOCK;
 	if (!_world.getBlockAt(target, existing) || (existing != AIR_BLOCK && existing != WATER_BLOCK))
 		return;
+	BlockId below = AIR_BLOCK;
+	if (!_world.getBlockAt(target - glm::ivec3(0, 1, 0), below) || !placementAllowed(_world.getBlockRegistry(), block, below))
+		return;                              // a torch needs solid ground (the server checks too)
 	for (const PendingEdit& e : _pendingEdits)
 		if (e.pos == target)
 			return;
@@ -189,6 +198,7 @@ void RemoteSession::handlePacket(const net::PacketId id, net::ByteReader& body) 
 		case PacketId::EntityMove:  onEntityMove(body);  break;
 		case PacketId::PlayerJoin:  onPlayerJoin(body);  break;
 		case PacketId::PlayerLeave: onPlayerLeave(body); break;
+		case PacketId::TimeUpdate:  _timeOfDay = body.readU32() % TimeOfDay::TICKS_PER_DAY; break;
 		default:
 			return;                          // unknown / unused (e.g. ChunkDelta): ignore, stay compatible
 	}

@@ -387,6 +387,8 @@ void App::run() {
 			const bool inGame = gameState.currentState == GameState::IN_GAME;
 			const bool simulate = session && (inGame || session->isRemote());
 			if (simulate) {
+				if (const auto serverTime = session->pollTimeOfDay())
+					timeTicks = *serverTime;                                 // the server's clock wins
 				if (const auto spawn = session->pollSpawn()) {              // was: the getSurfaceHeight block
 					camera->pos = *spawn;
 					spawnInitialized = true;

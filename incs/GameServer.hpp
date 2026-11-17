@@ -85,6 +85,7 @@ public:
 private:
 	static constexpr int           kChunksPerTick   = 12;     // per player
 	static constexpr std::uint64_t kKeepAliveTicks  = 100;    // 5 s at 20 Hz
+	static constexpr std::uint64_t kTimeUpdateTicks = 100;    // clients advance the clock in between
 	static constexpr std::uint64_t kEvictEveryTicks = 40;
 
 	using ColumnPtr = std::shared_ptr<ChunkColumn>;
@@ -109,6 +110,7 @@ private:
 	// ---- tick steps ---------------------------------------------------------------
 	void spawnWaitingPlayers();
 	void spawn(Player& p);
+	void sendTimeTo(net::ConnId conn);
 	void updateView(Player& p);            // wanted list + unloads when the center moved
 	void streamChunks(Player& p);
 	void requestGeneration();
@@ -139,6 +141,8 @@ private:
 	BlockRegistry _blocks;
 	glm::ivec2    _spawnXZ{8, 8};          // from the generator; the column is loaded before use
 	std::uint64_t _seed = 0;
+	WorldInfo     _world;                   // level.bin of the world served (time saved on stop)
+	std::uint32_t _timeOfDay = 0;           // ticks, one per server tick (20 Hz, like TimeOfDay)
 	std::shared_ptr<RegionStore>                      _store;
 	std::unique_ptr<WorldLock>                        _lock;
 	std::unordered_map<ChunkCoord, ColumnPtr>         _columns;

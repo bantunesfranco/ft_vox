@@ -60,6 +60,7 @@ public:
 
 	void update(const glm::vec3& playerPos, float dt) override;
 	[[nodiscard]] std::optional<glm::vec3> pollSpawn() override;     // from LoginOk, once
+	[[nodiscard]] std::optional<std::uint32_t> pollTimeOfDay() override;
 
 	void requestBreakBlock(const glm::ivec3& pos) override;          // sends BreakBlock
 	void requestPlaceBlock(const glm::vec3& origin,
@@ -113,6 +114,8 @@ private:
 	glm::vec3          _lastPlayerPos{};          // for the "Loading terrain" status
 
 	std::optional<glm::vec3>  _spawn;
+
+	std::optional<std::uint32_t> _timeOfDay;    // last TimeUpdate, until polled
 	std::vector<SessionEvent> _events;
 
 	// An edit we sent that the server has not answered yet. Settled by the
