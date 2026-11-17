@@ -1,6 +1,7 @@
 #include "ChunkMesher.hpp"
 
 #include <algorithm>
+#include <vector>
 
 void ChunkMesher::build(
     const ChunkSection& section,
@@ -56,6 +57,11 @@ void ChunkMesher::build(
         return static_cast<std::size_t>((x + 1) + (z + 1) * padded + (y + 1) * padded * padded);
     };
     const int baseY = sectionY * size;
+    // Blocks drawn with their own model (torches), not as cube faces.
+    std::array<bool, BLOCK_TYPE_COUNT> modelled{};
+    for (std::size_t id = 0; id < BLOCK_TYPE_COUNT; ++id)
+        modelled[id] = registry.get(static_cast<BlockId>(id)).model != BlockModel::Cube;
+    std::vector<std::array<int, 3>> modelCells;
     // Buried: the section and every border cell sharing a face with it are
     // opaque, so no face can be visible (deep stone). Border edges and
     // corners only matter for AO of visible faces, so they are not checked.
@@ -71,6 +77,8 @@ void ChunkMesher::build(
                 const bool isOpaque = registry.isOpaque(block);
                 blocks[cell(x, y, z)] = block;
                 opaque[cell(x, y, z)] = isOpaque ? 1 : 0;
+                if (interior && modelled[block])
+                    modelCells.push_back({x, y, z});
                 light[cell(x, y, z)] = neighborhood.getLight(x, y + baseY, z);
 
                 const int outside = (x < 0 || x >= size) + (y < 0 || y >= size) + (z < 0 || z >= size);
@@ -115,6 +123,8 @@ void ChunkMesher::build(
                         neighborPosition[axis] += sign;
                         if (opaqueAt(neighborPosition))
                             continue;                       // hidden face: the common case
+                        if (modelled[block])
+                            continue;                       // drawn below, with its model
                         const BlockDefinition& definition = registry.get(block);
                         if (definition.transparent && blockAt(neighborPosition) == block)
                             continue;
@@ -248,6 +258,13 @@ void ChunkMesher::build(
             }
         }
     }
+
+    for (const auto& [x, y, z] : modelCells) {
+        const BlockDefinition& definition = registry.get(blocks[cell(x, y, z)]);
+        const std::uint8_t packed = light[cell(x, y, z)];
+        const auto blockLight = static_cast<std::uint8_t>(std::max<int>(packed & 0x0F, definition.lightEmission));
+        emitTorch(output, x, y, z, definition.textureSide, static_cast<std::uint8_t>((packed & 0xF0) | blockLight));
+    }
 }
 
 void ChunkMesher::emitVertex(
@@ -353,5 +370,38 @@ void ChunkMesher::emitQuad(
         mesh.indices.push_back(base + 2);
         mesh.indices.push_back(base + 3);
         mesh.indices.push_back(base + 0);
+    }
+}
+
+// A torch: a 2 x 10 x 2 stick in the middle of its cell (1/16 block units),
+// four sides and a top, never merged with anything.
+void ChunkMesher::emitTorch(MeshData& mesh, const int x, const int y, const int z,
+                            const std::uint16_t texture, const std::uint8_t light) {
+    constexpr std::uint8_t lo = 7, hi = 9, top = 10;
+    struct Face {
+        NormalDir normal;
+        std::array<std::array<std::uint8_t, 3>, 4> corners;   // sub-block x, y, z, in emitQuad's order
+    };
+    static constexpr std::array<Face, 5> faces = {{
+        {NormalDir::PositiveX, {{{hi, 0, lo}, {hi, top, lo}, {hi, top, hi}, {hi, 0, hi}}}},
+        {NormalDir::NegativeX, {{{lo, 0, hi}, {lo, top, hi}, {lo, top, lo}, {lo, 0, lo}}}},
+        {NormalDir::PositiveZ, {{{hi, 0, hi}, {hi, top, hi}, {lo, top, hi}, {lo, 0, hi}}}},
+        {NormalDir::NegativeZ, {{{lo, 0, lo}, {lo, top, lo}, {hi, top, lo}, {hi, 0, lo}}}},
+        {NormalDir::PositiveY, {{{lo, top, hi}, {hi, top, hi}, {hi, top, lo}, {lo, top, lo}}}},
+    }};
+    const auto sky = static_cast<std::uint8_t>(light >> 4);
+    const auto block = static_cast<std::uint8_t>(light & 0x0F);
+    const auto textureIndex = static_cast<std::uint8_t>(texture & 0x3F);
+    for (const Face& face : faces) {
+        const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+        for (std::size_t corner = 0; corner < face.corners.size(); ++corner) {
+            const auto& s = face.corners[corner];
+            mesh.vertices.push_back(packVertex(
+                static_cast<std::uint8_t>(x), static_cast<std::uint16_t>(y), static_cast<std::uint8_t>(z),
+                face.normal, textureIndex, 3, static_cast<std::uint8_t>(corner),
+                sky, block, s[0], s[1], s[2]));
+        }
+        for (const std::uint32_t i : {0u, 1u, 2u, 2u, 3u, 0u})
+            mesh.indices.push_back(base + i);
     }
 }

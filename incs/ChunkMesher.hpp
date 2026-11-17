@@ -33,6 +33,8 @@ private:
         const std::array<std::uint8_t, 4>& light      // (sky << 4) | block per corner
     );
 
+    static void emitTorch(MeshData& mesh, int x, int y, int z, std::uint16_t texture, std::uint8_t light);
+
     static void emitVertex(
         MeshData &mesh,
         uint8_t x,

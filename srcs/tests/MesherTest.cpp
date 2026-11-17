@@ -1,4 +1,5 @@
 #include "SelfTest.hpp"
+#include "BlockTextures.hpp"
 #include "ChunkMesher.hpp"
 #include "TestWorld.hpp"
 
@@ -92,4 +93,24 @@ SELFTEST(Mesher, no_light_is_full_sky) {
 		dark += (skyOf(v) == 15 || worldBottom(v)) ? 0 : 1;
 	CHECK(!m.opaque.vertices.empty());
 	CHECK_EQ(dark, 0);
+}
+
+SELFTEST(Mesher, torch_is_a_stick) {
+	TestWorld w(FLOOR);
+	w.set(8, FLOOR + 1, 8, toBlockId(BlockType::Torch));      // standing on the floor
+	const auto light = w.light();
+	const Meshed m = mesh(w, (FLOOR + 1) / 16, light.get());
+	const auto torchTexture = BlockTextures::index(BlockTextures::Texture::Torch);
+	int vertices = 0, offGrid = 0, lit = 0;
+	for (const PackedVertex& v : m.opaque.vertices) {
+		if (((v.a >> 22u) & 0x3Fu) != torchTexture)
+			continue;
+		++vertices;
+		const std::uint32_t sx = (v.b >> 8u) & 0x1Fu, sy = (v.b >> 13u) & 0x1Fu, sz = (v.b >> 18u) & 0x1Fu;
+		offGrid += ((sx == 7 || sx == 9) && (sz == 7 || sz == 9) && (sy == 0 || sy == 10)) ? 0 : 1;
+		lit += blockOf(v) >= 14 ? 1 : 0;
+	}
+	CHECK_EQ(vertices, 20);                                    // 4 sides + top
+	CHECK_EQ(offGrid, 0);
+	CHECK_EQ(lit, 20);                                         // it glows
 }
