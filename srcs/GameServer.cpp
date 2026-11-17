@@ -226,6 +226,9 @@ void GameServer::onPlaceBlock(Player& p, net::ByteReader& body) {
 	bool allowed = p.spawned && block != AIR_BLOCK && block != BEDROCK_BLOCK
 	            && inReach(p, pos) && blockAt(pos, current)
 	            && (current == AIR_BLOCK || current == WATER_BLOCK);
+	BlockId below = AIR_BLOCK;
+	if (allowed && (!blockAt(pos - glm::ivec3(0, 1, 0), below) || !placementAllowed(_blocks, block, below)))
+		allowed = false;                               // a torch needs solid ground
 	if (allowed) {
 		for (const auto& other : _players | std::views::values) {
 			if (other.spawned && PlayerCollision::overlapsBlock(other.pos, pos)) {

@@ -16,6 +16,8 @@ constexpr std::array<ItemDefinition, static_cast<std::size_t>(ItemId::Count)> DE
 	{"Clay", toBlockId(BlockType::Clay), 64},
 	{"Cactus", toBlockId(BlockType::Cactus), 64},
 	{"Sandstone", toBlockId(BlockType::Sandstone), 64},
+	{"Glowstone", toBlockId(BlockType::Glowstone), 64},
+	{"Torch", toBlockId(BlockType::Torch), 64},
 }};
 }
 
@@ -39,6 +41,8 @@ ItemId ItemRegistry::fromBlock(const BlockId block) noexcept {
 		case BlockType::Clay: return ItemId::Clay;
 		case BlockType::Cactus: return ItemId::Cactus;
 		case BlockType::Sandstone: return ItemId::Sandstone;
+		case BlockType::Glowstone: return ItemId::Glowstone;
+		case BlockType::Torch: return ItemId::Torch;
 		default: return ItemId::Empty;
 	}
 }

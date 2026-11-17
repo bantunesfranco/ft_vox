@@ -28,6 +28,7 @@ enum class Texture : std::uint16_t {
 	OakLeaves, BirchLeaves, SpruceLeaves,
 	Gravel, Clay, CactusSide, CactusTop,
 	SandstoneSide, SandstoneTop, SandstoneBottom, Ice,
+	LavaStill, Glowstone, Torch,
 	Count
 };
 

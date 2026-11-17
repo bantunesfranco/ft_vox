@@ -16,3 +16,14 @@ SELFTEST(Inventory, blocks_without_drop_can_always_be_broken) {
 	CHECK(empty.canTakeDropOf(toBlockId(BlockType::Stone)));
 	CHECK(empty.canTakeDropOf(toBlockId(BlockType::SpruceLeaves)));
 }
+
+SELFTEST(Inventory, starting_items) {
+	const Inventory inventory;
+	int torches = 0, glowstone = 0;
+	for (const ItemStack& stack : inventory.slots()) {
+		torches += stack.item == ItemId::Torch ? stack.count : 0;
+		glowstone += stack.item == ItemId::Glowstone ? stack.count : 0;
+	}
+	CHECK_EQ(torches, 64);
+	CHECK_EQ(glowstone, 64);
+}

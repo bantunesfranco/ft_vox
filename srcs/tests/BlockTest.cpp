@@ -18,7 +18,10 @@ SELFTEST(Blocks, ids_never_move) {
 	CHECK_EQ(toBlockId(BlockType::Bedrock), BlockId{8});
 	CHECK_EQ(toBlockId(BlockType::OakLog), BlockId{9});
 	CHECK_EQ(toBlockId(BlockType::Ice), BlockId{19});
-	CHECK_EQ(BLOCK_TYPE_COUNT, std::size_t{20});
+	CHECK_EQ(toBlockId(BlockType::Lava), BlockId{20});
+	CHECK_EQ(toBlockId(BlockType::Glowstone), BlockId{21});
+	CHECK_EQ(toBlockId(BlockType::Torch), BlockId{22});
+	CHECK_EQ(BLOCK_TYPE_COUNT, std::size_t{23});
 }
 
 SELFTEST(Blocks, new_blocks_registered) {
@@ -50,7 +53,8 @@ SELFTEST(Blocks, solidity) {
 
 SELFTEST(Blocks, items_map_back) {
 	for (const BlockType type : {BlockType::OakLog, BlockType::BirchLog, BlockType::SpruceLog,
-	                             BlockType::Gravel, BlockType::Clay, BlockType::Cactus, BlockType::Sandstone}) {
+	                             BlockType::Gravel, BlockType::Clay, BlockType::Cactus, BlockType::Sandstone,
+	                             BlockType::Glowstone, BlockType::Torch}) {
 		const ItemId item = ItemRegistry::fromBlock(toBlockId(type));
 		CHECK(item != ItemId::Empty);
 		CHECK_EQ(ItemRegistry::get(item).placedBlock, toBlockId(type));
@@ -98,4 +102,38 @@ SELFTEST(Blocks, fog_inside_liquids) {
 		CHECK_EQ(registry.get(type).fogDistance, 0.0f);
 		CHECK_EQ(registry.get(type).fogColor, 0u);
 	}
+}
+
+SELFTEST(Blocks, light_blocks) {
+	const BlockRegistry r;
+	CHECK_EQ(r.get(BlockType::Glowstone).lightEmission, std::uint8_t{15});
+	CHECK_EQ(r.get(BlockType::Lava).lightEmission, std::uint8_t{15});
+	CHECK_EQ(r.get(BlockType::Torch).lightEmission, std::uint8_t{14});
+	CHECK_EQ(r.get(BlockType::Stone).lightEmission, std::uint8_t{0});
+	CHECK_EQ(r.get(BlockType::Water).lightFilter, std::uint8_t{1});
+	CHECK_EQ(r.get(BlockType::OakLeaves).lightFilter, std::uint8_t{1});
+	CHECK_EQ(r.get(BlockType::Air).lightFilter, std::uint8_t{0});
+
+	const BlockDefinition& lava = r.get(BlockType::Lava);
+	CHECK(!lava.solid);
+	CHECK_EQ(lava.fogColor, 0xC8400Au);
+	CHECK_EQ(lava.fogDistance, 1.5f);
+	CHECK(ItemRegistry::fromBlock(LAVA_BLOCK) == ItemId::Empty);
+
+	const BlockDefinition& torch = r.get(BlockType::Torch);
+	CHECK(!torch.solid && !torch.opaque);
+	CHECK(torch.model == BlockModel::Torch);
+	CHECK(r.get(BlockType::Glowstone).opaque && r.get(BlockType::Glowstone).solid);
+	CHECK(r.get(BlockType::Stone).model == BlockModel::Cube);
+}
+
+SELFTEST(Blocks, torch_needs_solid_ground) {
+	const BlockRegistry r;
+	const BlockId torch = toBlockId(BlockType::Torch);
+	CHECK(placementAllowed(r, torch, toBlockId(BlockType::Stone)));
+	CHECK(placementAllowed(r, torch, toBlockId(BlockType::Glowstone)));
+	for (const BlockType below : {BlockType::Air, BlockType::Water, BlockType::Lava, BlockType::OakLeaves,
+	                              BlockType::Ice, BlockType::Torch})
+		CHECK(!placementAllowed(r, torch, toBlockId(below)));
+	CHECK(placementAllowed(r, toBlockId(BlockType::Stone), AIR_BLOCK));
 }

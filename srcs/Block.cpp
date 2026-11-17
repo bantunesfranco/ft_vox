@@ -81,7 +81,8 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureBottom = 6,
         .textureSide = 6,
         .fogColor = 0x1A4AB4,         // deep blue
-        .fogDistance = 96.0f
+        .fogDistance = 96.0f,
+        .lightFilter = 1
     };
 
     _definitions[toBlockId(BlockType::Snow)] = {
@@ -122,7 +123,8 @@ BlockRegistry::BlockRegistry() noexcept {
     const auto leaves = [this](const BlockType type, const Texture texture) {
         _definitions[toBlockId(type)] = {
             .opaque = false, .transparent = false, .solid = true,
-            .textureTop = index(texture), .textureBottom = index(texture), .textureSide = index(texture)
+            .textureTop = index(texture), .textureBottom = index(texture), .textureSide = index(texture),
+            .lightFilter = 1
         };
     };
     leaves(BlockType::OakLeaves,    Texture::OakLeaves);
@@ -134,6 +136,37 @@ BlockRegistry::BlockRegistry() noexcept {
         .opaque = false, .transparent = true, .solid = true,
         .textureTop = index(Texture::Ice), .textureBottom = index(Texture::Ice), .textureSide = index(Texture::Ice)
     };
+
+    // Lava: not walked on, but drawn like a solid cube (not see-through);
+    // glows, and tints the view red when the eye is inside it.
+    _definitions[LAVA_BLOCK] = {
+        .opaque = true, .transparent = false, .solid = false,
+        .textureTop = index(Texture::LavaStill), .textureBottom = index(Texture::LavaStill),
+        .textureSide = index(Texture::LavaStill),
+        .fogColor = 0xC8400A, .fogDistance = 1.5f,
+        .lightEmission = 15
+    };
+    _definitions[toBlockId(BlockType::Glowstone)] = {
+        .opaque = true, .transparent = false, .solid = true,
+        .textureTop = index(Texture::Glowstone), .textureBottom = index(Texture::Glowstone),
+        .textureSide = index(Texture::Glowstone),
+        .lightEmission = 15
+    };
+    // Torch: a thin stick, walked through, lets light pass.
+    _definitions[toBlockId(BlockType::Torch)] = {
+        .opaque = false, .transparent = false, .solid = false,
+        .textureTop = index(Texture::Torch), .textureBottom = index(Texture::Torch),
+        .textureSide = index(Texture::Torch),
+        .lightEmission = 14,
+        .model = BlockModel::Torch
+    };
+}
+
+bool placementAllowed(const BlockRegistry& registry, const BlockId block, const BlockId below) noexcept {
+    if (registry.get(block).model != BlockModel::Torch)
+        return true;
+    const BlockDefinition& ground = registry.get(below);
+    return ground.solid && ground.opaque;
 }
 
 

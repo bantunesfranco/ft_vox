@@ -18,6 +18,8 @@ enum class ItemId : std::uint8_t {
 	Clay,
 	Cactus,
 	Sandstone,
+	Glowstone,
+	Torch,
 	Count,
 };
 

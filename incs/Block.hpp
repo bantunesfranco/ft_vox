@@ -27,6 +27,9 @@ enum class BlockType : std::uint8_t {
     Cactus,
     Sandstone,
     Ice,
+    Lava,
+    Glowstone,
+    Torch,
 
     Count
 };
@@ -44,6 +47,10 @@ constexpr BlockType toBlockType(BlockId id) noexcept {
 
 constexpr BlockId AIR_BLOCK = toBlockId(BlockType::Air);
 constexpr BlockId WATER_BLOCK = toBlockId(BlockType::Water);
+constexpr BlockId LAVA_BLOCK = toBlockId(BlockType::Lava);
+
+// How a block is drawn: a full cube, or a torch (a thin stick).
+enum class BlockModel : std::uint8_t { Cube, Torch };
 
 constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Count);
 
@@ -65,6 +72,13 @@ struct BlockDefinition {
     // Water: blue over 96 blocks (lava, once added: red over ~1.5).
     std::uint32_t fogColor = 0;
     float fogDistance = 0.0f;
+
+    // Light (0..15): what the block gives off, and how many extra levels light
+    // loses passing through it (water and leaves dim it; opaque blocks stop it).
+    std::uint8_t lightEmission = 0;
+    std::uint8_t lightFilter = 0;
+
+    BlockModel model = BlockModel::Cube;
 };
 
 
@@ -87,5 +101,9 @@ public:
 private:
     std::array<BlockDefinition, BLOCK_TYPE_COUNT> _definitions{};
 };
+
+// Whether `block` may be placed on top of `below`: a torch needs a solid,
+// opaque block under it; everything else can go anywhere.
+[[nodiscard]] bool placementAllowed(const BlockRegistry& registry, BlockId block, BlockId below) noexcept;
 
 #endif

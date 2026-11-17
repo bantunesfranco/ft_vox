@@ -53,7 +53,7 @@ BlockRaycastHit BlockSystem::raycast(
 		BlockId block = AIR_BLOCK;
 		if (!world.getBlockAt(cell, block))
 			return hit;
-		if (block != AIR_BLOCK && block != WATER_BLOCK) {
+		if (block != AIR_BLOCK && block != WATER_BLOCK && block != LAVA_BLOCK) {   // fluids are looked through
 			hit.blockPos = cell;
 			hit.adjacentPos = previous;
 			hit.distance = distance;
@@ -130,6 +130,11 @@ bool BlockSystem::placeBlock(
 		return false;
 	if (PlayerCollision::overlapsBlock(origin, hit.adjacentPos))
 		return false;
+	BlockId below = AIR_BLOCK;
+	if (!world.getBlockAt(hit.adjacentPos - glm::ivec3(0, 1, 0), below))
+		below = AIR_BLOCK;                              // not loaded: no support
+	if (!placementAllowed(world.getBlockRegistry(), block, below))
+		return false;                                   // a torch needs solid ground
 
 	return world.setBlockAt(hit.adjacentPos, block);
 }

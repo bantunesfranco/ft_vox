@@ -39,6 +39,9 @@ constexpr std::array<Sprite, TEXTURE_COUNT> SPRITES{{
 	{1584, 1216, NO_TINT},          // sandstone_top
 	{1536, 1216, NO_TINT},          // sandstone_bottom
 	{1552,   48, NO_TINT},          // ice
+	{1600,  624, NO_TINT},          // lava_still
+	{1408,  144, NO_TINT},          // glowstone
+	{1680, 1408, NO_TINT},          // torch
 }};
 
 } // namespace

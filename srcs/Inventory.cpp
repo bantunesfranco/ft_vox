@@ -4,6 +4,8 @@
 
 Inventory::Inventory() noexcept {
 	_slots[0] = {ItemId::AmethystBlock, 64};
+	_slots[1] = {ItemId::Torch, 64};          // no crafting: light comes with the player
+	_slots[2] = {ItemId::Glowstone, 64};
 }
 
 const std::array<ItemStack, Inventory::SLOT_COUNT>& Inventory::slots() const noexcept {
