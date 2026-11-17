@@ -69,15 +69,16 @@ std::optional<SpawnPoint> LocalSession::pollSpawn() {
 
 	if (_savedSpawn) {
 		const glm::vec3 eye = _savedSpawn->eye;
-		// floor, not a cast: a cast truncates toward zero, which picks the wrong block for x < 0
-		const glm::ivec3 cell{
-			static_cast<int>(std::floor(eye.x)),
-			std::clamp(static_cast<int>(std::floor(eye.y)), ChunkColumn::MIN_WORLD_Y, ChunkColumn::MAX_WORLD_Y - 1),
-			static_cast<int>(std::floor(eye.z))
-		};
-		BlockId block = AIR_BLOCK;
-		if (!_world.getBlockAt(cell, block))
-			return std::nullopt;                               // its column has not loaded yet
+		// Every column the player's box touches, so it is not wedged at a chunk edge.
+		const auto [lo, hi] = PlayerCollision::columnsUnderBox(eye);
+		for (int cz = lo.z; cz <= hi.z; ++cz) {
+			for (int cx = lo.x; cx <= hi.x; ++cx) {
+				BlockId block = AIR_BLOCK;
+				const glm::ivec3 corner{cx * ChunkSection::SIZE, ChunkColumn::MIN_WORLD_Y, cz * ChunkSection::SIZE};
+				if (!_world.getBlockAt(corner, block))
+					return std::nullopt;                       // that column has not loaded yet
+			}
+		}
 
 		// Blocks may have been built where the player stood since: rise out of them.
 		// Only real blocks count (an unloaded neighbour is not in the way).

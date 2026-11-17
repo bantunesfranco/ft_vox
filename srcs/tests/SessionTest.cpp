@@ -9,6 +9,7 @@
 
 #include <array>
 #include <chrono>
+#include <memory>
 #include <thread>
 
 namespace fs = std::filesystem;
@@ -181,4 +182,23 @@ SELFTEST(Session, local_spawn_lifted_when_built_over) {
 	CHECK(spawn->eye.x == record.eye.x && spawn->eye.z == record.eye.z);
 	CHECK(spawn->eye.y > record.eye.y);
 	CHECK(!PlayerPhysics::boxHitsBlocks(spawn->eye, solid));
+}
+
+SELFTEST(Session, local_spawn_waits_for_every_column_under_the_box) {
+	const selftest::TempDir dir;
+	const fs::path file = singleplayerFile(dir.path());
+	PlayerRecord record;
+	record.eye = {15.9f, 100.0f, 8.5f};                    // the box reaches into column (1, 0)
+	std::string error;
+	CHECK(savePlayer(file, record, error));
+
+	Game game;
+	LocalSession session(game.world, game.pool, game.blocks, START, file);
+	game.world.adoptColumn(std::make_unique<ChunkColumn>(ChunkCoord{0, 0}));
+	CHECK(!session.pollSpawn().has_value());               // the eye's column alone is not enough
+	game.world.adoptColumn(std::make_unique<ChunkColumn>(ChunkCoord{1, 0}));
+	const auto spawn = session.pollSpawn();
+	CHECK(spawn.has_value());
+	if (spawn)
+		CHECK(spawn->eye == record.eye);                   // empty columns: nothing to rise out of
 }
