@@ -50,7 +50,7 @@ constexpr BlockId WATER_BLOCK = toBlockId(BlockType::Water);
 constexpr BlockId LAVA_BLOCK = toBlockId(BlockType::Lava);
 
 // How a block is drawn: a full cube, or a torch (a thin stick).
-enum class BlockModel : std::uint8_t { Cube, Torch };
+enum class BlockModel : std::uint8_t { Cube, Torch, Cactus };
 
 constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Count);
 
@@ -79,6 +79,10 @@ struct BlockDefinition {
     std::uint8_t lightFilter = 0;
 
     BlockModel model = BlockModel::Cube;
+
+    // How far the sides of a solid block sit inside its cell, in 1/16 block
+    // (cactus 1): what the player collides with.
+    std::uint8_t collisionInset = 0;
 };
 
 

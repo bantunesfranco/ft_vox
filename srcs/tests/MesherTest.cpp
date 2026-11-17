@@ -114,3 +114,32 @@ SELFTEST(Mesher, torch_is_a_stick) {
 	CHECK_EQ(offGrid, 0);
 	CHECK_EQ(lit, 20);                                         // it glows
 }
+
+SELFTEST(Mesher, cactus_sides_inset) {
+	TestWorld w(FLOOR);
+	// On a two-block pillar, so both cacti (y 33, 34) are in section 2.
+	w.set(8, FLOOR + 1, 8, toBlockId(BlockType::Stone));
+	w.set(8, FLOOR + 2, 8, toBlockId(BlockType::Stone));
+	w.set(8, FLOOR + 3, 8, toBlockId(BlockType::Cactus));
+	w.set(8, FLOOR + 4, 8, toBlockId(BlockType::Cactus));   // two high: no face between them
+	const auto light = w.light();
+	const Meshed m = mesh(w, (FLOOR + 3) / 16, light.get());
+	const auto side = BlockTextures::index(BlockTextures::Texture::CactusSide);
+	const auto top = BlockTextures::index(BlockTextures::Texture::CactusTop);
+	int sides = 0, tops = 0, notInset = 0;
+	for (const PackedVertex& v : m.opaque.vertices) {
+		const std::uint32_t texture = (v.a >> 22u) & 0x3Fu;
+		const int normal = normalOf(v);
+		if (texture == side) {
+			++sides;
+			const bool xFace = normal == static_cast<int>(NormalDir::PositiveX) || normal == static_cast<int>(NormalDir::NegativeX);
+			const std::uint32_t sub = xFace ? (v.b >> 8u) & 0x1Fu : (v.b >> 18u) & 0x1Fu;
+			notInset += (sub == 1 || sub == 15) ? 0 : 1;
+		} else if (texture == top && normal == static_cast<int>(NormalDir::PositiveY)) {
+			++tops;
+		}
+	}
+	CHECK_EQ(sides, 2 * 4 * 4);                                 // 4 sides x 2 blocks, 4 vertices each
+	CHECK_EQ(notInset, 0);
+	CHECK_EQ(tops, 4);                                          // only the top of the stack
+}

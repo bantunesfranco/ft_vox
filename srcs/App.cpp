@@ -28,13 +28,17 @@
 namespace {
 bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
 	// Below the world is solid, above it empty; unloaded blocks count as solid.
-	return PlayerPhysics::boxHitsBlocks(eyePosition, [&world](const glm::ivec3& p) {
+	const BlockRegistry& registry = world.getBlockRegistry();
+	return PlayerPhysics::boxHitsShapes(eyePosition, [&world, &registry](const glm::ivec3& p) {
 		if (p.y < ChunkColumn::MIN_WORLD_Y)
-			return true;
+			return 0;
 		if (p.y >= ChunkColumn::MAX_WORLD_Y)
-			return false;
+			return -1;
 		BlockId block = AIR_BLOCK;
-		return !world.getBlockAt(p, block) || world.getBlockRegistry().get(block).solid;
+		if (!world.getBlockAt(p, block))
+			return 0;
+		const BlockDefinition& def = registry.get(block);
+		return def.solid ? static_cast<int>(def.collisionInset) : -1;
 	});
 }
 

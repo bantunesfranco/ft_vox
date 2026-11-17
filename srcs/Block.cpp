@@ -115,7 +115,6 @@ BlockRegistry::BlockRegistry() noexcept {
     cube(BlockType::SpruceLog, Texture::SpruceLogTop, Texture::SpruceLogTop, Texture::SpruceLogSide);
     cube(BlockType::Gravel,    Texture::Gravel,       Texture::Gravel,       Texture::Gravel);
     cube(BlockType::Clay,      Texture::Clay,         Texture::Clay,         Texture::Clay);
-    cube(BlockType::Cactus,    Texture::CactusTop,    Texture::CactusTop,    Texture::CactusSide);
     cube(BlockType::Sandstone, Texture::SandstoneTop, Texture::SandstoneBottom, Texture::SandstoneSide);
 
     // Leaves: solid, but see-through holes (alpha cut-out in the opaque pass),
@@ -151,6 +150,15 @@ BlockRegistry::BlockRegistry() noexcept {
         .textureTop = index(Texture::Glowstone), .textureBottom = index(Texture::Glowstone),
         .textureSide = index(Texture::Glowstone),
         .lightEmission = 15
+    };
+    // Cactus: sides 1/16 inside the cell (Minecraft's shape), so it hides
+    // nothing; full top and bottom.
+    _definitions[toBlockId(BlockType::Cactus)] = {
+        .opaque = false, .transparent = false, .solid = true,
+        .textureTop = index(Texture::CactusTop), .textureBottom = index(Texture::CactusTop),
+        .textureSide = index(Texture::CactusSide),
+        .model = BlockModel::Cactus,
+        .collisionInset = 1
     };
     // Torch: a thin stick, walked through, lets light pass.
     _definitions[toBlockId(BlockType::Torch)] = {

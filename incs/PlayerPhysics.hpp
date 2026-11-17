@@ -45,6 +45,10 @@ using Collides = std::function<bool(const glm::vec3& eye)>;
 // The player box against a block grid (`solid` decides per block).
 [[nodiscard]] bool boxHitsBlocks(const glm::vec3& eye, const std::function<bool(const glm::ivec3&)>& solid);
 
+// The same with block shapes: `inset` gives, per block, how far its sides sit
+// inside the cell in 1/16 block (0 = full cube, 1 = cactus), or -1 to pass through.
+[[nodiscard]] bool boxHitsShapes(const glm::vec3& eye, const std::function<int(const glm::ivec3&)>& inset);
+
 void step(Body& body, const Input& input, float dt, const Collides& collides);
 
 // Minecraft's sprint rule: the sprint key while moving forward, or forward

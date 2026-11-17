@@ -260,10 +260,29 @@ void ChunkMesher::build(
     }
 
     for (const auto& [x, y, z] : modelCells) {
-        const BlockDefinition& definition = registry.get(blocks[cell(x, y, z)]);
+        const BlockId block = blocks[cell(x, y, z)];
+        const BlockDefinition& definition = registry.get(block);
         const std::uint8_t packed = light[cell(x, y, z)];
         const auto blockLight = static_cast<std::uint8_t>(std::max<int>(packed & 0x0F, definition.lightEmission));
-        emitTorch(output, x, y, z, definition.textureSide, static_cast<std::uint8_t>((packed & 0xF0) | blockLight));
+        const auto cellLight = static_cast<std::uint8_t>((packed & 0xF0) | blockLight);
+        const Textures textures{definition.textureSide, definition.textureTop, definition.textureBottom};
+        if (definition.model == BlockModel::Torch) {
+            // A 2 x 10 x 2 stick in the middle of the cell: four sides and a top.
+            emitBox(output, x, y, z, {7, 0, 7}, {9, 10, 9}, SIDES | TOP, textures, cellLight);
+        } else if (definition.model == BlockModel::Cactus) {
+            // Minecraft's cactus: sides 1/16 inside the cell, full top and
+            // bottom, none between two cacti or against an opaque block.
+            emitBox(output, x, y, z, {1, 0, 0}, {15, 16, 16}, X_SIDES, textures, cellLight);
+            emitBox(output, x, y, z, {0, 0, 1}, {16, 16, 15}, Z_SIDES, textures, cellLight);
+            const BlockId above = blocks[cell(x, y + 1, z)], below = blocks[cell(x, y - 1, z)];
+            unsigned ends = 0;
+            if (above != block && !opaque[cell(x, y + 1, z)])
+                ends |= TOP;
+            if (below != block && !opaque[cell(x, y - 1, z)])
+                ends |= BOTTOM;
+            if (ends != 0)
+                emitBox(output, x, y, z, {0, 0, 0}, {16, 16, 16}, ends, textures, cellLight);
+        }
     }
 }
 
@@ -373,32 +392,38 @@ void ChunkMesher::emitQuad(
     }
 }
 
-// A torch: a 2 x 10 x 2 stick in the middle of its cell (1/16 block units),
-// four sides and a top, never merged with anything.
-void ChunkMesher::emitTorch(MeshData& mesh, const int x, const int y, const int z,
-                            const std::uint16_t texture, const std::uint8_t light) {
-    constexpr std::uint8_t lo = 7, hi = 9, top = 10;
+// Faces of a box inside cell (x, y, z), from `lo` to `hi` in 1/16 block, never
+// merged with anything; corners in emitQuad's order (same winding).
+void ChunkMesher::emitBox(MeshData& mesh, const int x, const int y, const int z,
+                          const std::array<std::uint8_t, 3> lo, const std::array<std::uint8_t, 3> hi,
+                          const unsigned faces, const Textures& textures, const std::uint8_t light) {
+    using Corner = std::array<std::uint8_t, 3>;
     struct Face {
+        unsigned flag;
         NormalDir normal;
-        std::array<std::array<std::uint8_t, 3>, 4> corners;   // sub-block x, y, z, in emitQuad's order
+        std::array<Corner, 4> corners;
+        std::uint16_t texture;
     };
-    static constexpr std::array<Face, 5> faces = {{
-        {NormalDir::PositiveX, {{{hi, 0, lo}, {hi, top, lo}, {hi, top, hi}, {hi, 0, hi}}}},
-        {NormalDir::NegativeX, {{{lo, 0, hi}, {lo, top, hi}, {lo, top, lo}, {lo, 0, lo}}}},
-        {NormalDir::PositiveZ, {{{hi, 0, hi}, {hi, top, hi}, {lo, top, hi}, {lo, 0, hi}}}},
-        {NormalDir::NegativeZ, {{{lo, 0, lo}, {lo, top, lo}, {hi, top, lo}, {hi, 0, lo}}}},
-        {NormalDir::PositiveY, {{{lo, top, hi}, {hi, top, hi}, {hi, top, lo}, {lo, top, lo}}}},
+    const std::uint8_t x0 = lo[0], y0 = lo[1], z0 = lo[2], x1 = hi[0], y1 = hi[1], z1 = hi[2];
+    const std::array<Face, 6> all = {{
+        {POSITIVE_X, NormalDir::PositiveX, {{{x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {x1, y0, z1}}}, textures.side},
+        {NEGATIVE_X, NormalDir::NegativeX, {{{x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, {x0, y0, z0}}}, textures.side},
+        {TOP,        NormalDir::PositiveY, {{{x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}}}, textures.top},
+        {BOTTOM,     NormalDir::NegativeY, {{{x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}}}, textures.bottom},
+        {POSITIVE_Z, NormalDir::PositiveZ, {{{x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, {x0, y0, z1}}}, textures.side},
+        {NEGATIVE_Z, NormalDir::NegativeZ, {{{x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, {x1, y0, z0}}}, textures.side},
     }};
     const auto sky = static_cast<std::uint8_t>(light >> 4);
     const auto block = static_cast<std::uint8_t>(light & 0x0F);
-    const auto textureIndex = static_cast<std::uint8_t>(texture & 0x3F);
-    for (const Face& face : faces) {
+    for (const Face& face : all) {
+        if ((faces & face.flag) == 0)
+            continue;
         const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
         for (std::size_t corner = 0; corner < face.corners.size(); ++corner) {
-            const auto& s = face.corners[corner];
+            const Corner& s = face.corners[corner];
             mesh.vertices.push_back(packVertex(
                 static_cast<std::uint8_t>(x), static_cast<std::uint16_t>(y), static_cast<std::uint8_t>(z),
-                face.normal, textureIndex, 3, static_cast<std::uint8_t>(corner),
+                face.normal, static_cast<std::uint8_t>(face.texture & 0x3F), 3, static_cast<std::uint8_t>(corner),
                 sky, block, s[0], s[1], s[2]));
         }
         for (const std::uint32_t i : {0u, 1u, 2u, 2u, 3u, 0u})

@@ -152,3 +152,21 @@ SELFTEST(PlayerPhysics, sprint_key_and_double_tap) {
 	slow.forwardPressed(10.5);
 	CHECK(!slow.update(true, false, false));
 }
+
+SELFTEST(PlayerPhysics, cactus_sides_are_inset) {
+	// A cactus at x = 3: its sides are 1/16 inside the block, so walking at it
+	// stops 1/16 further than at a full block.
+	const Collides cactus = [](const glm::vec3& eye) {
+		return boxHitsShapes(eye, [](const glm::ivec3& b) {
+			if (b.y < 0)
+				return 0;                              // the floor: a full block
+			return (b.x == 3 && b.y < 2) ? 1 : -1;     // cactus (inset 1/16), else nothing
+		});
+	};
+	Body body = standing();
+	for (float t = 0.0f; t < 2.0f; t += DT)
+		step(body, Input{.wish = {1.0f, 0.0f}}, DT, cactus);
+	const float face = 3.0f + 1.0f / 16.0f - PlayerCollision::HALF_WIDTH;
+	CHECK(body.eye.x <= face + 0.01f);
+	CHECK(body.eye.x >= face - 0.02f);
+}

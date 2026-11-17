@@ -33,7 +33,17 @@ private:
         const std::array<std::uint8_t, 4>& light      // (sky << 4) | block per corner
     );
 
-    static void emitTorch(MeshData& mesh, int x, int y, int z, std::uint16_t texture, std::uint8_t light);
+    // Faces of emitBox, as flags.
+    static constexpr unsigned POSITIVE_X = 1u, NEGATIVE_X = 2u, TOP = 4u, BOTTOM = 8u, POSITIVE_Z = 16u, NEGATIVE_Z = 32u;
+    static constexpr unsigned X_SIDES = POSITIVE_X | NEGATIVE_X, Z_SIDES = POSITIVE_Z | NEGATIVE_Z;
+    static constexpr unsigned SIDES = X_SIDES | Z_SIDES;
+    struct Textures {
+        std::uint16_t side;
+        std::uint16_t top;
+        std::uint16_t bottom;
+    };
+    static void emitBox(MeshData& mesh, int x, int y, int z, std::array<std::uint8_t, 3> lo,
+                        std::array<std::uint8_t, 3> hi, unsigned faces, const Textures& textures, std::uint8_t light);
 
     static void emitVertex(
         MeshData &mesh,

@@ -7,20 +7,33 @@
 
 namespace PlayerPhysics {
 
-bool boxHitsBlocks(const glm::vec3& eye, const std::function<bool(const glm::ivec3&)>& solid) {
+bool boxHitsShapes(const glm::vec3& eye, const std::function<int(const glm::ivec3&)>& inset) {
 	using namespace PlayerCollision;
-	const int minX = static_cast<int>(std::floor(eye.x - HALF_WIDTH + EPSILON));
-	const int maxX = static_cast<int>(std::floor(eye.x + HALF_WIDTH - EPSILON));
-	const int minY = static_cast<int>(std::floor(eye.y - EYE_HEIGHT + EPSILON));
-	const int maxY = static_cast<int>(std::floor(eye.y + HEIGHT - EYE_HEIGHT - EPSILON));
-	const int minZ = static_cast<int>(std::floor(eye.z - HALF_WIDTH + EPSILON));
-	const int maxZ = static_cast<int>(std::floor(eye.z + HALF_WIDTH - EPSILON));
-	for (int y = minY; y <= maxY; ++y)
-		for (int z = minZ; z <= maxZ; ++z)
-			for (int x = minX; x <= maxX; ++x)
-				if (solid({x, y, z}))
+	const float minX = eye.x - HALF_WIDTH, maxX = eye.x + HALF_WIDTH;
+	const float minZ = eye.z - HALF_WIDTH, maxZ = eye.z + HALF_WIDTH;
+	const int x0 = static_cast<int>(std::floor(minX + EPSILON)), x1 = static_cast<int>(std::floor(maxX - EPSILON));
+	const int y0 = static_cast<int>(std::floor(eye.y - EYE_HEIGHT + EPSILON));
+	const int y1 = static_cast<int>(std::floor(eye.y + HEIGHT - EYE_HEIGHT - EPSILON));
+	const int z0 = static_cast<int>(std::floor(minZ + EPSILON)), z1 = static_cast<int>(std::floor(maxZ - EPSILON));
+	for (int y = y0; y <= y1; ++y)
+		for (int z = z0; z <= z1; ++z)
+			for (int x = x0; x <= x1; ++x) {
+				const int in = inset({x, y, z});
+				if (in < 0)
+					continue;
+				if (in == 0)
+					return true;                       // a full cube: the cell overlap is enough
+				const float side = static_cast<float>(in) / 16.0f;
+				const float bx0 = static_cast<float>(x) + side, bx1 = static_cast<float>(x + 1) - side;
+				const float bz0 = static_cast<float>(z) + side, bz1 = static_cast<float>(z + 1) - side;
+				if (minX < bx1 - EPSILON && maxX > bx0 + EPSILON && minZ < bz1 - EPSILON && maxZ > bz0 + EPSILON)
 					return true;
+			}
 	return false;
+}
+
+bool boxHitsBlocks(const glm::vec3& eye, const std::function<bool(const glm::ivec3&)>& solid) {
+	return boxHitsShapes(eye, [&solid](const glm::ivec3& p) { return solid(p) ? 0 : -1; });
 }
 
 namespace {
