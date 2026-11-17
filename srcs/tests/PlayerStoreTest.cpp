@@ -74,7 +74,7 @@ SELFTEST(PlayerStore, file_names) {
 	const fs::path world = "w";
 	CHECK(playerFile(world, "Bob") == world / "players" / "426f62.bin");
 	CHECK(playerFile(world, "a b") == world / "players" / "612062.bin");
-	CHECK(playerFile(world, "ÿ") == world / "players" / "ff.bin");   // bytes hex-encode unsigned
+	CHECK(playerFile(world, "\xff") == world / "players" / "ff.bin");   // bytes hex-encode unsigned
 	CHECK(singleplayerFile(world) == world / "player.bin");
 }
 
