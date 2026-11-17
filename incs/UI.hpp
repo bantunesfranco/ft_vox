@@ -25,6 +25,7 @@ enum class UiActionType {
 	QUIT_GAME,
 	SET_WIREFRAME,
 	SET_CLEAR_COLOR,
+	SET_TIME,             // slot = ticks (debug)
 	INVENTORY_SLOT_CLICK,
 };
 
@@ -79,6 +80,7 @@ struct UiFrameModel {
 	int selectedWorld{-1};
 	std::string seedText{};                   // seed of the world being played (debug window)
 	std::string hostWorldName{};              // multiplayer menu: the world "Host" would host
+	int timeOfDay{0};                         // ticks (debug window slider)
 };
 
 class UI {

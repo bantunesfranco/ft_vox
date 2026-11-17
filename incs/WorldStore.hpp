@@ -9,8 +9,9 @@
 //  saves/<folder>/region/      RegionStore files
 //  saves/<folder>/session.lock held open by the process playing the world
 //
-//  level.bin (little-endian): "FVLV", u32 version (1), u64 seed,
-//  i64 lastPlayed (unix milliseconds), string name (u16 length + UTF-8).
+//  level.bin (little-endian): "FVLV", u32 version (2), u64 seed,
+//  i64 lastPlayed (unix milliseconds), string name (u16 length + UTF-8),
+//  u32 timeOfDay (ticks; absent in version 1, read as TimeOfDay::NEW_WORLD).
 // ============================================================================
 
 #include <cstdint>
@@ -18,6 +19,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+
+#include "TimeOfDay.hpp"
 #include <string_view>
 #include <vector>
 
@@ -27,6 +30,7 @@ struct WorldInfo {
 	std::uint64_t         seed = 0;
 	std::int64_t          lastPlayed = 0;   // unix milliseconds
 	bool                  readable = true;  // false: level.bin missing or damaged
+	std::uint32_t         timeOfDay = TimeOfDay::NEW_WORLD;   // ticks, see TimeOfDay.hpp
 };
 
 // Seed from what the player typed: whitespace trimmed; empty -> `randomSeed`;

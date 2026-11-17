@@ -96,6 +96,7 @@ Renderer::Renderer() {
     _skyInverseLocation = glGetUniformLocation(_skyProgram, "uInverseViewProj");
     _skyZenithLocation = glGetUniformLocation(_skyProgram, "uZenith");
     _skyHorizonLocation = glGetUniformLocation(_skyProgram, "uHorizon");
+    _skySunLocation = glGetUniformLocation(_skyProgram, "uSunDir");
     glGenVertexArrays(1, &_skyVao);
 
     if (glGetError() != GL_NO_ERROR)
@@ -131,13 +132,15 @@ GLuint Renderer::buildProgram(const char* vertexPath, const char* fragmentPath) 
     return program;
 }
 
-void Renderer::drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon) const {
+void Renderer::drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon,
+                       const glm::vec3& sunDirection) const {
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glUseProgram(_skyProgram);
     glUniformMatrix4fv(_skyInverseLocation, 1, GL_FALSE, &inverseViewProj[0][0]);
     glUniform3fv(_skyZenithLocation, 1, &zenith[0]);
     glUniform3fv(_skyHorizonLocation, 1, &horizon[0]);
+    glUniform3fv(_skySunLocation, 1, &sunDirection[0]);
     glBindVertexArray(_skyVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);

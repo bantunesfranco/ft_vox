@@ -121,8 +121,9 @@ int main(const int argc, char** argv)
 
 	const auto app = std::make_unique<App>(1440, 900, "PotatoCraft", settings);
 	if (argc >= 2 && std::strcmp(argv[1], "--bench") == 0)
-		app->enableBenchmark(argc >= 3 ? std::atof(argv[2]) : 30.0,   // --bench [seconds [x z]]
-			argc >= 5 ? glm::vec2(std::atof(argv[3]), std::atof(argv[4])) : glm::vec2(8.0f, 8.0f));
+		app->enableBenchmark(argc >= 3 ? std::atof(argv[2]) : 30.0,   // --bench [seconds [x z [ticks]]]
+			argc >= 5 ? glm::vec2(std::atof(argv[3]), std::atof(argv[4])) : glm::vec2(8.0f, 8.0f),
+			argc >= 6 ? static_cast<std::uint32_t>(std::atoi(argv[5])) : 6000u);
 	app->run();
 	app->terminate();
 

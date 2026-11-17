@@ -1,4 +1,5 @@
 #include "SelfTest.hpp"
+#include "TimeOfDay.hpp"
 #include "WorldStore.hpp"
 
 #include <fstream>
@@ -130,4 +131,43 @@ SELFTEST(WorldStore, lock_is_exclusive) {
 	first.reset();
 	auto third = WorldLock::acquire(dir.path(), error);
 	CHECK(third != nullptr);
+}
+
+SELFTEST(WorldStore, time_saved) {
+	const selftest::TempDir dir;
+	std::string error;
+	auto world = createWorld(dir.path(), "Clock", "3", error);
+	CHECK(world.has_value());
+	if (!world)
+		return;
+	CHECK_EQ(world->timeOfDay, TimeOfDay::NEW_WORLD);                // new worlds start in the morning
+	world->timeOfDay = 15000;
+	CHECK(markPlayed(*world, error));
+	const auto worlds = listWorlds(dir.path());
+	CHECK(worlds.size() == 1 && worlds[0].readable && worlds[0].timeOfDay == 15000u);
+}
+
+SELFTEST(WorldStore, v1_level_loads) {
+	// A level.bin written before the time of day existed (version 1).
+	const selftest::TempDir dir;
+	const fs::path folder = dir.path() / "old";
+	fs::create_directories(folder);
+	std::string bytes = "FVLV";
+	const auto put = [&bytes](const std::uint64_t v, const int n) {
+		for (int i = 0; i < n; ++i)
+			bytes.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
+	};
+	put(1, 4);                  // version
+	put(42, 8);                 // seed
+	put(1000, 8);               // last played
+	put(3, 2);                  // name length
+	bytes += "Old";
+	std::ofstream(folder / "level.bin", std::ios::binary) << bytes;
+	const auto worlds = listWorlds(dir.path());
+	CHECK(worlds.size() == 1 && worlds[0].readable);
+	if (!worlds.empty()) {
+		CHECK_EQ(worlds[0].seed, 42ull);
+		CHECK_EQ(worlds[0].name, std::string("Old"));
+		CHECK_EQ(worlds[0].timeOfDay, TimeOfDay::NEW_WORLD);
+	}
 }

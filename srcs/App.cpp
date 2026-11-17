@@ -110,6 +110,8 @@ bool App::startSingleplayer(const WorldInfo& info) {
 		std::cerr << "Could not update " << info.name << ": " << error << '\n';
 
 	resetPlayerState();
+	playingWorld = played;
+	timeTicks = played.timeOfDay;
 	lastSessionError.clear();
 	worldLock = std::move(lock);
 	regionStore = std::make_shared<RegionStore>(info.folder / "region");
@@ -132,6 +134,7 @@ void App::startBenchmarkWorld() {
 	playingSeed = BENCH_SEED;
 	const int ground = world.generatedSurfaceHeight(static_cast<int>(bench.startXZ.x), static_cast<int>(bench.startXZ.y));
 	bench.height = static_cast<float>(std::max(ground, 62) + 35);
+	timeTicks = bench.ticks;
 	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos);
 	gameState.startGameplay();
 	applyGameState();
@@ -198,6 +201,13 @@ void App::resetPlayerState() {
 
 void App::endSession() {
 	session.reset();              // disconnects first...
+	if (playingWorld) {
+		playingWorld->timeOfDay = static_cast<std::uint32_t>(timeTicks) % TimeOfDay::TICKS_PER_DAY;
+		std::string error;
+		if (!markPlayed(*playingWorld, error))
+			std::cerr << "Could not save the time of " << playingWorld->name << ": " << error << '\n';
+		playingWorld.reset();
+	}
 	if (regionStore) {
 		if (threadPool)
 			world.flush(*threadPool);   // every edit and generated column on disk
@@ -383,8 +393,11 @@ void App::run() {
 					grounded = true;
 					jumpRequested = false;
 				}
-				if (!bench.active)                  // the benchmark flies the camera itself
+				if (!bench.active) {                // the benchmark flies the camera itself, at a fixed time
 					updatePlayerMovement(inGame && !ui->wantsKeyboardCapture());
+					timeTicks = std::fmod(timeTicks + FPSCounter::getDeltaTime() * TimeOfDay::TICKS_PER_SECOND,
+					                      static_cast<double>(TimeOfDay::TICKS_PER_DAY));
+				}
 				session->onLocalPlayerMoved(camera->pos, camera->yaw, camera->pitch);
 			}
 			profiler.mark(FrameProfiler::Session);
@@ -394,9 +407,12 @@ void App::run() {
 			updateFluidFog();
 			worldUBO.eye = glm::vec4(camera->pos, 1.0f);
 			worldUBO.fog = fluidFog;
-			// Haze at the edge of the loaded world: the sky's horizon colour.
-			const glm::vec3 zenith(clearColor[0], clearColor[1], clearColor[2]);
-			const glm::vec3 horizon = glm::mix(zenith, glm::vec3(1.0f), 0.5f);
+			// Time of day: sky light, sky colours; the haze is the horizon colour.
+			const auto ticks = static_cast<std::uint32_t>(timeTicks);
+			worldUBO.time.x = TimeOfDay::daylight(ticks);
+			const TimeOfDay::SkyColours sky = TimeOfDay::skyColours(ticks, {clearColor[0], clearColor[1], clearColor[2]});
+			const glm::vec3 zenith = sky.zenith;
+			const glm::vec3 horizon = sky.horizon;
 			worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_RADIUS * ChunkSection::SIZE));
 			world.frustum.updateFrustum(camera->proj, camera->view);
 
@@ -412,7 +428,8 @@ void App::run() {
 			processMeshUploads(world);
 			profiler.mark(FrameProfiler::Upload);
 			if (fluidFog.w <= 0.0f)                    // under water the fog colour is the sky
-				renderer->drawSky(glm::inverse(camera->proj * glm::mat4(glm::mat3(camera->view))), zenith, horizon);
+				renderer->drawSky(glm::inverse(camera->proj * glm::mat4(glm::mat3(camera->view))), zenith, horizon,
+				                  TimeOfDay::sunDirection(ticks));
 			toggleWireframe(showWireframe);
 			renderWorld(world);
 
@@ -435,6 +452,7 @@ void App::run() {
 		uiModel.showDebug = gameState.currentState == GameState::IN_GAME;
 		uiModel.wireframe = showWireframe;
 		uiModel.clearColor = clearColor;
+		uiModel.timeOfDay = static_cast<int>(timeTicks);
 		uiModel.lastError = lastSessionError;
 		if (playingSeed)
 			uiModel.seedText = std::to_string(static_cast<std::int64_t>(*playingSeed));
@@ -633,8 +651,9 @@ void App::collectNameTags(UiFrameModel& model) const {
 //  turning (recorded: streaming, meshing and drawing all at once).
 // ============================================================================
 
-void App::enableBenchmark(const double seconds, const glm::vec2 startXZ) {
+void App::enableBenchmark(const double seconds, const glm::vec2 startXZ, const std::uint32_t ticks) {
 	bench.startXZ = startXZ;
+	bench.ticks = ticks % TimeOfDay::TICKS_PER_DAY;
 	bench.active   = true;
 	bench.duration = std::max(seconds, BENCH_WARMUP + 1.0);
 	glfwSwapInterval(0);
@@ -831,6 +850,9 @@ void App::applyUiAction(const UiAction& action) {
 			break;
 		case UiActionType::SET_CLEAR_COLOR:
 			clearColor = action.color;
+			break;
+		case UiActionType::SET_TIME:
+			timeTicks = static_cast<double>(static_cast<std::uint32_t>(action.slot) % TimeOfDay::TICKS_PER_DAY);
 			break;
 		case UiActionType::INVENTORY_SLOT_CLICK:
 			clickInventorySlot(action.slot, action.secondaryClick);

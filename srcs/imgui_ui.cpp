@@ -646,6 +646,13 @@ void renderDebugWindow(const UiFrameModel& model, std::vector<UiAction>& actions
     if (ImGui::Checkbox("Wireframe", &wireframe))
         actions.push_back({UiActionType::SET_WIREFRAME, wireframe, {}});
 
+    int ticks = model.timeOfDay;
+    if (ImGui::SliderInt("Time", &ticks, 0, 23999)) {
+        UiAction action{UiActionType::SET_TIME, false, {}};
+        action.slot = ticks;
+        actions.push_back(action);
+    }
+
     std::array<float, 4> color = model.clearColor;
     if (ImGui::ColorEdit4("Color", color.data())) {
         UiAction action{UiActionType::SET_CLEAR_COLOR, false, {}};

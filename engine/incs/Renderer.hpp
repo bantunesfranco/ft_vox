@@ -75,6 +75,7 @@ private:
     GLint  _skyInverseLocation = -1;
     GLint  _skyZenithLocation = -1;
     GLint  _skyHorizonLocation = -1;
+    GLint  _skySunLocation = -1;
 
     GLuint _vao = 0;
     GLuint _vbo = 0;
@@ -150,7 +151,8 @@ public:
 
     // Sky gradient behind everything; call before drawing the world.
     // `inverseViewProj`: inverse of projection * camera rotation (no translation).
-    void drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon) const;
+    void drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon,
+                 const glm::vec3& sunDirection) const;
 
     void uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh);
     void releaseMesh(GpuMesh& gpuMesh);

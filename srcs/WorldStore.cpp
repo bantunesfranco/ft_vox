@@ -21,7 +21,7 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr std::array<char, 4> LEVEL_MAGIC{'F', 'V', 'L', 'V'};
-constexpr std::uint32_t LEVEL_VERSION = 1;
+constexpr std::uint32_t LEVEL_VERSION = 2;          // 2: time of day appended
 constexpr const char* LEVEL_FILE = "level.bin";
 constexpr std::size_t MAX_FOLDER_CHARS = 32;
 
@@ -77,6 +77,7 @@ bool writeLevel(const WorldInfo& world, std::string& error) {
 	const std::size_t nameBytes = std::min<std::size_t>(world.name.size(), 0xFFFF);
 	putLE(data, static_cast<std::uint16_t>(nameBytes));
 	data.append(world.name, 0, nameBytes);
+	putLE(data, world.timeOfDay);
 
 	// Write a temp file, then replace: a crash never leaves a half-written level.bin.
 	const fs::path tmp = world.folder / "level.bin.tmp";
@@ -107,12 +108,17 @@ bool readLevel(const fs::path& folder, WorldInfo& world) {
 	std::size_t pos = LEVEL_MAGIC.size();
 	std::uint32_t version = 0;
 	std::uint16_t nameBytes = 0;
-	if (!getLE(data, pos, version) || version != LEVEL_VERSION
+	if (!getLE(data, pos, version) || (version != 1 && version != LEVEL_VERSION)
 	    || !getLE(data, pos, world.seed) || !getLE(data, pos, world.lastPlayed)
-	    || !getLE(data, pos, nameBytes) || data.size() - pos != nameBytes)
+	    || !getLE(data, pos, nameBytes) || data.size() - pos < nameBytes)
 		return false;
 	world.name.assign(data, pos, nameBytes);
-	return true;
+	pos += nameBytes;
+	world.timeOfDay = TimeOfDay::NEW_WORLD;           // version 1 had no clock
+	if (version >= 2 && !getLE(data, pos, world.timeOfDay))
+		return false;
+	world.timeOfDay %= TimeOfDay::TICKS_PER_DAY;
+	return pos == data.size();
 }
 
 // ---- folder names ------------------------------------------------------------------

@@ -16,6 +16,7 @@
 #include "GameServer.hpp"
 #include "FrameProfiler.hpp"
 #include "RegionStore.hpp"
+#include "TimeOfDay.hpp"
 #include "WorldStore.hpp"
 #include <filesystem>
 #include <optional>
@@ -33,7 +34,7 @@ class App : public Engine
 
 		void	run() override;
 		// ft_vox --bench: scripted singleplayer flight with a timing report.
-		void	enableBenchmark(double seconds, glm::vec2 startXZ = {8.0f, 8.0f});
+		void	enableBenchmark(double seconds, glm::vec2 startXZ = {8.0f, 8.0f}, std::uint32_t ticks = 6000);
 
 		void	terminate() override;
 		void	destroyBlock();
@@ -100,7 +101,11 @@ class App : public Engine
 		bool jumpRequested = false;
 		glm::vec3 velocity{0.0f};          // walking physics (PlayerPhysics), unused when flying
 		std::array<float, 4> clearColor{0.075f, 0.33f, 0.61f, 1.0f};
-		glm::vec4 fluidFog{0.0f};          // fog of the block the eye is in (rgb, w = distance; 0 = none)
+		glm::vec4 fluidFog{0.0f};
+		// Time of day (TimeOfDay ticks, fractional): loaded with a world,
+		// advanced while it is played, saved in its level.bin when left.
+		double timeTicks = TimeOfDay::NEW_WORLD;
+		std::optional<WorldInfo> playingWorld;      // the singleplayer world being played          // fog of the block the eye is in (rgb, w = distance; 0 = none)
 		bool hasHighlightedBlock = false;
 		glm::ivec3 highlightedBlockPos{};
 
@@ -124,6 +129,7 @@ class App : public Engine
 			double start     = 0.0;
 			glm::vec2 startXZ{8.0f, 8.0f};
 			float  height    = 110.0f;   // eye height of the flight
+			std::uint32_t ticks = 6000;  // fixed time of day (noon): runs stay comparable
 		} bench;
 		FrameProfiler profiler;
 		std::size_t   drawCalls = 0;   // meshes drawn this frame (in 2 multi-draw calls)
