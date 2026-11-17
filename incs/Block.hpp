@@ -64,9 +64,6 @@ struct BlockBox {
 // draws it and the highlight outlines it.
 constexpr BlockBox TORCH_BOX{{7, 0, 7}, {9, 10, 9}};
 
-// The box the highlight outlines for a block drawn with `model`.
-[[nodiscard]] BlockBox outlineBox(BlockModel model) noexcept;
-
 constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Count);
 
 
@@ -102,6 +99,10 @@ struct BlockDefinition {
     // Building into this block's cell replaces it (air, water, lava).
     bool replaceable = false;
 };
+
+// The box the highlight outlines for a block: TORCH_BOX for a torch, else its
+// cell with the sides `collisionInset` inside (the whole cell for a cube).
+[[nodiscard]] BlockBox outlineBox(const BlockDefinition& definition) noexcept;
 
 
 class BlockRegistry {

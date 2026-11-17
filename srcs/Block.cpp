@@ -173,13 +173,11 @@ BlockRegistry::BlockRegistry() noexcept {
     };
 }
 
-BlockBox outlineBox(const BlockModel model) noexcept {
-    switch (model) {
-    case BlockModel::Torch:  return TORCH_BOX;
-    case BlockModel::Cactus: return {{1, 0, 1}, {15, 16, 15}};   // sides 1/16 inside the cell
-    case BlockModel::Cube:   break;
-    }
-    return {{0, 0, 0}, {16, 16, 16}};
+BlockBox outlineBox(const BlockDefinition& definition) noexcept {
+    if (definition.model == BlockModel::Torch)
+        return TORCH_BOX;
+    const int inset = definition.collisionInset;
+    return {{inset, 0, inset}, {16 - inset, 16, 16 - inset}};
 }
 
 bool placementAllowed(const BlockRegistry& registry, const BlockId block, const BlockId below) noexcept {

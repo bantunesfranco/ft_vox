@@ -609,7 +609,7 @@ void App::renderBlockHighlight() {
 	BlockId id = AIR_BLOCK;
 	if (!world.getBlockAt(highlightedBlockPos, id))
 		return;
-	const BlockBox box = outlineBox(world.getBlockRegistry().get(id).model);
+	const BlockBox box = outlineBox(world.getBlockRegistry().get(id));
 	const glm::vec3 origin(highlightedBlockPos);
 	renderer->renderBoundingBox(origin + glm::vec3(box.min) / 16.0f, origin + glm::vec3(box.max) / 16.0f);
 }

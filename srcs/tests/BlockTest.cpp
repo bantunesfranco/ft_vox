@@ -143,11 +143,12 @@ SELFTEST(Blocks, torch_needs_solid_ground) {
 
 SELFTEST(Blocks, outline_box) {
 	// The highlight hugs the block's shape, in sixteenths of a block.
-	const BlockBox cube = outlineBox(BlockModel::Cube);
+	const BlockRegistry r;
+	const BlockBox cube = outlineBox(r.get(toBlockId(BlockType::Stone)));
 	CHECK(cube.min == glm::ivec3(0, 0, 0) && cube.max == glm::ivec3(16, 16, 16));
-	const BlockBox torch = outlineBox(BlockModel::Torch);
+	const BlockBox torch = outlineBox(r.get(toBlockId(BlockType::Torch)));
 	CHECK(torch.min == glm::ivec3(7, 0, 7) && torch.max == glm::ivec3(9, 10, 9));
-	const BlockBox cactus = outlineBox(BlockModel::Cactus);
+	const BlockBox cactus = outlineBox(r.get(toBlockId(BlockType::Cactus)));
 	CHECK(cactus.min == glm::ivec3(1, 0, 1) && cactus.max == glm::ivec3(15, 16, 15));
 	CHECK(TORCH_BOX.min == torch.min && TORCH_BOX.max == torch.max);
 }
