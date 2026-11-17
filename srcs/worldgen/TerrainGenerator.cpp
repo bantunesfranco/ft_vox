@@ -15,6 +15,10 @@ constexpr int CELL_Y  = 8;
 constexpr int NODES_XZ = ChunkSection::SIZE / CELL_XZ + 1;          // 5
 constexpr int NODES_Y  = ChunkColumn::HEIGHT / CELL_Y + 1;          // 41
 
+// Cave grid: one node every CELL_CAVE blocks in every direction.
+constexpr int CELL_CAVE    = 4;
+constexpr int CAVE_NODES_Y = ChunkColumn::HEIGHT / CELL_CAVE + 1;   // 81
+
 constexpr BlockId STONE   = toBlockId(BlockType::Stone);
 constexpr BlockId BEDROCK = toBlockId(BlockType::Bedrock);
 constexpr BlockId ICE     = toBlockId(BlockType::Ice);
@@ -74,7 +78,8 @@ TerrainGenerator::TerrainGenerator(const std::uint64_t seed)
 	  _humidity(mixSeed(seed, 5), 3, 1.0f / 900.0f),
 	  _detail(mixSeed(seed, 6), 3, 1.0f / 40.0f),
 	  _surfaceNoise(mixSeed(seed, 7), 2, 1.0f / 24.0f),
-	  _mesa(mixSeed(seed, 8), 2, 1.0f / 110.0f) {}
+	  _mesa(mixSeed(seed, 8), 2, 1.0f / 110.0f),
+	  _caves(mixSeed(seed, 20)) {}
 
 Climate TerrainGenerator::climateAt(const int x, const int z) const noexcept {
 	const float fx = static_cast<float>(x);
@@ -148,7 +153,12 @@ Biome TerrainGenerator::biomeAt(const int x, const int z) const noexcept {
 	return biomeOf(shapeAt(x, z));
 }
 
-void TerrainGenerator::generate(ChunkColumn& column) const {
+void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const {
+	const auto has = [stages](const Stages s) {
+		return (static_cast<unsigned>(stages) & static_cast<unsigned>(s)) != 0u;
+	};
+	if (!has(Stages::Terrain))
+		return;                          // later stages build on the terrain
 	const ChunkCoord coord = column.coord();
 	const int baseX = coord.x * ChunkSection::SIZE;
 	const int baseZ = coord.z * ChunkSection::SIZE;
@@ -224,6 +234,91 @@ void TerrainGenerator::generate(ChunkColumn& column) const {
 			const int seaTop = ChunkColumn::toStorageY(SEA_LEVEL);
 			if (shape.climate.temperature < -0.45f && column.getUnchecked(x, seaTop, z) == WATER_BLOCK)
 				column.setUnchecked(x, seaTop, z, ICE);
+		}
+
+	// 4. Caves, after the surface rules so cave floors stay stone.
+	if (has(Stages::Caves))
+		carveCaves(column);
+}
+
+void TerrainGenerator::carveCaves(ChunkColumn& column) const {
+	const ChunkCoord coord = column.coord();
+	const int baseX = coord.x * ChunkSection::SIZE;
+	const int baseZ = coord.z * ChunkSection::SIZE;
+	const auto isOpen = [](const BlockId b) { return b == AIR_BLOCK || b == WATER_BLOCK; };
+
+	// Top solid block of every block column; columns under sea level stay sealed.
+	std::array<int, ChunkSection::SIZE * ChunkSection::SIZE> tops{};
+	int maxTop = -1;
+	for (int z = 0; z < ChunkSection::SIZE; ++z)
+		for (int x = 0; x < ChunkSection::SIZE; ++x) {
+			int top = 0;
+			for (int sy = ChunkColumn::HEIGHT - 1; sy > 0; --sy)
+				if (!isOpen(column.getUnchecked(x, sy, z))) {
+					top = sy;
+					break;
+				}
+			tops[static_cast<std::size_t>(z * ChunkSection::SIZE + x)] = top;
+			if (ChunkColumn::toWorldY(top) >= SEA_LEVEL)
+				maxTop = std::max(maxTop, top);
+		}
+	if (maxTop < 0)
+		return;
+
+	// Carver noise on a 4x4x4 grid aligned to world coordinates, up to 8 blocks
+	// above the highest surface.
+	const int topNode = std::min(CAVE_NODES_Y - 1, (maxTop + 8) / CELL_CAVE + 1);
+	std::array<CaveCarver::Sample, NODES_XZ * CAVE_NODES_Y * NODES_XZ> samples{};
+	const auto node = [](const int i, const int gy, const int k) {
+		return static_cast<std::size_t>((k * CAVE_NODES_Y + gy) * NODES_XZ + i);
+	};
+	for (int k = 0; k < NODES_XZ; ++k)
+		for (int i = 0; i < NODES_XZ; ++i)
+			for (int gy = 1; gy <= topNode; ++gy)
+				samples[node(i, gy, k)] = _caves.sample(baseX + i * CELL_CAVE,
+				                                        ChunkColumn::MIN_WORLD_Y + gy * CELL_CAVE,
+				                                        baseZ + k * CELL_CAVE);
+
+	const int lowest = ChunkColumn::toStorageY(ChunkColumn::MIN_WORLD_Y + 5);
+	const int deepWater = ChunkColumn::toStorageY(DEEP_WATER_LEVEL);
+	for (int z = 0; z < ChunkSection::SIZE; ++z)
+		for (int x = 0; x < ChunkSection::SIZE; ++x) {
+			const int top = tops[static_cast<std::size_t>(z * ChunkSection::SIZE + x)];
+			if (ChunkColumn::toWorldY(top) < SEA_LEVEL)
+				continue;
+			const int wx = baseX + x, wz = baseZ + z;
+			const float ravine = _caves.ravineStrength(wx, wz);
+			const bool entrance = _caves.entrance(wx, wz);
+			const int i = x / CELL_CAVE, k = z / CELL_CAVE;
+			const float fx = fraction(x, CELL_CAVE), fz = fraction(z, CELL_CAVE);
+
+			// Top down; nothing is carved within 4 blocks under water (overhangs
+			// on the coast hold water that must not drain into a cave).
+			int sinceWater = 1000;
+			for (int sy = top; sy >= lowest; --sy) {
+				const BlockId current = column.getUnchecked(x, sy, z);
+				++sinceWater;
+				if (current == WATER_BLOCK)
+					sinceWater = 0;
+				if (isOpen(current) || current == BEDROCK || sinceWater <= 4)
+					continue;
+				const int gy = sy / CELL_CAVE;
+				const float fy = fraction(sy, CELL_CAVE);
+				const auto lerp = [&](float CaveCarver::Sample::*field) {
+					return trilinear(
+						samples[node(i, gy, k)].*field,         samples[node(i + 1, gy, k)].*field,
+						samples[node(i, gy + 1, k)].*field,     samples[node(i + 1, gy + 1, k)].*field,
+						samples[node(i, gy, k + 1)].*field,     samples[node(i + 1, gy, k + 1)].*field,
+						samples[node(i, gy + 1, k + 1)].*field, samples[node(i + 1, gy + 1, k + 1)].*field,
+						fx, fy, fz);
+				};
+				const CaveCarver::Sample s{lerp(&CaveCarver::Sample::cheese),
+				                           lerp(&CaveCarver::Sample::tunnelA),
+				                           lerp(&CaveCarver::Sample::tunnelB)};
+				const int depth = top - sy;
+				if (CaveCarver::carved(s, ChunkColumn::toWorldY(sy), entrance ? std::max(depth, 4) : depth, ravine))
+					column.setUnchecked(x, sy, z, sy < deepWater ? WATER_BLOCK : AIR_BLOCK);
+			}
 		}
 }
 

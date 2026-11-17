@@ -25,6 +25,7 @@
 
 #include "Chunk.hpp"
 #include "worldgen/Biomes.hpp"
+#include "worldgen/Caves.hpp"
 #include "worldgen/Noise.hpp"
 
 namespace worldgen {
@@ -43,8 +44,16 @@ class TerrainGenerator {
 public:
 	explicit TerrainGenerator(std::uint64_t seed);
 
+	// Generation stages, as flags (tests generate terrain alone).
+	enum class Stages : unsigned {
+		Terrain    = 1u,      // shape, water, surface rules, bedrock
+		Caves      = 2u,
+		Structures = 4u,
+		All        = 7u,
+	};
+
 	// Fills a freshly constructed (all air) column.
-	void generate(ChunkColumn& column) const;
+	void generate(ChunkColumn& column, Stages stages = Stages::All) const;
 
 	[[nodiscard]] Climate climateAt(int x, int z) const noexcept;
 	[[nodiscard]] Biome   biomeAt(int x, int z) const noexcept;
@@ -71,6 +80,7 @@ private:
 	// Density at a grid node (world x, z multiple of 4; grid level gy).
 	[[nodiscard]] float nodeDensity(const Shape& shape, int x, int gy, int z) const noexcept;
 	[[nodiscard]] Biome biomeOf(const Shape& shape) const noexcept;
+	void carveCaves(ChunkColumn& column) const;
 
 	std::uint64_t _seed;
 	Octaves _continentalness;
@@ -81,6 +91,7 @@ private:
 	Octaves _detail;
 	Octaves _surfaceNoise;     // varies soil depth, clay patches
 	Octaves _mesa;             // badlands plateaus
+	CaveCarver _caves;
 };
 
 } // namespace worldgen

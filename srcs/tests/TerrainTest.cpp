@@ -10,9 +10,10 @@ using namespace worldgen;
 
 namespace {
 
-std::unique_ptr<ChunkColumn> generated(const TerrainGenerator& gen, const ChunkCoord c) {
+std::unique_ptr<ChunkColumn> generated(const TerrainGenerator& gen, const ChunkCoord c,
+                                       const TerrainGenerator::Stages stages = TerrainGenerator::Stages::All) {
 	auto column = std::make_unique<ChunkColumn>(c);
-	gen.generate(*column);
+	gen.generate(*column, stages);
 	return column;
 }
 
@@ -106,7 +107,7 @@ SELFTEST(Terrain, surface_height_matches_generation) {
 	int wrong = 0;
 	for (int i = 0; i < 12; ++i) {
 		const ChunkCoord c{i * 23 - 90, i * 11 - 40};
-		const auto column = generated(gen, c);
+		const auto column = generated(gen, c, TerrainGenerator::Stages::Terrain);
 		for (int z = 0; z < 16; z += 5)
 			for (int x = 0; x < 16; x += 5) {
 				int top = ChunkColumn::MIN_WORLD_Y - 1;
@@ -130,7 +131,7 @@ SELFTEST(Terrain, plains_walkable) {
 			if (gen.biomeAt(x, z) != Biome::Plains)
 				continue;
 			const ChunkCoord c{x >> 4, z >> 4};
-			const auto column = generated(gen, c);
+			const auto column = generated(gen, c, TerrainGenerator::Stages::Terrain);   // shape, not caves
 			++columns;
 			for (int lz = 0; lz < 16; ++lz)
 				for (int lx = 0; lx < 16; ++lx)
