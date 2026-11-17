@@ -10,10 +10,24 @@
 //  client -> server
 //    PlayerMove  {f32 x, f32 y, f32 z, f32 yaw, f32 pitch}   eye position
 //    BreakBlock  {i32 x, i32 y, i32 z}                       block to remove
-//    PlaceBlock  {i32 x, i32 y, i32 z, u16 block}            EMPTY cell to fill
+//    PlaceBlock  {i32 x, i32 y, i32 z, u16 block}            EMPTY cell to fill; `block` must
+//                                                            be the server's selected stack's
+//                                                            block, else refused (BlockUpdate +
+//                                                            InventoryContents)
+//    InventoryAction {u32 seq, u8 kind, u8 slot, u8 secondary}
+//                                                            kind 0 Select / 1 Click / 2 Close;
+//                                                            kind > 2, secondary > 1 or a wrong
+//                                                            length is a protocol violation; an
+//                                                            out-of-range slot is just rejected
 //
 //  server -> client
-//    LoginOk     {u32 playerId, f32 x, f32 y, f32 z}         spawn eye position
+//    LoginOk     {u32 playerId, f32 x, f32 y, f32 z, f32 yaw, f32 pitch}
+//                                                            spawn eye position and look
+//    InventoryContents {u32 ackSeq, 149 bytes}               the player's inventory (see
+//                                                            encodeInventory), after LoginOk, after
+//                                                            every InventoryAction (ackSeq = its seq,
+//                                                            accepted or not) and whenever a break
+//                                                            or place changed it or was refused
 //    ChunkData   {i32 cx, i32 cz, <column>}                  see ChunkCodec.hpp
 //    UnloadChunk {i32 cx, i32 cz}
 //    BlockUpdate {i32 x, i32 y, i32 z, u16 block}            authoritative; also

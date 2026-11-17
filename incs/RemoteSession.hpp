@@ -16,6 +16,9 @@
 //      SessionEvent. So BlockBroken / BlockPlaced come when the server CONFIRMS
 //      the edit (an edit the server rejects, or does not answer within
 //      kEditTimeout, produces no event).
+//    - the inventory is the server's too: actions are predicted locally
+//      (PredictedInventory), sent as InventoryAction, and corrected by every
+//      InventoryContents. Breaks and places change it only through those.
 //
 //  Chunks are decoded on the main thread, in packet order: decoding a column
 //  takes microseconds, and in-order application guarantees a BlockUpdate is
@@ -67,11 +70,10 @@ public:
 	void requestPlaceBlock(const glm::vec3& origin,
 	                       const glm::vec3& direction) override;      // raycasts locally, sends PlaceBlock
 
-	// The predicted inventory: actions show at once (for now they stay local;
-	// the server's copy is not synchronised yet, so breaks and places do not
-	// change it).
+	// The predicted inventory: actions show at once and are sent to the server,
+	// whose InventoryContents replace it (pending actions replayed on top).
 	[[nodiscard]] const Inventory& inventory() const override { return _inventory.view(); }
-	void inventoryAction(const InventoryAction& action) override;
+	void inventoryAction(const InventoryAction& action) override;   // sends InventoryAction
 
 	void onLocalPlayerMoved(const glm::vec3& eyePos, float yaw, float pitch) override;   // rate limited
 
@@ -97,6 +99,7 @@ private:
 	// ---- inbound packets ------------------------------------------------------
 	void handlePacket(net::PacketId id, net::ByteReader& body);
 	void onLoginOk(net::ByteReader& body);
+	void onInventoryContents(net::ByteReader& body);
 	void onChunkData(net::ByteReader& body);
 	void onUnloadChunk(net::ByteReader& body);
 	void onBlockUpdate(net::ByteReader& body);

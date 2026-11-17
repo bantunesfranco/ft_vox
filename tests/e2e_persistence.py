@@ -16,8 +16,8 @@ import tempfile
 import time
 
 EXE = os.path.abspath(sys.argv[1])
-IDS = dict(Hello=0x0001, Login=0x0002, BreakBlock=0x0020, LoginOk=0x0102,
-           BlockUpdate=0x0120, ChunkData=0x0130, Disconnect=0x0FFF)
+IDS = dict(Hello=0x0001, Login=0x0002, PlayerMove=0x0010, BreakBlock=0x0020, InventoryAction=0x0030,
+           LoginOk=0x0102, BlockUpdate=0x0120, ChunkData=0x0130, InventoryContents=0x0150, Disconnect=0x0FFF)
 NAMES = {v: k for k, v in IDS.items()}
 EYE = 1.62
 
@@ -72,7 +72,7 @@ class Client:
         self.s.settimeout(0.2)
         self.buf = b""
         self.chunks = {}
-        self.send("Hello", struct.pack("<I", 1))
+        self.send("Hello", struct.pack("<I", 2))
         self.send("Login", struct.pack("<H", len(name)) + name.encode())
 
     def send(self, name, payload=b""):
@@ -125,15 +125,44 @@ def block_at(column_payload, lx, wy, lz):
     return 0
 
 
-def login(port):
-    client = Client(port, "tester")
+def inventory(payload):
+    """InventoryContents -> (ackSeq, selected, [(item, count)] * 36)."""
+    ack, selected = struct.unpack_from("<IB", payload)
+    return ack, selected, [struct.unpack_from("<HH", payload, 5 + 4 * i) for i in range(36)]
+
+
+DIRT_BLOCK, DIRT_ITEM, AMETHYST_ITEM, TORCH_ITEM, GLOWSTONE_ITEM = 2, 2, 5, 15, 14
+STARTING_ITEMS = [(AMETHYST_ITEM, 64), (TORCH_ITEM, 64), (GLOWSTONE_ITEM, 64)] + [(0, 0)] * 33
+
+
+def login(port, name="tester"):
+    """Returns the client, the LoginOk (eye, yaw, pitch) and the first InventoryContents."""
+    client = Client(port, name)
     msgs = client.pump(20, lambda n, p: n == "LoginOk")
     login_ok = [p for n, p in msgs if n == "LoginOk"]
-    ok(len(login_ok) == 1, "login")
-    _, sx, sy, sz = struct.unpack("<Ifff", login_ok[0])
+    ok(len(login_ok) == 1 and len(login_ok[0]) == 24, f"{name} logs in")
+    _, sx, sy, sz, yaw, pitch = struct.unpack("<Ifffff", login_ok[0])
+    msgs = client.pump(5, lambda n, p: n == "InventoryContents")
+    contents = [inventory(p) for n, p in msgs if n == "InventoryContents"]
+    ok(len(contents) == 1, f"{name} gets InventoryContents after LoginOk")
     spawn_chunk = (math.floor(sx / 16), math.floor(sz / 16))
     client.pump(10, lambda n, p: spawn_chunk in client.chunks)
-    return client, (sx, sy, sz)
+    return client, (sx, sy, sz), (yaw, pitch), contents[0]
+
+
+def find_block(client, eye, block, avoid, reach=6):
+    """A cell holding `block` within `reach` of `eye`, outside the (x, z) `avoid`, from the columns received."""
+    ex, ey, ez = (math.floor(v) for v in eye)
+    for dy in range(-2, -reach, -1):
+        for dx in range(-3, 4):
+            for dz in range(-3, 4):
+                x, y, z = ex + dx, ey + dy, ez + dz
+                if (x, z) == avoid:
+                    continue
+                chunk = (x // 16, z // 16)
+                if chunk in client.chunks and block_at(client.chunks[chunk], x % 16, y, z % 16) == block:
+                    return x, y, z
+    return None
 
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -143,13 +172,27 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     server = start_server(tmp, 25621, "--world", world, "--seed", "42")
     log = wait_line(server, "listening")
     ok(any("seed 42" in line for line in log), "new world uses --seed 42")
-    client, (sx, sy, sz) = login(25621)
+    client, (sx, sy, sz), _, _ = login(25621)
     target = (math.floor(sx), round(sy - EYE) - 1, math.floor(sz))
     client.send("BreakBlock", struct.pack("<iii", *target))
     upd = lambda n, p: n == "BlockUpdate" and struct.unpack_from("<iii", p) == target
     got = [p for n, p in client.pump(5, upd) if upd(n, p)]
     ok(got and struct.unpack_from("<H", got[0], 12)[0] == 0, "block broken")
     client.close()
+
+    # 1b. "Saver" moves, looks, selects a slot and breaks a dirt block
+    saver, _, _, _ = login(25621, "Saver")
+    saved_eye = (sx + 3.25, sy + 0.5, sz + 2.75)
+    saver.send("PlayerMove", struct.pack("<fffff", *saved_eye, 45.0, -20.0))
+    saver.pump(10, lambda n, p: (math.floor(saved_eye[0]) // 16, math.floor(saved_eye[2]) // 16) in saver.chunks)
+    dirt = find_block(saver, saved_eye, DIRT_BLOCK, avoid=(math.floor(sx), math.floor(sz)))  # not under the spawn
+    ok(dirt is not None, f"a dirt block near the saved eye ({dirt})")
+    saver.send("InventoryAction", struct.pack("<IBBB", 1, 0, 4, 0))   # Select 4
+    saver.send("BreakBlock", struct.pack("<iii", *dirt))
+    msgs = saver.pump(5, lambda n, p: n == "InventoryContents" and any(i == DIRT_ITEM for i, c in inventory(p)[2]))
+    got = [inventory(p) for n, p in msgs if n == "InventoryContents"]
+    ok(got and any(i == DIRT_ITEM for i, c in got[-1][2]) and got[-1][1] == 4, "Saver broke dirt and holds it")
+    saver.close()
 
     # 2. a second server cannot open the same world
     second = start_server(tmp, 25622, "--world", world)
@@ -170,12 +213,28 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     server = start_server(tmp, 25623, "--world", world, "--seed", "99")
     log = wait_line(server, "listening")
     ok(any("seed 42" in line for line in log), "existing world keeps seed 42")
-    client, _ = login(25623)
+    client, _, _, _ = login(25623)
     lx, lz = target[0] % 16, target[2] % 16
     chunk = (target[0] // 16, target[2] // 16)
     ok(chunk in client.chunks and block_at(client.chunks[chunk], lx, target[1], lz) == 0,
        "edit survived the restart")
     client.close()
+
+    # 5. players: Saver comes back where it left, with its items; a new name starts fresh
+    saver, eye, look, contents = login(25623, "Saver")
+    ok(abs(eye[0] - saved_eye[0]) < 0.01 and abs(eye[2] - saved_eye[2]) < 0.01
+       and eye[1] > saved_eye[1] - 0.01 and abs(look[0] - 45.0) < 0.01 and abs(look[1] + 20.0) < 0.01,
+       f"player saved across restart: eye {tuple(round(v, 2) for v in eye)} (saved "
+       f"{tuple(round(v, 2) for v in saved_eye)}, may be lifted), look {look}")
+    ok(any(i == DIRT_ITEM for i, c in contents[2]) and contents[1] == 4 and contents[0] == 0,
+       "player's inventory saved across restart (dirt, slot 4 selected)")
+    saver.close()
+
+    other, eye, look, contents = login(25623, "Other")
+    ok(abs(eye[0] - sx) < 0.01 and abs(eye[2] - sz) < 0.01 and abs(eye[1] - sy) <= 1.01 and look == (0.0, 0.0),
+       f"new name gets the world spawn ({tuple(round(v, 2) for v in eye)})")
+    ok(contents[2] == STARTING_ITEMS and contents[1] == 0, "new name gets the starting items")
+    other.close()
     ok(stop_server(server) == 0, "server stops cleanly again")
 
 print("ALL PASSED")

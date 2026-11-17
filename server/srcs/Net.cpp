@@ -201,7 +201,8 @@ bool packetAllowedIn(const ConnState s, PacketId id) {
             constexpr std::array inboundPlayPackets = {
                 PacketId::PlayerMove,
                 PacketId::BreakBlock,
-                PacketId::PlaceBlock
+                PacketId::PlaceBlock,
+                PacketId::InventoryAction
             };
             return std::ranges::find(inboundPlayPackets, id) != inboundPlayPackets.end();
         }

@@ -1,6 +1,7 @@
 #include "RemoteSession.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -166,7 +167,13 @@ void RemoteSession::requestPlaceBlock(const glm::vec3& origin, const glm::vec3& 
 }
 
 void RemoteSession::inventoryAction(const InventoryAction& action) {
-	(void)_inventory.apply(action);          // shown at once; not sent to the server yet
+	if (_phase != Phase::Playing)
+		return;                              // the server would never ack it
+	const std::uint32_t seq = _inventory.apply(action);   // shown at once
+	net::ByteWriter w(net::PacketId::InventoryAction, 7);
+	w.writeU32(seq).writeU8(static_cast<std::uint8_t>(action.kind)).writeU8(action.slot)
+	 .writeU8(action.secondary ? 1 : 0);
+	_net.send(w.finish());
 }
 
 void RemoteSession::onLocalPlayerMoved(const glm::vec3& eyePos, const float yaw, const float pitch) {
@@ -202,6 +209,7 @@ void RemoteSession::handlePacket(const net::PacketId id, net::ByteReader& body) 
 	using net::PacketId;
 	switch (id) {
 		case PacketId::LoginOk:     onLoginOk(body);     break;
+		case PacketId::InventoryContents: onInventoryContents(body); break;
 		case PacketId::ChunkData:   onChunkData(body);   break;
 		case PacketId::UnloadChunk: onUnloadChunk(body); break;
 		case PacketId::BlockUpdate: onBlockUpdate(body); break;
@@ -223,12 +231,27 @@ void RemoteSession::handlePacket(const net::PacketId id, net::ByteReader& body) 
 void RemoteSession::onLoginOk(net::ByteReader& body) {
 	const std::uint32_t id = body.readU32();
 	const glm::vec3 spawn{body.readF32(), body.readF32(), body.readF32()};
-	if (!body.ok() || !finite(spawn))
-		return;                              // handlePacket reports it
+	const float yaw   = body.readF32();
+	const float pitch = body.readF32();
+	if (!body.ok() || !finite(spawn) || !std::isfinite(yaw) || !std::isfinite(pitch))
+		return;                              // handlePacket reports a short one
 	_playerId = id;
-	_spawn    = SpawnPoint{spawn, 0.0f, 0.0f};   // LoginOk carries no look yet
+	_spawn    = SpawnPoint{spawn, yaw, std::clamp(pitch, -90.0f, 90.0f)};
 	_phase    = Phase::Playing;
 	_remote.erase(id);                       // in case a join for ourselves slipped in
+}
+
+void RemoteSession::onInventoryContents(net::ByteReader& body) {
+	const std::uint32_t ackSeq = body.readU32();
+	std::array<std::uint8_t, Inventory::ENCODED_SIZE> bytes{};
+	if (!body.readBytes(bytes.data(), bytes.size()))
+		return;                              // handlePacket reports it
+	const std::optional<Inventory> server = decodeInventory(bytes);
+	if (!server) {
+		fail("invalid inventory from server");
+		return;
+	}
+	_inventory.onServerState(*server, ackSeq);
 }
 
 void RemoteSession::onChunkData(net::ByteReader& body) {

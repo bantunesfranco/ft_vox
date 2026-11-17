@@ -10,6 +10,7 @@
 
 #include "ChunkCodec.hpp"
 #include "PlayerCollision.hpp"
+#include "PlayerPhysics.hpp"
 #include "ThreadPool.hpp"
 
 namespace {
@@ -111,6 +112,8 @@ void GameServer::saveColumn(ColumnPtr column) {
 	});
 }
 
+// Player saves are queued by onDisconnect, which the transport calls for every
+// connection while it shuts down, so they are in flight before this waits.
 void GameServer::saveAllAndWait() {
 	for (const ChunkCoord& coord : _dirty)
 		if (const auto it = _columns.find(coord); it != _columns.end())
@@ -119,6 +122,32 @@ void GameServer::saveAllAndWait() {
 	std::unique_lock lock(_saveMutex);
 	_saveDone.wait(lock, [this] { return _savesInFlight == 0; });
 }
+
+void GameServer::savePlayer(const Player& p) {
+	waitForPlayerSave(p.name);             // two saves of one file must not overlap
+	{
+		std::lock_guard lock(_saveMutex);
+		++_savesInFlight;
+		_playerSavesInFlight.insert(p.name);
+	}
+	PlayerRecord record{p.pos, p.yaw, p.pitch, p.inventory};
+	_pool->enqueueFireAndForget([this, file = playerFile(_world.folder, p.name), name = p.name,
+	                             record = std::move(record)] {
+		std::string error;
+		if (!::savePlayer(file, record, error))
+			std::fprintf(stderr, "[server] failed to save player %s: %s\n", name.c_str(), error.c_str());
+		std::lock_guard lock(_saveMutex);
+		_playerSavesInFlight.erase(_playerSavesInFlight.find(name));
+		--_savesInFlight;
+		_saveDone.notify_all();
+	});
+}
+
+void GameServer::waitForPlayerSave(const std::string& name) {
+	std::unique_lock lock(_saveMutex);
+	_saveDone.wait(lock, [this, &name] { return !_playerSavesInFlight.contains(name); });
+}
+
 void GameServer::stop() { if (_transport) _transport->stop(); }
 
 // ============================================================================
@@ -138,9 +167,24 @@ bool GameServer::onLogin(const net::ConnId id, const std::string& name) {
 	const auto it = _players.find(id);
 	if (it == _players.end() || !validName(name))
 		return false;
-	it->second.name = name;
-	log("%s joined (player %u)", name.c_str(), static_cast<unsigned>(id));
-	return true;               // spawned (LoginOk) once the spawn column exists
+	for (const auto& [otherId, other] : _players) {
+		if (otherId != id && other.name == name) {
+			log("refused %s: already playing", name.c_str());
+			return false;
+		}
+	}
+	Player& p = it->second;
+	p.name = name;
+
+	waitForPlayerSave(name);               // it may have just left: read what it left with
+	if (auto record = loadPlayer(playerFile(_world.folder, name))) {
+		p.savedEye  = record->eye;
+		p.yaw       = record->yaw;
+		p.pitch     = std::clamp(record->pitch, -90.0f, 90.0f);
+		p.inventory = record->inventory;
+	}
+	log("%s joined (player %u%s)", name.c_str(), static_cast<unsigned>(id), p.savedEye ? "" : ", new");
+	return true;               // spawned (LoginOk) once the columns it spawns in exist
 }
 
 void GameServer::onDisconnect(const net::ConnId id, const net::DisconnectReason why) {
@@ -150,6 +194,8 @@ void GameServer::onDisconnect(const net::ConnId id, const net::DisconnectReason 
 	const bool wasSpawned = it->second.spawned;
 	if (!it->second.name.empty())
 		log("%s left (%s)", it->second.name.c_str(), net::toString(why));
+	if (wasSpawned)
+		savePlayer(it->second);            // a copy: the entry goes now
 	_players.erase(it);
 
 	if (wasSpawned && _transport) {
@@ -169,6 +215,7 @@ void GameServer::onPacket(const net::ConnId id, const net::PacketId type, net::B
 		case net::PacketId::PlayerMove: onPlayerMove(p, body); break;
 		case net::PacketId::BreakBlock: onBreakBlock(p, body); break;
 		case net::PacketId::PlaceBlock: onPlaceBlock(p, body); break;
+		case net::PacketId::InventoryAction: onInventoryAction(p, body); break;
 		case net::PacketId::Disconnect:
 			_transport->disconnect(id, net::DisconnectReason::PeerClosed);
 			break;
@@ -214,11 +261,17 @@ void GameServer::onBreakBlock(Player& p, net::ByteReader& body) {
 
 	BlockId current = AIR_BLOCK;
 	const bool allowed = p.spawned && inReach(p, pos) && blockAt(pos, current)
-	                  && current != AIR_BLOCK && current != BEDROCK_BLOCK;
-	if (allowed)
-		setBlock(pos, AIR_BLOCK);
-	else
+	                  && current != AIR_BLOCK && current != BEDROCK_BLOCK
+	                  && p.inventory.canTakeDropOf(current);   // nothing is lost to a full inventory
+	if (!allowed) {
 		sendBlockTo(p, pos);                           // tell it what is really there
+		return;
+	}
+	setBlock(pos, AIR_BLOCK);
+	if (const ItemId drop = ItemRegistry::fromBlock(current); drop != ItemId::Empty) {
+		(void)p.inventory.add(drop);                   // fits: canTakeDropOf said so
+		sendInventoryTo(p);
+	}
 }
 
 void GameServer::onPlaceBlock(Player& p, net::ByteReader& body) {
@@ -228,8 +281,11 @@ void GameServer::onPlaceBlock(Player& p, net::ByteReader& body) {
 		return;
 	if (!body.atEnd() || block >= BLOCK_TYPE_COUNT) { violation(p, "bad PlaceBlock"); return; }
 
+	// Only what it holds: a client cannot place a block it does not have.
+	const ItemStack& held = p.inventory.selectedStack();
 	BlockId current = AIR_BLOCK;
-	bool allowed = p.spawned && block != AIR_BLOCK && block != BEDROCK_BLOCK
+	bool allowed = p.spawned && !held.empty() && ItemRegistry::get(held.item).placedBlock == block
+	            && block != AIR_BLOCK && block != BEDROCK_BLOCK
 	            && inReach(p, pos) && blockAt(pos, current)
 	            && _blocks.get(current).replaceable;
 	BlockId below = AIR_BLOCK;
@@ -243,10 +299,42 @@ void GameServer::onPlaceBlock(Player& p, net::ByteReader& body) {
 			}
 		}
 	}
-	if (allowed)
+	if (allowed) {
 		setBlock(pos, block);
-	else
+		(void)p.inventory.consumeSelected();
+	} else {
 		sendBlockTo(p, pos);
+	}
+	if (p.spawned)
+		sendInventoryTo(p);                            // the stack used, or the truth after a refusal
+}
+
+void GameServer::onInventoryAction(Player& p, net::ByteReader& body) {
+	const std::uint32_t seq       = body.readU32();
+	const std::uint8_t  kind      = body.readU8();
+	const std::uint8_t  slot      = body.readU8();
+	const std::uint8_t  secondary = body.readU8();
+	if (!body.ok())
+		return;                                        // the transport kicks
+	if (!body.atEnd() || kind > static_cast<std::uint8_t>(InventoryAction::Kind::Close) || secondary > 1) {
+		violation(p, "bad InventoryAction");
+		return;
+	}
+	// An out-of-range slot is rejected by the rules, not kicked: it is still acked,
+	// and the contents sent back correct the client's prediction.
+	(void)applyAction(p.inventory, {static_cast<InventoryAction::Kind>(kind), slot, secondary != 0});
+	p.ackSeq = seq;
+	if (p.spawned)
+		sendInventoryTo(p);                            // before LoginOk: spawn() sends it
+}
+
+void GameServer::sendInventoryTo(const Player& p) {
+	std::vector<std::uint8_t> bytes;
+	bytes.reserve(Inventory::ENCODED_SIZE);
+	encodeInventory(p.inventory, bytes);
+	net::ByteWriter w(net::PacketId::InventoryContents, 4 + bytes.size());
+	w.writeU32(p.ackSeq).writeBytes(bytes.data(), bytes.size());
+	_transport->send(p.conn, w.finish());
 }
 
 // ============================================================================
@@ -284,52 +372,91 @@ void GameServer::onTick(const std::uint64_t tick) {
 				sendTimeTo(id);
 	if (tick % kEvictEveryTicks == 0)
 		evictColumns();
+	if (tick % kSavePlayersTicks == 0)
+		for (const auto& p : _players | std::views::values)
+			if (p.spawned)
+				savePlayer(p);
 }
 
 void GameServer::spawnWaitingPlayers() {
-	bool anyWaiting = false;
-	for (const auto& p : _players | std::views::values)
-		anyWaiting |= !p.spawned && !p.name.empty();
-	if (!anyWaiting)
-		return;
-
-	if (!_spawnKnown) {
-		const ChunkCoord spawnChunk = chunkOf(glm::vec3(_spawnXZ.x, 0, _spawnXZ.y));
-		const auto it = _columns.find(spawnChunk);
-		if (it == _columns.end()) {
-			if (!_generating.contains(spawnChunk))
-				requestColumn(spawnChunk);
-			return;
-		}
-		// Stand on the highest opaque block at the middle of the spawn chunk.
-		const int lx = _spawnXZ.x - spawnChunk.x * ChunkSection::SIZE;
-		const int lz = _spawnXZ.y - spawnChunk.z * ChunkSection::SIZE;
-		int surface = 100;
-		for (int sy = ChunkColumn::HEIGHT - 1; sy >= 0; --sy) {
-			if (_blocks.get(it->second->getUnchecked(lx, sy, lz)).solid) {
-				surface = ChunkColumn::toWorldY(sy);
-				break;
-			}
-		}
-		_spawnPoint = {static_cast<float>(_spawnXZ.x) + 0.5f,
-		               static_cast<float>(surface + 1) + PlayerCollision::EYE_HEIGHT,
-		               static_cast<float>(_spawnXZ.y) + 0.5f};
-		_spawnKnown = true;
+	for (auto& p : _players | std::views::values) {
+		if (p.spawned || p.name.empty())
+			continue;
+		if (const auto eye = spawnEyeFor(p))
+			spawn(p, *eye);
 	}
-
-	for (auto& p : _players | std::views::values)
-		if (!p.spawned && !p.name.empty())
-			spawn(p);
 }
 
-void GameServer::spawn(Player& p) {
-	p.spawned = true;
-	p.pos     = _spawnPoint;
+bool GameServer::worldSpawnReady() {
+	if (_spawnKnown)
+		return true;
+	const ChunkCoord spawnChunk = chunkOf(glm::vec3(_spawnXZ.x, 0, _spawnXZ.y));
+	const auto it = _columns.find(spawnChunk);
+	if (it == _columns.end()) {
+		if (!_generating.contains(spawnChunk))
+			requestColumn(spawnChunk);
+		return false;
+	}
+	// Stand on the highest opaque block at the middle of the spawn chunk.
+	const int lx = _spawnXZ.x - spawnChunk.x * ChunkSection::SIZE;
+	const int lz = _spawnXZ.y - spawnChunk.z * ChunkSection::SIZE;
+	int surface = 100;
+	for (int sy = ChunkColumn::HEIGHT - 1; sy >= 0; --sy) {
+		if (_blocks.get(it->second->getUnchecked(lx, sy, lz)).solid) {
+			surface = ChunkColumn::toWorldY(sy);
+			break;
+		}
+	}
+	_spawnPoint = {static_cast<float>(_spawnXZ.x) + 0.5f,
+	               static_cast<float>(surface + 1) + PlayerCollision::EYE_HEIGHT,
+	               static_cast<float>(_spawnXZ.y) + 0.5f};
+	_spawnKnown = true;
+	return true;
+}
 
-	net::ByteWriter ok(net::PacketId::LoginOk, 16);
-	ok.writeU32(p.conn).writeF32(p.pos.x).writeF32(p.pos.y).writeF32(p.pos.z);
+std::optional<glm::vec3> GameServer::spawnEyeFor(const Player& p) {
+	if (!p.savedEye)
+		return worldSpawnReady() ? std::optional(_spawnPoint) : std::nullopt;
+
+	// Every column the player's box touches, so it is not wedged at a chunk edge.
+	const glm::vec3 eye = *p.savedEye;
+	constexpr float hw = PlayerCollision::HALF_WIDTH;
+	const ChunkCoord lo = chunkOf(eye - glm::vec3(hw, 0.0f, hw));
+	const ChunkCoord hi = chunkOf(eye + glm::vec3(hw, 0.0f, hw));
+	bool ready = true;
+	for (int cz = lo.z; cz <= hi.z; ++cz) {
+		for (int cx = lo.x; cx <= hi.x; ++cx) {
+			const ChunkCoord coord{cx, cz};
+			if (_columns.contains(coord))
+				continue;
+			ready = false;
+			if (!_generating.contains(coord))
+				requestColumn(coord);
+		}
+	}
+	if (!ready)
+		return std::nullopt;
+
+	// Blocks may have been built where it stood since: rise out of them.
+	const auto solid = [this](const glm::ivec3& pos) {
+		if (pos.y < ChunkColumn::MIN_WORLD_Y)
+			return true;
+		BlockId block = AIR_BLOCK;
+		return blockAt(pos, block) && _blocks.get(block).solid;
+	};
+	return PlayerPhysics::liftOutOfBlocks(eye, solid);
+}
+
+void GameServer::spawn(Player& p, const glm::vec3& eye) {
+	p.spawned = true;
+	p.pos     = eye;
+	p.savedEye.reset();
+
+	net::ByteWriter ok(net::PacketId::LoginOk, 24);
+	ok.writeU32(p.conn).writeF32(p.pos.x).writeF32(p.pos.y).writeF32(p.pos.z).writeF32(p.yaw).writeF32(p.pitch);
 	_transport->send(p.conn, ok.finish());
 	sendTimeTo(p.conn);                    // night shows at once, not after the first update
+	sendInventoryTo(p);
 
 	// Everyone already here, to the newcomer...
 	for (const auto& other : _players | std::views::values) {
@@ -437,7 +564,8 @@ void GameServer::evictColumns() {
 	for (auto it = _columns.begin(); it != _columns.end();) {
 		bool needed = false;
 		for (const auto& p : _players | std::views::values) {
-			const ChunkCoord center = chunkOf(p.spawned ? p.pos : glm::vec3(_spawnXZ.x, 0, _spawnXZ.y));
+			const glm::vec3 where = p.spawned ? p.pos : p.savedEye.value_or(glm::vec3(_spawnXZ.x, 0, _spawnXZ.y));
+			const ChunkCoord center = chunkOf(where);
 			if (chebyshev(it->first, center) <= keep) {
 				needed = true;
 				break;

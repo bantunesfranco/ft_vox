@@ -19,6 +19,13 @@
 //                  edit is answered with the real block so the client resyncs
 //    - players   : positions are relayed 20 times a second (EntityMove), joins
 //                  and leaves are announced
+//    - inventory : the server owns each player's inventory. Clients send
+//                  InventoryAction (applied with the same applyAction as
+//                  singleplayer) and get InventoryContents back; a break adds
+//                  the drop, a place must use the selected stack's block
+//    - saves     : each player (eye, look, inventory) in players/<hex name>.bin,
+//                  loaded on login, saved on disconnect, on stop and every
+//                  kSavePlayersTicks; one login per name
 //
 //  Two ways to run it:
 //    dedicated  `ft_vox --server [port]`   (main.cpp, no window)
@@ -40,7 +47,9 @@
 
 #include <glm/glm.hpp>
 
+#include "Inventory.hpp"
 #include "Net.hpp"
+#include "PlayerStore.hpp"
 #include "Protocol.hpp"
 #include "World.hpp"
 #include "worldgen/TerrainGenerator.hpp"
@@ -87,6 +96,7 @@ private:
 	static constexpr std::uint64_t kKeepAliveTicks  = 100;    // 5 s at 20 Hz
 	static constexpr std::uint64_t kTimeUpdateTicks = 100;    // clients advance the clock in between
 	static constexpr std::uint64_t kEvictEveryTicks = 40;
+	static constexpr std::uint64_t kSavePlayersTicks = 1200;  // 60 s at 20 Hz
 
 	using ColumnPtr = std::shared_ptr<ChunkColumn>;
 
@@ -97,6 +107,9 @@ private:
 		float        yaw   = 0.0f;
 		float        pitch = 0.0f;
 		bool         spawned = false;     // LoginOk sent
+		std::optional<glm::vec3> savedEye;   // from the player's file, until spawned there
+		Inventory     inventory;            // authoritative; the starting items for a new player
+		std::uint32_t ackSeq = 0;           // seq of the last InventoryAction applied (or rejected)
 		ChunkCoord   center{INT_MAX, INT_MAX};
 		std::vector<ChunkCoord>        wanted;   // within viewRadius, nearest first
 		std::unordered_set<ChunkCoord> sent;     // columns this client holds
@@ -106,10 +119,14 @@ private:
 	void onPlayerMove(Player& p, net::ByteReader& body);
 	void onBreakBlock(Player& p, net::ByteReader& body);
 	void onPlaceBlock(Player& p, net::ByteReader& body);
+	void onInventoryAction(Player& p, net::ByteReader& body);
 
 	// ---- tick steps ---------------------------------------------------------------
 	void spawnWaitingPlayers();
-	void spawn(Player& p);
+	bool worldSpawnReady();                // computes _spawnPoint once its column exists
+	std::optional<glm::vec3> spawnEyeFor(const Player& p);   // nullopt until its columns exist
+	void spawn(Player& p, const glm::vec3& eye);
+	void sendInventoryTo(const Player& p);
 	void sendTimeTo(net::ConnId conn);
 	void updateView(Player& p);            // wanted list + unloads when the center moved
 	void streamChunks(Player& p);
@@ -122,6 +139,8 @@ private:
 	void onColumnGenerated(const ChunkCoord& coord, ColumnPtr column, bool generated);
 	void saveColumn(ColumnPtr column);             // on the pool; counted in _savesInFlight
 	void saveAllAndWait();
+	void savePlayer(const Player& p);              // a copy, on the pool; counted in _savesInFlight
+	void waitForPlayerSave(const std::string& name);   // until no save of that file is in flight
 	ChunkColumn* columnAt(const glm::ivec3& pos, glm::ivec3& local);
 	bool blockAt(const glm::ivec3& pos, BlockId& out);
 	void setBlock(const glm::ivec3& pos, BlockId block);
@@ -150,6 +169,7 @@ private:
 	std::mutex              _saveMutex;
 	std::condition_variable _saveDone;
 	std::size_t             _savesInFlight = 0;
+	std::unordered_multiset<std::string> _playerSavesInFlight;   // names; guarded by _saveMutex
 	std::unordered_map<ChunkCoord, net::SharedBuffer> _encoded;   // ChunkData frames, until edited
 	std::unordered_set<ChunkCoord>                    _generating;
 

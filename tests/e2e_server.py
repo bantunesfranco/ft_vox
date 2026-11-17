@@ -3,7 +3,8 @@ import socket, struct, sys, time
 PORT = int(sys.argv[1])
 IDS = dict(Hello=0x0001, Login=0x0002, PlayerMove=0x0010, BreakBlock=0x0020, PlaceBlock=0x0021,
            LoginOk=0x0102, EntityMove=0x0110, PlayerJoin=0x0111, PlayerLeave=0x0112,
-           BlockUpdate=0x0120, ChunkData=0x0130, UnloadChunk=0x0131, TimeUpdate=0x0140, KeepAlive=0x0F00, Disconnect=0x0FFF)
+           BlockUpdate=0x0120, ChunkData=0x0130, UnloadChunk=0x0131, TimeUpdate=0x0140, KeepAlive=0x0F00, Disconnect=0x0FFF,
+           InventoryAction=0x0030, InventoryContents=0x0150)
 NAMES = {v: k for k, v in IDS.items()}
 EYE = 1.62
 
@@ -18,7 +19,7 @@ class Client:
         self.s.settimeout(0.2)
         self.buf = b""
         self.chunks = {}
-        self.send("Hello", struct.pack("<I", 1))
+        self.send("Hello", struct.pack("<I", 2))
         nb = name.encode()
         self.send("Login", struct.pack("<H", len(nb)) + nb)
 
@@ -68,6 +69,20 @@ def decode_column(p):
     assert off == len(p), (off, len(p))
     return sections
 
+def inventory(payload):
+    """InventoryContents -> (ackSeq, selected, [(item, count)] * 36, cursor)."""
+    ok(len(payload) == 4 + 149, f"InventoryContents is 153 bytes ({len(payload)})")
+    ack, selected = struct.unpack_from("<IB", payload)
+    stacks = [struct.unpack_from("<HH", payload, 5 + 4 * i) for i in range(37)]
+    return ack, selected, stacks[:36], stacks[36]
+
+def last_inventory(msgs):
+    got = [p for n, p in msgs if n == "InventoryContents"]
+    return inventory(got[-1]) if got else None
+
+AMETHYST_ITEM, TORCH_ITEM = 5, 15
+STONE, AMETHYST = 3, 5
+
 def block_at(col, lx, wy, lz):
     sy = wy + 64
     sec = col.get(sy // 16)
@@ -78,8 +93,13 @@ a = Client("alice")
 msgs = a.pump(15, lambda n, p: n == "LoginOk")
 login = [p for n, p in msgs if n == "LoginOk"]
 ok(len(login) == 1, "alice receives LoginOk")
-aid, sx, sy, sz = struct.unpack("<Ifff", login[0])
-print(f"     alice id={aid} spawn=({sx:.2f}, {sy:.2f}, {sz:.2f})")
+ok(len(login[0]) == 24, "LoginOk carries id, eye, yaw and pitch")
+aid, sx, sy, sz, syaw, spitch = struct.unpack("<Ifffff", login[0])
+print(f"     alice id={aid} spawn=({sx:.2f}, {sy:.2f}, {sz:.2f}) look=({syaw:.1f}, {spitch:.1f})")
+msgs += a.pump(2, lambda n, p: n == "InventoryContents")
+inv = last_inventory(msgs)
+ok(inv is not None and inv[0] == 0 and inv[2][0] == (AMETHYST_ITEM, 64),
+   "InventoryContents right after LoginOk (ack 0, 64 amethyst in slot 0)")
 after = [p for n, p in msgs if n == "TimeUpdate"] or         [p for n, p in a.pump(1, lambda n, p: n == "TimeUpdate") if len(p) == 4]
 ok(len(after) >= 1 and 0 <= struct.unpack("<I", after[0])[0] < 24000,
    "TimeUpdate received right after LoginOk")
@@ -150,9 +170,34 @@ pa = [p for n, p in ra if upd(n, p)]
 ok(pa and struct.unpack_from("<H", pa[0], 12)[0] == 0, "break accepted: alice gets BlockUpdate(air)")
 ok(any(upd(n, p) for n, p in rb), "break broadcast to bob")
 
-a.send("PlaceBlock", struct.pack("<iiiH", target[0], target[1], target[2], 3))  # stone back
-pa = [p for n, p in a.pump(2, upd) if upd(n, p)]
-ok(pa and struct.unpack_from("<H", pa[0], 12)[0] == 3, "place accepted: BlockUpdate(stone)")
+ITEM_OF = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 7: 6, 9: 7, 10: 8, 11: 9, 15: 10, 16: 11, 17: 12, 18: 13, 21: 14, 22: 15}
+inv = last_inventory(ra + a.pump(1, lambda n, p: n == "InventoryContents"))
+dropped = ITEM_OF.get(below)
+ok(inv is not None and (dropped is None or any(i == dropped for i, c in inv[2])),
+   f"InventoryContents after the break holds its item (block {below} -> item {dropped})")
+
+a.send("InventoryAction", struct.pack("<IBBB", 1, 0, 1, 0))     # Select 1 (torch)
+inv = last_inventory(a.pump(2, lambda n, p: n == "InventoryContents"))
+ok(inv is not None and inv[0] == 1 and inv[1] == 1, "InventoryAction acked (ack 1, selected 1)")
+before = inv
+
+# The hole is free, in reach and outside alice's box: only the item decides.
+a.send("PlaceBlock", struct.pack("<iiiH", target[0], target[1], target[2], STONE))  # alice holds torches
+msgs = a.pump(2, lambda n, p: n == "InventoryContents")
+pa = [p for n, p in msgs if upd(n, p)]
+inv = last_inventory(msgs)
+ok(pa and struct.unpack_from("<H", pa[0], 12)[0] == 0 and inv is not None and inv[1:] == before[1:],
+   "place without the item is refused (old block re-sent, inventory unchanged)")
+
+a.send("InventoryAction", struct.pack("<IBBB", 2, 0, 0, 0))     # Select 0 (amethyst)
+a.send("PlaceBlock", struct.pack("<iiiH", target[0], target[1], target[2], AMETHYST))
+msgs = a.pump(2, upd)
+msgs += a.pump(2, lambda n, p: n == "InventoryContents")
+pa = [p for n, p in msgs if upd(n, p)]
+inv = last_inventory(msgs)
+ok(pa and struct.unpack_from("<H", pa[0], 12)[0] == AMETHYST and inv is not None
+   and inv[0] == 2 and inv[2][0] == (AMETHYST_ITEM, 63),
+   "place consumes (BlockUpdate amethyst, 63 left in slot 0)")
 
 far_target = (target[0] + 40, target[1], target[2])
 a.send("BreakBlock", struct.pack("<iii", *far_target))
@@ -164,17 +209,40 @@ ok(pa and real is not None and struct.unpack_from("<H", pa[0], 12)[0] == real,
    "out-of-reach break rejected (answered with the real block)")
 
 bedrock = (target[0], -64, target[2])
-a.send("PlaceBlock", struct.pack("<iiiH", target[0], feet_y, target[2], 3))  # inside alice herself
+a.send("PlaceBlock", struct.pack("<iiiH", target[0], feet_y, target[2], AMETHYST))  # inside alice herself
 inside = (target[0], feet_y, target[2])
 upd_in = lambda n, p: n == "BlockUpdate" and struct.unpack_from("<iii", p) == inside
 pa = [p for n, p in a.pump(2, upd_in) if upd_in(n, p)]
 ok(pa and struct.unpack_from("<H", pa[0], 12)[0] == 0, "place inside a player rejected")
 
+# ---- 4b. one login per name, malformed InventoryAction -----------------------
+dup = Client("alice")
+msgs = dup.pump(3, lambda n, p: n in ("Disconnect", "CLOSED"))
+ok(any(n in ("Disconnect", "CLOSED") for n, p in msgs) and not any(n == "LoginOk" for n, p in msgs),
+   "duplicate name refused (Disconnect)")
+
+old = socket.create_connection(("127.0.0.1", PORT)); old.settimeout(3)
+old.sendall(struct.pack("<IHI", 6, IDS["Hello"], 1))               # a protocol 1 client
+reply = old.recv(64); old.close()
+ok(len(reply) >= 7 and struct.unpack_from("<H", reply, 4)[0] == IDS["Disconnect"] and reply[6] == 2,
+   "protocol 1 Hello refused (Disconnect(ProtocolViolation))")
+
+c = Client("carol")
+c.pump(10, lambda n, p: n == "LoginOk")
+c.send("InventoryAction", struct.pack("<IBBB", 1, 0, 200, 0))   # slot out of range: rejected, acked
+inv = last_inventory(c.pump(2, lambda n, p: n == "InventoryContents" and struct.unpack_from("<I", p)[0] == 1))
+ok(inv is not None and inv[0] == 1 and inv[1] == 0, "out-of-range slot rejected but acked")
+c.send("InventoryAction", struct.pack("<IBBB", 2, 3, 0, 0))     # kind 3 does not exist
+msgs = c.pump(2, lambda n, p: n in ("Disconnect", "CLOSED"))
+disc = [p for n, p in msgs if n == "Disconnect"]
+ok(disc and disc[0][0] == 2, "bad InventoryAction kind -> Disconnect(ProtocolViolation)")
+
 # ---- 5. leave ------------------------------------------------------------------
 b.send("Disconnect", b"\x00")
 b.s.close()
-msgs = a.pump(2, lambda n, p: n == "PlayerLeave")
-ok(any(n == "PlayerLeave" and struct.unpack("<I", p)[0] == bid for n, p in msgs), "alice is told bob left")
+left = lambda n, p: n == "PlayerLeave" and struct.unpack("<I", p)[0] == bid
+msgs = a.pump(2, left)
+ok(any(left(n, p) for n, p in msgs), "alice is told bob left")
 
 # ---- 6. malformed packet -> kicked --------------------------------------------
 a.send("BreakBlock", struct.pack("<ii", 1, 2))          # truncated

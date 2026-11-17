@@ -105,6 +105,7 @@ enum class PacketId : uint16_t {
 	PlayerMove   = 0x0010,   // position / look intent
 	BreakBlock   = 0x0020,   // intent, server validates
 	PlaceBlock   = 0x0021,   // intent, server validates
+	InventoryAction = 0x0030,   // seq + one inventory input, server applies it
 
 	// server -> client
 	LoginOk      = 0x0102,   // player id, spawn
@@ -116,6 +117,7 @@ enum class PacketId : uint16_t {
 	ChunkData    = 0x0130,   // encoded chunk
 	UnloadChunk  = 0x0131,
 	TimeUpdate   = 0x0140,   // u32 time of day (ticks); clients ignore it if unknown
+	InventoryContents = 0x0150,   // the authoritative inventory + last action seq applied
 
 	// both directions
 	KeepAlive    = 0x0F00,
@@ -144,7 +146,7 @@ const char* toString(DisconnectReason r);
 constexpr size_t FRAME_LENGTH_SIZE = sizeof(uint32_t);
 constexpr size_t FRAME_ID_SIZE     = sizeof(uint16_t);
 constexpr size_t FRAME_HEADER_SIZE = FRAME_LENGTH_SIZE + FRAME_ID_SIZE;
-constexpr uint32_t PROTOCOL_VERSION = 1;
+constexpr uint32_t PROTOCOL_VERSION = 2;
 
 // ============================================================================
 //  net::wire : host <-> little-endian conversion for fixed-size values
@@ -353,6 +355,7 @@ public:
 	// --- variable-size data -----------------------------------------------------
 	std::string readString(size_t maxLen);                           // u16 length + bytes, <= maxLen
 	bool        readBlob(Buffer& out, size_t maxLen);                // u32 length + bytes, <= maxLen
+	bool        readBytes(uint8_t* out, size_t n) { return take(out, n); }   // raw, no prefix
 
 	[[nodiscard]] bool   ok()        const { return _ok; }
 	[[nodiscard]] size_t remaining() const { return static_cast<size_t>(_end - _p); }
