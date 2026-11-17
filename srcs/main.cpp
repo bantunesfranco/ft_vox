@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <charconv>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -23,6 +24,7 @@
 #include "GameServer.hpp"
 #include "SelfTest.hpp"
 #include "WorldStore.hpp"
+#include "worldgen/TerrainGenerator.hpp"
 #include <string_view>
 
 namespace {
@@ -79,12 +81,39 @@ int runDedicatedServer(const int argc, char** argv) {
 	return EXIT_SUCCESS;
 }
 
+// ft_vox --selftest-hash <seed> <cx> <cz>: generates one column the way the
+// game and the server do and prints a hash of its blocks (FNV-1a 64 over every
+// section's block ids as little-endian u16, absent sections as zeros), so
+// tests/e2e_server.py can check that both generate the same world.
+int runColumnHash(const int argc, char** argv) {
+	if (argc != 5) {
+		std::cerr << "usage: " << argv[0] << " --selftest-hash <seed> <cx> <cz>\n";
+		return EXIT_FAILURE;
+	}
+	const std::uint64_t seed = parseSeed(argv[2], 0);
+	const ChunkCoord coord{std::atoi(argv[3]), std::atoi(argv[4])};
+	ChunkColumn column(coord);
+	worldgen::TerrainGenerator(seed).generate(column);
+
+	std::uint64_t hash = 14695981039346656037ull;
+	const auto mix = [&hash](const std::uint8_t byte) { hash = (hash ^ byte) * 1099511628211ull; };
+	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s)
+		for (const BlockId block : column.section(s).blocks()) {
+			mix(static_cast<std::uint8_t>(block & 0xFFu));
+			mix(static_cast<std::uint8_t>(block >> 8));
+		}
+	std::printf("%016llx\n", static_cast<unsigned long long>(hash));
+	return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(const int argc, char** argv)
 {
 	if (argc >= 2 && std::strcmp(argv[1], "--server") == 0)
 		return runDedicatedServer(argc, argv);
+	if (argc >= 2 && std::strcmp(argv[1], "--selftest-hash") == 0)
+		return runColumnHash(argc, argv);
 	if (argc >= 2 && std::strcmp(argv[1], "--selftest") == 0)
 		return runSelfTests(argc, argv);
 

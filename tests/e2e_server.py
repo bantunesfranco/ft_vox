@@ -95,6 +95,24 @@ below = block_at(a.chunks[spawn_chunk], lx, feet_y - 1, lz)
 at_feet = block_at(a.chunks[spawn_chunk], lx, feet_y, lz)
 ok(below != 0 and at_feet == 0, f"spawn stands on a solid block (below={below}, feet={at_feet})")
 
+# column_matches_singleplayer: with `<exe> <seed>` (the seed the server was
+# started with), the server's spawn column must hash like the game's own
+# generation (`ft_vox --selftest-hash`). Before any edit, and from a fresh world.
+if len(sys.argv) >= 4:
+    import subprocess
+    exe, seed = sys.argv[2], sys.argv[3]
+    def column_hash(col):
+        h = 14695981039346656037
+        for s in range(20):
+            for b in col.get(s, [0] * 4096):
+                for byte in (b & 0xFF, b >> 8):
+                    h = ((h ^ byte) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+        return f"{h:016x}"
+    local = subprocess.run([exe, "--selftest-hash", seed, str(spawn_chunk[0]), str(spawn_chunk[1])],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    remote = column_hash(a.chunks[spawn_chunk])
+    ok(local == remote, f"column {spawn_chunk} matches singleplayer generation ({remote} vs {local})")
+
 # ---- 3. second player: join + movement relay ---------------------------------
 b = Client("bob")
 msgs = b.pump(5, lambda n, p: n == "LoginOk")
