@@ -235,6 +235,27 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
        f"new name gets the world spawn ({tuple(round(v, 2) for v in eye)})")
     ok(contents[2] == STARTING_ITEMS and contents[1] == 0, "new name gets the starting items")
     other.close()
+
+    # 6. the server stops while Saver is still playing: the stop saves it
+    saver, eye, _, _ = login(25623, "Saver")
+    stop_eye = (eye[0] - 2.5, eye[1] + 1.0, eye[2] + 1.5)
+    saver.send("PlayerMove", struct.pack("<fffff", *stop_eye, -90.0, 30.0))
+    saver.send("InventoryAction", struct.pack("<IBBB", 1, 0, 2, 0))   # Select 2
+    msgs = saver.pump(5, lambda n, p: n == "InventoryContents" and inventory(p)[0] == 1)
+    ok(any(n == "InventoryContents" and inventory(p)[:2] == (1, 2) for n, p in msgs), "Saver selects slot 2")
+    ok(stop_server(server) == 0, "server stops cleanly with Saver connected")
+    saver.s.close()
+
+    server = start_server(tmp, 25624, "--world", world)
+    wait_line(server, "listening")
+    saver, eye, look, contents = login(25624, "Saver")
+    ok(abs(eye[0] - stop_eye[0]) < 0.01 and abs(eye[2] - stop_eye[2]) < 0.01
+       and eye[1] > stop_eye[1] - 0.01 and abs(look[0] + 90.0) < 0.01 and abs(look[1] - 30.0) < 0.01,
+       f"player saved by the stop: eye {tuple(round(v, 2) for v in eye)} (at stop "
+       f"{tuple(round(v, 2) for v in stop_eye)}, may be lifted), look {look}")
+    ok(any(i == DIRT_ITEM for i, c in contents[2]) and contents[1] == 2,
+       "inventory saved by the stop (dirt, slot 2 selected)")
+    saver.close()
     ok(stop_server(server) == 0, "server stops cleanly again")
 
 print("ALL PASSED")
