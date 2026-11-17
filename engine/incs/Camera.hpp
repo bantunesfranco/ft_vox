@@ -17,7 +17,7 @@ class Camera
 		glm::vec3	up;
 		float		pitch{};
 		float		yaw{};
-		float		fov;
+		float		fov;          // vertical, degrees (70 = Minecraft's default; 90 looked fish-eyed)
 		glm::mat4	view{};
 		glm::mat4	proj{};
 

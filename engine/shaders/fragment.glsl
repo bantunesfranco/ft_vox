@@ -59,9 +59,9 @@ void main()
     vec3 color = tex.rgb * brightness;
     if (fog.w <= 0.0 && skyFog.w > 0.0) {
         // Horizontal distance: columns load in a square around the player,
-        // the last 40 % of the view distance fades into the haze.
+        // the last 25 % of the view distance fades into the haze.
         float d = distance(vWorldPos.xz, eye.xz);
-        color = mix(color, skyFog.rgb, smoothstep(skyFog.w * 0.6, skyFog.w, d));
+        color = mix(color, skyFog.rgb, smoothstep(skyFog.w * 0.75, skyFog.w, d));
     }
     if (fog.w > 0.0) {
         // Clear close by, easing into the fog colour by fog.w.
