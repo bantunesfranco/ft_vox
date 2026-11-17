@@ -169,7 +169,7 @@ private:
 	std::mutex              _saveMutex;
 	std::condition_variable _saveDone;
 	std::size_t             _savesInFlight = 0;
-	std::unordered_multiset<std::string> _playerSavesInFlight;   // names; guarded by _saveMutex
+	std::unordered_set<std::string> _playerSavesInFlight;   // names (one save each at a time); guarded by _saveMutex
 	std::unordered_map<ChunkCoord, net::SharedBuffer> _encoded;   // ChunkData frames, until edited
 	std::unordered_set<ChunkCoord>                    _generating;
 

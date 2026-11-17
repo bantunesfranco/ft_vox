@@ -67,10 +67,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     if (camera->pitch < -89.0f)
         camera->pitch = -89.0f;
 
-    const float pitch = glm::radians(camera->pitch);
-    const float yaw = glm::radians(camera->yaw);
-    const glm::vec3 dir{cosf(yaw) * cosf(pitch),sinf(pitch),sinf(yaw) * cosf(pitch)};
-    camera->dir = glm::normalize(dir);
+    camera->dir = lookDirection(camera->yaw, camera->pitch);
 }
 
 void mouse_button_callback(GLFWwindow* window, const int button, const int action, int mods)

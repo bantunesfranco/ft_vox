@@ -133,7 +133,7 @@ void GameServer::savePlayer(const Player& p) {
 		if (!::savePlayer(file, record, error))
 			std::fprintf(stderr, "[server] failed to save player %s: %s\n", name.c_str(), error.c_str());
 		std::lock_guard lock(_saveMutex);
-		_playerSavesInFlight.erase(_playerSavesInFlight.find(name));
+		_playerSavesInFlight.erase(name);
 		--_savesInFlight;
 		_saveDone.notify_all();
 	});

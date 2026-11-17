@@ -193,6 +193,7 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 		}
 
 	// 2. Stone where the interpolated density is positive, water below sea level.
+	static_assert(ChunkColumn::HEIGHT % CELL_Y == 0, "the cells must fill the column exactly");
 	for (int z = 0; z < ChunkSection::SIZE; ++z)
 		for (int x = 0; x < ChunkSection::SIZE; ++x) {
 			const int i = x / CELL_XZ, k = z / CELL_XZ;
@@ -297,6 +298,7 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 				                                        ChunkColumn::MIN_WORLD_Y + gy * CELL_CAVE,
 				                                        baseZ + k * CELL_CAVE);
 
+	static_assert(ChunkColumn::HEIGHT % CELL_CAVE == 0, "the cave cells must fill the column exactly");
 	const int lowest = ChunkColumn::toStorageY(ChunkColumn::MIN_WORLD_Y + 5);
 	const int deepLava = ChunkColumn::toStorageY(DEEP_LAVA_LEVEL);
 	for (int z = 0; z < ChunkSection::SIZE; ++z)

@@ -27,17 +27,6 @@
 #include "stb_image_write.h"
 
 namespace {
-// Camera::dir for a yaw and pitch in degrees.
-glm::vec3 lookDirection(const float yawDegrees, const float pitchDegrees) {
-	const float pitch = glm::radians(pitchDegrees);
-	const float yaw = glm::radians(yawDegrees);
-	return glm::normalize(glm::vec3{
-		std::cos(yaw) * std::cos(pitch),
-		std::sin(pitch),
-		std::sin(yaw) * std::cos(pitch)
-	});
-}
-
 bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
 	// Below the world is solid, above it empty; unloaded blocks count as solid.
 	const BlockRegistry& registry = world.getBlockRegistry();
@@ -152,7 +141,8 @@ void App::startBenchmarkWorld() {
 	const int ground = world.generatedSurfaceHeight(static_cast<int>(bench.startXZ.x), static_cast<int>(bench.startXZ.y));
 	bench.height = static_cast<float>(std::max(ground, 62) + 35);
 	timeTicks = bench.ticks;
-	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem, camera->pos, std::nullopt);
+	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem,
+		glm::vec3(bench.startXZ.x, bench.height, bench.startXZ.y), std::nullopt);
 	gameState.startGameplay();
 	applyGameState();
 }
@@ -707,10 +697,7 @@ void App::runBenchmarkScript() {
 	const double turning = t < BENCH_WARMUP ? std::min(t, BENCH_WARMUP - 1.0) : t - 1.0;
 	camera->yaw   = static_cast<float>(turning * 25.0);
 	camera->pitch = -20.0f;
-	const float yaw = glm::radians(camera->yaw);
-	const float pitch = glm::radians(camera->pitch);
-	camera->dir = glm::normalize(glm::vec3(std::cos(yaw) * std::cos(pitch), std::sin(pitch),
-	                                       std::sin(yaw) * std::cos(pitch)));
+	camera->dir   = lookDirection(camera->yaw, camera->pitch);
 }
 
 void App::saveScreenshot(const char* path) const {

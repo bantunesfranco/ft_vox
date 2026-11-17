@@ -27,4 +27,7 @@ class Camera
 		float rotSpeed{};
 };
 
+// Camera::dir for a yaw and pitch in degrees.
+[[nodiscard]] glm::vec3 lookDirection(float yawDegrees, float pitchDegrees);
+
 #endif

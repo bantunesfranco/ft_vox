@@ -174,7 +174,8 @@ ok(any(upd(n, p) for n, p in rb), "break broadcast to bob")
 ITEM_OF = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 7: 6, 9: 7, 10: 8, 11: 9, 15: 10, 16: 11, 17: 12, 18: 13, 21: 14, 22: 15}
 inv = last_inventory(ra + a.pump(1, lambda n, p: n == "InventoryContents"))
 dropped = ITEM_OF.get(below)
-ok(inv is not None and (dropped is None or any(i == dropped for i, c in inv[2])),
+ok(dropped is not None, f"block {below} under alice is in the ITEM_OF table")
+ok(inv is not None and any(i == dropped for i, c in inv[2]),
    f"InventoryContents after the break holds its item (block {below} -> item {dropped})")
 
 a.send("InventoryAction", struct.pack("<IBBB", 1, 0, 1, 0))     # Select 1 (torch)
