@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 #include "Chunk.hpp"
+#include "ColumnJobTracker.hpp"
 #include "Frustum.hpp"
 #include "Light.hpp"
 #include "ChunkMesher.hpp"
@@ -95,16 +96,9 @@ private:
 	std::unordered_map<ChunkCoord, ColumnPtr> chunks;
 	std::unordered_set<ChunkCoord> generatingChunks;
 
-	// Main thread only.
-	struct MeshStatus {
-		std::uint64_t version  = 0;      // bumped on every change; older results are dropped
-		bool          meshed   = false;  // render states match `version`
-		bool          inFlight = false;  // a job is running
-		std::uint32_t waited   = 0;      // frames spent waiting, for fair priority
-	};
-	std::unordered_map<ChunkCoord, MeshStatus> meshStatus;
-	std::uint64_t meshVersionCounter = 0;          // versions are never reused
-	std::size_t   meshJobsInFlight   = 0;
+	// Mesh jobs: `current()` means the render states match the column's
+	// blocks and light. Main thread only.
+	ColumnJobTracker meshJobs;
 
 	// Worker -> main thread.
 	struct MeshResult {
@@ -120,15 +114,9 @@ private:
 	// Light: one ColumnLight per column, computed by a job from the column's
 	// 3x3 window (so it depends on nearby blocks only, never on load order).
 	// Under chunk_mutex.
-	struct LightStatus {
-		std::uint64_t version  = 0;      // bumped when the 3x3 blocks change
-		std::uint64_t ready    = 0;      // version the stored light was computed for
-		bool          inFlight = false;
-	};
+	// `current()` means the stored light was computed for the column's present 3x3 blocks.
+	ColumnJobTracker lightJobs;
 	std::unordered_map<ChunkCoord, std::shared_ptr<const ColumnLight>> lights;
-	std::unordered_map<ChunkCoord, LightStatus> lightStatus;
-	std::uint64_t lightVersionCounter = 0;
-	std::size_t   lightJobsInFlight   = 0;
 	struct LightResult {
 		ChunkCoord    coord;
 		std::uint64_t version = 0;
