@@ -10,6 +10,9 @@
 //  "draw" is the cost of SUBMITTING the draws; GPU time shows up in "swap"
 //  (SwapBuffers waits for the GPU when it is behind).
 //
+//  Any frame over 50 ms (recorded or not, bench or not) logs one line to stderr
+//  naming the phases that took the time, so a one-off freeze can be traced.
+//
 //  Besides the text report it writes a Chrome trace (JSON) that Perfetto UI
 //  (ui.perfetto.dev) or chrome://tracing open directly. Other threads can add
 //  spans with Trace::Scope (thread-safe), e.g. chunk generation on the pool.
@@ -22,6 +25,7 @@
 #include <cstdio>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -127,6 +131,8 @@ public:
 	void endFrame(const bool record, const std::size_t drawCalls) {
 		const auto now = Clock::now();
 		Trace::instance().add("frame", _frameStart, now);
+		if (const auto line = slowFrameReport(_current))
+			std::fprintf(stderr, "%s\n", line->c_str());
 		if (!record)
 			return;
 		_frames.push_back(std::chrono::duration<double, std::milli>(now - _frameStart).count());
@@ -135,6 +141,33 @@ public:
 			_phaseFrames[i].push_back(_current[i]);
 		}
 		_drawCalls += drawCalls;
+	}
+
+	// One line for a frame whose phases add up to `thresholdMs` or more, listing
+	// every phase of 1 ms or more, largest first (ties keep phase order).
+	[[nodiscard]] static std::optional<std::string> slowFrameReport(
+			const std::array<double, PhaseCount>& phaseMs, const double thresholdMs = 50.0) {
+		double total = 0.0;
+		for (const double ms : phaseMs)
+			total += ms;
+		if (total < thresholdMs)
+			return std::nullopt;
+		std::array<int, PhaseCount> order{};
+		for (int i = 0; i < PhaseCount; ++i)
+			order[i] = i;
+		std::ranges::stable_sort(order, [&phaseMs](const int a, const int b) { return phaseMs[a] > phaseMs[b]; });
+		char buf[64];
+		std::snprintf(buf, sizeof buf, "slow frame: %.1f ms (", total);
+		std::string line = buf;
+		bool first = true;
+		for (const int i : order) {
+			if (phaseMs[i] < 1.0)
+				break;
+			std::snprintf(buf, sizeof buf, "%s%s %.1f", first ? "" : ", ", kLabels[i], phaseMs[i]);
+			line += buf;
+			first = false;
+		}
+		return line + ")";
 	}
 
 	void report() const {
@@ -172,6 +205,9 @@ private:
 	using Clock = std::chrono::steady_clock;
 	static constexpr std::array<const char*, PhaseCount> kNames{
 		"begin", "session", "prune", "mesh", "upload", "draw", "ui", "swap"};
+
+	static constexpr std::array<const char*, PhaseCount> kLabels{
+		"Begin", "Session", "Prune", "Mesh", "Upload", "Draw", "Ui", "Swap"};
 
 	static double percentile(std::vector<double> values, const double p) {
 		std::ranges::sort(values);
