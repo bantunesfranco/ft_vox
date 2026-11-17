@@ -7,6 +7,8 @@ in vec2 vUV;
 in vec3 vNormal;
 in vec3 vWorldPos;
 in float vAO;
+in float vSky;
+in float vBlock;
 flat in uint vTexIndex;
 
 layout(binding = 0) uniform sampler2D uAtlas;
@@ -21,6 +23,7 @@ layout(std140, binding = 0) uniform WorldUBO
     vec4 eye;         // xyz = camera position
     vec4 fog;         // rgb = colour, w = distance (0 = off): eye inside water / lava
     vec4 skyFog;      // rgb = colour, w = view distance (0 = off): far terrain fades out
+    vec4 time;        // x = daylight: how much of the sky light is there now
 };
 
 out vec4 FragColor;
@@ -48,13 +51,12 @@ void main()
     if (tex.a < 0.1)
     discard;
 
-    float dist = distance(vWorldPos, light.xyz);
-
-    float lightFactor = clamp(1.0 - dist / light.w, 0.0, 1.0);
-
-    float ambient = ambientData.x;
-
-    float brightness = (ambient + lightFactor) * vAO * 1.25;
+    // Light level 0..15: sky light scaled by the time of day, or block light.
+    // Minecraft's curve (v / (4 - 3v)) makes dim levels fall off quickly;
+    // level 0 keeps 5 %. Full light is 0.625, the brightness before light levels.
+    float level = max(vSky * time.x, vBlock) / 15.0;
+    float curve = level / (4.0 - 3.0 * level);
+    float brightness = 0.625 * (0.05 + 0.95 * curve) * vAO;
 
     vec3 color = tex.rgb * brightness;
     if (fog.w <= 0.0 && skyFog.w > 0.0) {

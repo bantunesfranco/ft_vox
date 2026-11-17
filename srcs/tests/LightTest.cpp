@@ -1,5 +1,6 @@
 #include "SelfTest.hpp"
 #include "Light.hpp"
+#include "TestWorld.hpp"
 #include "worldgen/TerrainGenerator.hpp"
 
 #include <algorithm>
@@ -14,40 +15,9 @@ constexpr BlockId GLOWSTONE = toBlockId(BlockType::Glowstone);
 constexpr BlockId LEAVES    = toBlockId(BlockType::OakLeaves);
 constexpr int FLOOR = 10;            // storage y of the top floor block
 
-// Nine all-air columns around (0, 0) with a stone floor up to FLOOR. Blocks
-// are set in centre-relative coordinates: x, z in -16..31.
-struct TestWorld {
-	std::array<std::unique_ptr<ChunkColumn>, 9> columns;
-	BlockRegistry registry;
-
-	TestWorld() {
-		for (int dz = -1; dz <= 1; ++dz)
-			for (int dx = -1; dx <= 1; ++dx)
-				columns[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))] = std::make_unique<ChunkColumn>(ChunkCoord{dx, dz});
-		for (int z = -16; z < 32; ++z)
-			for (int x = -16; x < 32; ++x)
-				for (int y = 0; y <= FLOOR; ++y)
-					set(x, y, z, STONE);
-	}
-	void set(const int x, const int y, const int z, const BlockId block) {
-		const int cx = (x + 16) / 16, cz = (z + 16) / 16;
-		columns[static_cast<std::size_t>(cz * 3 + cx)]->setUnchecked((x + 16) % 16, y, (z + 16) % 16, block);
-	}
-	// A solid box of stone with a hollow inside [x0, x1] x [y0, y1] x [z0, z1].
-	void hollowBox(const int x0, const int y0, const int z0, const int x1, const int y1, const int z1) {
-		for (int z = z0 - 1; z <= z1 + 1; ++z)
-			for (int y = y0 - 1; y <= y1 + 1; ++y)
-				for (int x = x0 - 1; x <= x1 + 1; ++x) {
-					const bool inside = x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1;
-					set(x, y, z, inside ? AIR_BLOCK : STONE);
-				}
-	}
-	[[nodiscard]] std::shared_ptr<const ColumnLight> light() const {
-		ColumnWindow window{};
-		for (std::size_t i = 0; i < 9; ++i)
-			window[i] = columns[i].get();
-		return computeLight(window, registry);
-	}
+// The floor every hand-built world here has (see TestWorld.hpp).
+struct LitWorld : TestWorld {
+	LitWorld() : TestWorld(FLOOR) {}
 };
 
 int sky(const ColumnLight& l, const int x, const int y, const int z) { return ColumnLight::sky(l.at(x, y, z)); }
@@ -69,7 +39,7 @@ ColumnWindow generatedWindow(const worldgen::TerrainGenerator& gen, const ChunkC
 } // namespace
 
 SELFTEST(Light, open_sky) {
-	const TestWorld w;
+	const LitWorld w;
 	const auto l = w.light();
 	CHECK_EQ(sky(*l, 8, FLOOR + 1, 8), 15);
 	CHECK_EQ(block(*l, 8, FLOOR + 1, 8), 0);
@@ -77,7 +47,7 @@ SELFTEST(Light, open_sky) {
 }
 
 SELFTEST(Light, overhang) {
-	TestWorld w;
+	LitWorld w;
 	for (int z = 7; z <= 9; ++z)
 		for (int x = 7; x <= 9; ++x)
 			w.set(x, FLOOR + 3, z, STONE);              // roof two cells above the floor
@@ -87,7 +57,7 @@ SELFTEST(Light, overhang) {
 }
 
 SELFTEST(Light, sealed_cave) {
-	TestWorld w;
+	LitWorld w;
 	w.hollowBox(6, FLOOR - 6, 6, 8, FLOOR - 4, 8);
 	const auto l = w.light();
 	CHECK_EQ(sky(*l, 7, FLOOR - 5, 7), 0);
@@ -95,7 +65,7 @@ SELFTEST(Light, sealed_cave) {
 }
 
 SELFTEST(Light, glowstone_falloff) {
-	TestWorld w;
+	LitWorld w;
 	w.hollowBox(4, FLOOR - 5, 8, 10, FLOOR - 5, 8);     // a sealed 7 x 1 x 1 tunnel
 	w.set(4, FLOOR - 5, 8, GLOWSTONE);
 	const auto l = w.light();
@@ -106,7 +76,7 @@ SELFTEST(Light, glowstone_falloff) {
 }
 
 SELFTEST(Light, opaque_stops) {
-	TestWorld w;
+	LitWorld w;
 	w.hollowBox(6, FLOOR - 5, 8, 6, FLOOR - 5, 8);
 	w.hollowBox(8, FLOOR - 5, 8, 8, FLOOR - 5, 8);      // one stone block between the pockets
 	w.set(6, FLOOR - 5, 8, GLOWSTONE);
@@ -115,7 +85,7 @@ SELFTEST(Light, opaque_stops) {
 }
 
 SELFTEST(Light, leaves_and_water_dim) {
-	TestWorld w;
+	LitWorld w;
 	// A 1 x 1 shaft in a stone pillar, open at the top: the only light comes
 	// straight down through what fills its top.
 	for (int y = FLOOR + 1; y <= FLOOR + 8; ++y)
@@ -135,7 +105,7 @@ SELFTEST(Light, leaves_and_water_dim) {
 }
 
 SELFTEST(Light, crosses_columns) {
-	TestWorld w;
+	LitWorld w;
 	w.hollowBox(-3, FLOOR - 5, 8, 3, FLOOR - 5, 8);     // tunnel from the west neighbour into the centre
 	w.set(-1, FLOOR - 5, 8, GLOWSTONE);                  // west column, local x 15
 	const auto l = w.light();
@@ -144,7 +114,7 @@ SELFTEST(Light, crosses_columns) {
 }
 
 SELFTEST(Light, world_limits) {
-	TestWorld w;
+	LitWorld w;
 	w.set(8, ChunkColumn::HEIGHT - 1, 8, GLOWSTONE);
 	w.set(9, 0, 9, GLOWSTONE);
 	const auto l = w.light();

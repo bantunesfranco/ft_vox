@@ -8,7 +8,11 @@
 #include <cstdint>
 #include <vector>
 
-using PackedVertex = std::uint32_t;
+// Two 32-bit words per vertex (see packVertex).
+struct PackedVertex {
+    std::uint32_t a;
+    std::uint32_t b;
+};
 
 enum class NormalDir : std::uint8_t
 {
@@ -23,18 +27,20 @@ enum class NormalDir : std::uint8_t
 };
 
 /*
- * Chunk vertices can exist at Y=256 because the world column is
- * 256 blocks tall. X/Z remain section-sized and can reach 16.
- *
- * Layout:
- *
- * bits  0 -  4 : X       5 bits
- * bits  5 - 13 : Y       9 bits
- * bits 14 - 18 : Z       5 bits
- * bits 19 - 21 : Normal  3 bits
- * bits 22 - 27 : Texture 6 bits
- * bits 28 - 29 : AO      2 bits
- * bits 30 - 31 : corner  2 bits
+ * Word a:
+ *   bits  0 -  4 : X       5 bits   (block corner, 0..16)
+ *   bits  5 - 13 : Y       9 bits
+ *   bits 14 - 18 : Z       5 bits
+ *   bits 19 - 21 : Normal  3 bits
+ *   bits 22 - 27 : Texture 6 bits
+ *   bits 28 - 29 : AO      2 bits
+ *   bits 30 - 31 : corner  2 bits
+ * Word b:
+ *   bits  0 -  3 : sky light    0..15
+ *   bits  4 -  7 : block light  0..15
+ *   bits  8 - 12 : sub-x   (each in 1/16 block, added to the position:
+ *   bits 13 - 17 : sub-y    used by torches, 0 for cubes)
+ *   bits 18 - 22 : sub-z
  */
 constexpr PackedVertex packVertex(
     std::uint8_t x,
@@ -43,17 +49,28 @@ constexpr PackedVertex packVertex(
     NormalDir normal,
     std::uint8_t texture,
     std::uint8_t ao,
-    std::uint8_t corner
+    std::uint8_t corner,
+    std::uint8_t sky = 15,
+    std::uint8_t block = 0,
+    std::uint8_t subX = 0,
+    std::uint8_t subY = 0,
+    std::uint8_t subZ = 0
 ) noexcept
 {
-    return
-        (static_cast<PackedVertex>(x) & 0x1Fu) |
-        ((static_cast<PackedVertex>(y) & 0x1FFu) << 5u) |
-        ((static_cast<PackedVertex>(z) & 0x1Fu) << 14u) |
-        ((static_cast<PackedVertex>(normal) & 0x07u) << 19u) |
-        ((static_cast<PackedVertex>(texture) & 0x3Fu) << 22u) |
-        ((static_cast<PackedVertex>(ao) & 0x03u) << 28u) |
-        ((static_cast<PackedVertex>(corner) & 0x03u) << 30u);
+    return PackedVertex{
+        (static_cast<std::uint32_t>(x) & 0x1Fu) |
+        ((static_cast<std::uint32_t>(y) & 0x1FFu) << 5u) |
+        ((static_cast<std::uint32_t>(z) & 0x1Fu) << 14u) |
+        ((static_cast<std::uint32_t>(normal) & 0x07u) << 19u) |
+        ((static_cast<std::uint32_t>(texture) & 0x3Fu) << 22u) |
+        ((static_cast<std::uint32_t>(ao) & 0x03u) << 28u) |
+        ((static_cast<std::uint32_t>(corner) & 0x03u) << 30u),
+        (static_cast<std::uint32_t>(sky) & 0x0Fu) |
+        ((static_cast<std::uint32_t>(block) & 0x0Fu) << 4u) |
+        ((static_cast<std::uint32_t>(subX) & 0x1Fu) << 8u) |
+        ((static_cast<std::uint32_t>(subY) & 0x1Fu) << 13u) |
+        ((static_cast<std::uint32_t>(subZ) & 0x1Fu) << 18u)
+    };
 }
 
 

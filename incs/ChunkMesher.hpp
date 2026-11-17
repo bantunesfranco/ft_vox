@@ -29,7 +29,8 @@ private:
         int maxZ,
         NormalDir normal,
         std::uint16_t texture,
-        const std::array<std::uint8_t, 4>& ao
+        const std::array<std::uint8_t, 4>& ao,
+        const std::array<std::uint8_t, 4>& light      // (sky << 4) | block per corner
     );
 
     static void emitVertex(
@@ -39,7 +40,8 @@ private:
         uint8_t z,
         NormalDir normal,
         uint16_t texture,
-        uint8_t ao, uint8_t corner
+        uint8_t ao, uint8_t corner,
+        uint8_t light
     );
 };
 

@@ -38,6 +38,9 @@ void ChunkMesher::build(
     std::array<int, size * size> mask{};
     std::array<std::uint8_t, size * size> maskAo{};
     std::array<std::array<std::uint8_t, 4>, size * size> maskCornerAo{};
+    constexpr std::uint16_t nonUniformLight = 0xFFFF;
+    std::array<std::uint16_t, size * size> maskLight{};
+    std::array<std::array<std::uint8_t, 4>, size * size> maskCornerLight{};
 
     /*
      * The section plus a one-block border, copied once into flat arrays.
@@ -48,6 +51,7 @@ void ChunkMesher::build(
     constexpr int padded = size + 2;
     thread_local std::array<BlockId, padded * padded * padded> blocks{};
     thread_local std::array<std::uint8_t, padded * padded * padded> opaque{};
+    thread_local std::array<std::uint8_t, padded * padded * padded> light{};   // (sky << 4) | block
     const auto cell = [](const int x, const int y, const int z) noexcept {
         return static_cast<std::size_t>((x + 1) + (z + 1) * padded + (y + 1) * padded * padded);
     };
@@ -67,6 +71,7 @@ void ChunkMesher::build(
                 const bool isOpaque = registry.isOpaque(block);
                 blocks[cell(x, y, z)] = block;
                 opaque[cell(x, y, z)] = isOpaque ? 1 : 0;
+                light[cell(x, y, z)] = neighborhood.getLight(x, y + baseY, z);
 
                 const int outside = (x < 0 || x >= size) + (y < 0 || y >= size) + (z < 0 || z >= size);
                 if (!isOpaque && outside <= 1)
@@ -78,6 +83,7 @@ void ChunkMesher::build(
         return;
     const auto blockAt  = [&](const std::array<int, 3>& p) { return blocks[cell(p[0], p[1], p[2])]; };
     const auto opaqueAt = [&](const std::array<int, 3>& p) { return opaque[cell(p[0], p[1], p[2])] != 0; };
+    const auto lightAt  = [&](const std::array<int, 3>& p) { return light[cell(p[0], p[1], p[2])]; };
 
     output.reserve(2048, 3072);
     transparentOutput.reserve(512, 768);
@@ -117,6 +123,7 @@ void ChunkMesher::build(
                             ? (sign > 0 ? definition.textureTop : definition.textureBottom)
                             : definition.textureSide;
                         std::array<std::uint8_t, 4> faceAo{};
+                        std::array<std::uint8_t, 4> faceLight{};
                         for (std::size_t corner = 0; corner < faceAo.size(); ++corner) {
                             std::array<int, 3> sideOne = position;
                             std::array<int, 3> sideTwo = position;
@@ -139,6 +146,25 @@ void ChunkMesher::build(
                                 ? 0
                                 : static_cast<std::uint8_t>(3 - static_cast<int>(sideOneOpaque)
                                     - static_cast<int>(sideTwoOpaque) - static_cast<int>(diagonalOpaque));
+
+                            // Smooth light: the average of the open cells among the
+                            // four in front of this corner (as Minecraft does).
+                            int skySum = 0, blockSum = 0, samples = 0;
+                            const auto add = [&](const std::array<int, 3>& p) {
+                                const std::uint8_t packed = lightAt(p);
+                                skySum += packed >> 4;
+                                blockSum += packed & 0x0F;
+                                ++samples;
+                            };
+                            add(neighborPosition);
+                            if (!sideOneOpaque)
+                                add(sideOne);
+                            if (!sideTwoOpaque)
+                                add(sideTwo);
+                            if (!diagonalOpaque && !(sideOneOpaque && sideTwoOpaque))
+                                add(diagonal);
+                            const int blockLight = std::max(blockSum / samples, static_cast<int>(definition.lightEmission));
+                            faceLight[corner] = static_cast<std::uint8_t>(((skySum / samples) << 4) | blockLight);
                         }
 
                         const bool uniformAo = std::all_of(faceAo.begin() + 1, faceAo.end(),
@@ -148,6 +174,10 @@ void ChunkMesher::build(
                             | (definition.transparent ? 0x40 : 0);
                         maskAo[maskIndex] = uniformAo ? faceAo[0] : nonUniformAo;
                         maskCornerAo[maskIndex] = faceAo;
+                        const bool uniformLight = std::all_of(faceLight.begin() + 1, faceLight.end(),
+                            [&faceLight](const std::uint8_t value) { return value == faceLight[0]; });
+                        maskLight[maskIndex] = uniformLight ? faceLight[0] : nonUniformLight;
+                        maskCornerLight[maskIndex] = faceLight;
                     }
                 }
 
@@ -160,20 +190,27 @@ void ChunkMesher::build(
                             continue;
                         }
 
+                        // Faces merge only with the same texture, AO and light,
+                        // each uniform across the face.
                         int width = 1;
                         const std::uint8_t aoKey = maskAo[faceIndex];
+                        const std::uint16_t lightKey = maskLight[faceIndex];
                         const auto& faceAo = maskCornerAo[faceIndex];
-                        while (aoKey != nonUniformAo && u + width < size
+                        const auto& faceLight = maskCornerLight[faceIndex];
+                        const bool mergeable = aoKey != nonUniformAo && lightKey != nonUniformLight;
+                        while (mergeable && u + width < size
                             && mask[v * size + u + width] == key
-                            && maskAo[v * size + u + width] == aoKey)
+                            && maskAo[v * size + u + width] == aoKey
+                            && maskLight[v * size + u + width] == lightKey)
                             ++width;
 
                         int height = 1;
-                        bool canExtend = aoKey != nonUniformAo;
+                        bool canExtend = mergeable;
                         while (v + height < size && canExtend) {
                             for (int offset = 0; offset < width; ++offset) {
                                 const std::size_t candidateIndex = static_cast<std::size_t>((v + height) * size + u + offset);
-                                if (mask[candidateIndex] != key || maskAo[candidateIndex] != aoKey) {
+                                if (mask[candidateIndex] != key || maskAo[candidateIndex] != aoKey
+                                    || maskLight[candidateIndex] != lightKey) {
                                     canExtend = false;
                                     break;
                                 }
@@ -202,7 +239,8 @@ void ChunkMesher::build(
                             maximum[0], maximum[1], maximum[2],
                             direction,
                             static_cast<std::uint16_t>(key & 0x3F),
-                            faceAo
+                            faceAo,
+                            faceLight
                         );
                         u += width;
                     }
@@ -220,7 +258,8 @@ void ChunkMesher::emitVertex(
     NormalDir normal,
     std::uint16_t texture,
     std::uint8_t ao,
-    std::uint8_t corner
+    std::uint8_t corner,
+    std::uint8_t light
 ) {
     /*
      * Texture IDs are currently limited to 6 bits by the packed
@@ -228,7 +267,8 @@ void ChunkMesher::emitVertex(
      */
     const auto textureIndex = static_cast<std::uint8_t>(texture & 0x3F);
 
-    mesh.vertices.push_back(packVertex(x, y, z, normal, textureIndex, ao, corner));
+    mesh.vertices.push_back(packVertex(x, y, z, normal, textureIndex, ao, corner,
+        static_cast<std::uint8_t>(light >> 4), static_cast<std::uint8_t>(light & 0x0F)));
 }
 
 void ChunkMesher::emitQuad(
@@ -241,7 +281,8 @@ void ChunkMesher::emitQuad(
     const int maxZ,
     NormalDir normal,
     std::uint16_t texture,
-    const std::array<std::uint8_t, 4>& ao
+    const std::array<std::uint8_t, 4>& ao,
+    const std::array<std::uint8_t, 4>& light
 ) {
     const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
     using VertexPosition = std::array<std::uint8_t, 3>;
@@ -280,7 +321,8 @@ void ChunkMesher::emitQuad(
         emitVertex(
             mesh,
             position[0], position[1], position[2],
-            normal, texture, ao[corner], static_cast<std::uint8_t>(corner)
+            normal, texture, ao[corner], static_cast<std::uint8_t>(corner),
+            light[corner]
         );
     }
 

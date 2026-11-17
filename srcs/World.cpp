@@ -43,24 +43,13 @@ namespace
     {
         const auto baseVertex = static_cast<std::uint32_t>(columnMesh.vertices.size());
 
-        for (const PackedVertex vertex : sectionMesh.vertices) {
-            const auto x = static_cast<std::uint8_t>(vertex & 0x1Fu);
-            const auto localY = static_cast<std::uint16_t>((vertex >> 5u) & 0x1FFu);
-            const auto z = static_cast<std::uint8_t>((vertex >> 14u) & 0x1Fu);
-            const auto normal = static_cast<NormalDir>((vertex >> 19u) & 0x07u);
-            const auto texture = static_cast<std::uint8_t>((vertex >> 22u) & 0x3Fu);
-            const auto ao = static_cast<std::uint8_t>((vertex >> 28u) & 0x03u);
-            const auto corner = static_cast<std::uint8_t>((vertex >> 30u) & 0x03u);
-
-            columnMesh.vertices.push_back(packVertex(
-                x,
-                static_cast<std::uint16_t>(localY + sectionY * ChunkSection::SIZE),
-                z,
-                normal,
-                texture,
-                ao,
-                corner
-            ));
+        // Section-local y becomes column y; everything else (word b too) is kept.
+        constexpr std::uint32_t Y_MASK = 0x1FFu << 5u;
+        for (PackedVertex vertex : sectionMesh.vertices) {
+            const std::uint32_t localY = (vertex.a & Y_MASK) >> 5u;
+            vertex.a = (vertex.a & ~Y_MASK)
+                     | (((localY + static_cast<std::uint32_t>(sectionY * ChunkSection::SIZE)) & 0x1FFu) << 5u);
+            columnMesh.vertices.push_back(vertex);
         }
 
         for (const std::uint32_t index : sectionMesh.indices)

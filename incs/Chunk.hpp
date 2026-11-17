@@ -128,6 +128,8 @@ private:
 };
 
 
+class ColumnLight;
+
 class ChunkNeighborhood {
 public:
     ChunkNeighborhood() noexcept = default;
@@ -144,6 +146,14 @@ public:
     [[nodiscard]]
     BlockId getBlock(int x, int y, int z) const noexcept;
 
+    // Light of the 3x3 columns (null: not computed yet, reads as full sky).
+    void setLight(int dx, int dz, const ColumnLight* light) noexcept;
+
+    // Packed (sky << 4) | block at centre-relative x, z (-16..31), storage y;
+    // above the world full sky, below it dark.
+    [[nodiscard]]
+    std::uint8_t getLight(int x, int y, int z) const noexcept;
+
 private:
     /*
      * 3x3 neighborhood:
@@ -159,6 +169,7 @@ private:
      * neighborhood queries easier.
      */
     std::array<const ChunkColumn*, 9> _columns{};
+    std::array<const ColumnLight*, 9> _lights{};
 
     [[nodiscard]]
     static constexpr int index(int dx, int dz) noexcept {

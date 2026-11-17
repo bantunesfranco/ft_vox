@@ -26,6 +26,7 @@ struct WorldUBO {
     glm::vec4 eye{0.0f};      // xyz = camera position
     glm::vec4 fog{0.0f};      // rgb = colour, w = distance it fades over (0 = off)
     glm::vec4 skyFog{0.0f};   // rgb = colour, w = view distance: hides the edge of the loaded world (0 = off)
+    glm::vec4 time{1.0f, 0.0f, 0.0f, 0.0f};   // x = daylight (1 noon .. ~0.2 midnight): scales sky light
 };
 
 
@@ -104,7 +105,7 @@ private:
     std::vector<std::pair<std::size_t, std::size_t>> _freeVertexRanges;
     std::vector<std::pair<std::size_t, std::size_t>> _freeIndexRanges;
 
-    static constexpr std::size_t INITIAL_VERTEX_BUFFER_SIZE = 64 * 1024 * 1024;
+    static constexpr std::size_t INITIAL_VERTEX_BUFFER_SIZE = 128 * 1024 * 1024;   // 8-byte vertices
 
     static constexpr std::size_t INITIAL_INDEX_BUFFER_SIZE = 64 * 1024 * 1024;
 

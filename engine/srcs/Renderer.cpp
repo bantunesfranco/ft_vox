@@ -1,5 +1,6 @@
 #define GLFW_INCLUDE_NONE
 
+#include <cstddef>
 #include "Engine.hpp"
 #include "Renderer.hpp"
 
@@ -220,18 +221,14 @@ void Renderer::createVertexLayout() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
 
     /*
-     * PackedVertex == uint32_t.
-     * The shader receives the complete 32-bit value and unpacks it.
+     * PackedVertex: two 32-bit words, unpacked by the shader (see Mesh.hpp).
      */
     glEnableVertexAttribArray(0);
-
-    glVertexAttribIPointer(
-        0,
-        1,
-        GL_UNSIGNED_INT,
-        sizeof(PackedVertex),
-        nullptr
-    );
+    glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+        reinterpret_cast<const void*>(offsetof(PackedVertex, a)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+        reinterpret_cast<const void*>(offsetof(PackedVertex, b)));
 
     // Chunk position, one per draw: divisor 1 + baseInstance = draw index.
     glBindBuffer(GL_ARRAY_BUFFER, _instanceBuffer);
@@ -630,7 +627,11 @@ void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPo
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _boundsIbo);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices.data(), GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), nullptr);
+        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+            reinterpret_cast<const void*>(offsetof(PackedVertex, a)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+            reinterpret_cast<const void*>(offsetof(PackedVertex, b)));
     }
 
     const glm::vec3 size = glm::max(maxPos - minPos, glm::vec3(0.01f));

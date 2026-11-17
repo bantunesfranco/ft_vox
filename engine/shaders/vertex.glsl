@@ -4,6 +4,8 @@ layout(location = 0) in uint aPackedVertex;
 // Per draw (instanced attribute, selected by baseInstance in multi-draw).
 // Draws without the array enabled read the value set by glVertexAttrib3f.
 layout(location = 1) in vec3 aChunkPosition;
+// Second word: sky light 4 bits, block light 4 bits, sub-block offset 3 x 5 bits.
+layout(location = 2) in uint aLight;
 
 layout(std140, binding = 0) uniform WorldUBO
 {
@@ -13,6 +15,7 @@ layout(std140, binding = 0) uniform WorldUBO
     vec4 eye;         // xyz = camera position
     vec4 fog;         // rgb = colour, w = distance (0 = off)
     vec4 skyFog;      // rgb = colour, w = view distance (0 = off)
+    vec4 time;        // x = daylight
 };
 
 uniform bool uHighlightPass;
@@ -23,6 +26,8 @@ out vec3 vNormal;
 out vec3 vWorldPos;
 out float vAO;
 flat out uint vTexIndex;
+out float vSky;     // 0..15, interpolated across the face (smooth light)
+out float vBlock;
 
 vec3 decodeNormal(uint normalIdx)
 {
@@ -54,7 +59,10 @@ void main()
     // 2 bits.
     uint ao = (data >> 28u) & 0x03u;
 
-    vec3 localPos = vec3(x, y, z);
+    vec3 localPos = vec3(x, y, z)
+        + vec3((aLight >> 8u) & 0x1Fu, (aLight >> 13u) & 0x1Fu, (aLight >> 18u) & 0x1Fu) / 16.0;
+    vSky = float(aLight & 0x0Fu);
+    vBlock = float((aLight >> 4u) & 0x0Fu);
     // Outline: scale the unit cube to the box, grown by 1% around its center
     // so it does not z-fight with the faces it surrounds.
     if (uHighlightPass)

@@ -1,4 +1,5 @@
 #include "Chunk.hpp"
+#include "Light.hpp"
 
 BlockId ChunkSection::get(int x, int y, int z) const noexcept {
     assert(x >= 0 && x < SIZE);
@@ -175,4 +176,23 @@ BlockId ChunkNeighborhood::getBlock(int x, int y, int z) const noexcept {
         return AIR_BLOCK;
 
     return column->getUnchecked(localX, y, localZ);
+}
+
+void ChunkNeighborhood::setLight(const int dx, const int dz, const ColumnLight* light) noexcept {
+    if (dx < -1 || dx > 1 || dz < -1 || dz > 1)
+        return;
+    _lights[static_cast<std::size_t>(index(dx, dz))] = light;
+}
+
+std::uint8_t ChunkNeighborhood::getLight(const int x, const int y, const int z) const noexcept {
+    if (y >= ChunkColumn::HEIGHT)
+        return ColumnLight::FULL_SKY;
+    if (y < 0)
+        return 0;
+    const int dx = x < 0 ? -1 : (x >= ChunkSection::SIZE ? 1 : 0);
+    const int dz = z < 0 ? -1 : (z >= ChunkSection::SIZE ? 1 : 0);
+    const ColumnLight* light = _lights[static_cast<std::size_t>(index(dx, dz))];
+    if (!light)
+        return ColumnLight::FULL_SKY;
+    return light->at(x - dx * ChunkSection::SIZE, y, z - dz * ChunkSection::SIZE);
 }
