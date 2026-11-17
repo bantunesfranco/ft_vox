@@ -7,6 +7,7 @@
 #include <unordered_set>
 
 #include "Chunk.hpp"
+#include "Light.hpp"
 #include "ChunkMesher.hpp"
 #include "ThreadPool.hpp"
 
@@ -81,6 +82,14 @@ public:
 
 	const BlockRegistry& getBlockRegistry() const noexcept;
 
+	// --- light ---------------------------------------------------------------
+	// A column's light, computed in the background once its 3x3 columns are
+	// loaded, recomputed after edits nearby (null until the first one lands).
+	[[nodiscard]] std::shared_ptr<const ColumnLight> lightOf(const ChunkCoord& coord) const;
+	// No light job running or waiting: every column with a full 3x3 has
+	// light matching its current blocks (tests).
+	[[nodiscard]] bool lightIdle() const;
+
 	[[nodiscard]]
 	const std::vector<ChunkRenderState>& getRenderStates() const noexcept;
 
@@ -145,9 +154,35 @@ private:
 		std::uint64_t epoch   = 0;
 		std::vector<ChunkRenderState> states;
 	};
-	std::mutex              resultMutex;
+	mutable std::mutex      resultMutex;
 	std::vector<MeshResult> meshResults;
 	std::vector<MeshResult> readyResults;        // drained, waiting for their frame budget
+
+	// Light: one ColumnLight per column, computed by a job from the column's
+	// 3x3 window (so it depends on nearby blocks only, never on load order).
+	// Under chunk_mutex.
+	struct LightStatus {
+		std::uint64_t version  = 0;      // bumped when the 3x3 blocks change
+		std::uint64_t ready    = 0;      // version the stored light was computed for
+		bool          inFlight = false;
+	};
+	std::unordered_map<ChunkCoord, std::shared_ptr<const ColumnLight>> lights;
+	std::unordered_map<ChunkCoord, LightStatus> lightStatus;
+	std::uint64_t lightVersionCounter = 0;
+	std::size_t   lightJobsInFlight   = 0;
+	struct LightResult {
+		ChunkCoord    coord;
+		std::uint64_t version = 0;
+		std::uint64_t epoch   = 0;
+		std::shared_ptr<const ColumnLight> light;     // null: failed, scheduled again
+	};
+	std::vector<LightResult> lightResults;          // worker -> main thread, under resultMutex
+
+	void applyLightResults();
+	void scheduleLightJobs(const glm::vec3& playerPosition, ThreadPool& threadPool);
+	// The blocks of `coord` changed: the light of every column whose window
+	// holds it (the 3x3 around it) is out of date. chunk_mutex held.
+	void invalidateLightLocked(const ChunkCoord& coord);
 
 	void applyMeshResults();
 	void scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& playerForward,

@@ -62,6 +62,137 @@ namespace
  * Accessors
  * ============================================================ */
 
+std::shared_ptr<const ColumnLight> World::lightOf(const ChunkCoord& coord) const {
+    std::lock_guard lock(chunk_mutex);
+    const auto it = lights.find(coord);
+    return it == lights.end() ? nullptr : it->second;
+}
+
+bool World::lightIdle() const {
+    std::lock_guard lock(chunk_mutex);
+    if (lightJobsInFlight > 0)
+        return false;
+    {
+        std::lock_guard results(resultMutex);
+        if (!lightResults.empty())
+            return false;
+    }
+    for (const auto& coord : chunks | std::views::keys) {
+        bool windowLoaded = true;
+        for (int dz = -1; dz <= 1 && windowLoaded; ++dz)
+            for (int dx = -1; dx <= 1 && windowLoaded; ++dx)
+                windowLoaded = chunks.contains({coord.x + dx, coord.z + dz});
+        if (!windowLoaded)
+            continue;
+        const auto status = lightStatus.find(coord);
+        if (status == lightStatus.end() || status->second.ready != status->second.version)
+            return false;
+    }
+    return true;
+}
+
+void World::invalidateLightLocked(const ChunkCoord& coord) {
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx) {
+            const auto it = lightStatus.find({coord.x + dx, coord.z + dz});
+            if (it != lightStatus.end())
+                it->second.version = ++lightVersionCounter;   // a job in flight is now stale
+        }
+}
+
+void World::applyLightResults() {
+    std::vector<LightResult> finished;
+    {
+        std::lock_guard results(resultMutex);
+        finished.swap(lightResults);
+    }
+    if (finished.empty())
+        return;
+    const std::uint64_t currentEpoch = epoch.load(std::memory_order_acquire);
+    std::lock_guard lock(chunk_mutex);
+    for (LightResult& result : finished) {
+        if (result.epoch != currentEpoch)
+            continue;                                   // from before clear()
+        if (lightJobsInFlight > 0)
+            --lightJobsInFlight;
+        const auto status = lightStatus.find(result.coord);
+        if (status == lightStatus.end())
+            continue;                                   // column unloaded meanwhile
+        status->second.inFlight = false;
+        if (!result.light || status->second.version != result.version || !chunks.contains(result.coord))
+            continue;                                   // blocks changed meanwhile: a new job follows
+        lights[result.coord] = std::move(result.light);
+        status->second.ready = result.version;
+        // Its faces and its neighbours' border faces show this light.
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+                invalidateMeshLocked({result.coord.x + dx, result.coord.z + dz});
+    }
+}
+
+void World::scheduleLightJobs(const glm::vec3& playerPosition, ThreadPool& threadPool) {
+    const std::size_t maxInFlight = std::max<std::size_t>(2, threadPool.getWorkerCount() * 2);
+    if (lightJobsInFlight >= maxInFlight)
+        return;
+
+    struct Candidate {
+        ChunkCoord coord;
+        float distance;
+    };
+    std::vector<Candidate> candidates;
+    std::lock_guard lock(chunk_mutex);
+    for (const auto& coord : chunks | std::views::keys) {
+        auto [statusIt, inserted] = lightStatus.try_emplace(coord);
+        LightStatus& status = statusIt->second;
+        if (inserted)
+            status.version = ++lightVersionCounter;
+        if (status.inFlight || status.ready == status.version)
+            continue;
+        bool windowLoaded = true;
+        for (int dz = -1; dz <= 1 && windowLoaded; ++dz)
+            for (int dx = -1; dx <= 1 && windowLoaded; ++dx)
+                windowLoaded = chunks.contains({coord.x + dx, coord.z + dz});
+        if (!windowLoaded)
+            continue;
+        const float cx = (static_cast<float>(coord.x) + 0.5f) * static_cast<float>(ChunkSection::SIZE) - playerPosition.x;
+        const float cz = (static_cast<float>(coord.z) + 0.5f) * static_cast<float>(ChunkSection::SIZE) - playerPosition.z;
+        candidates.push_back({coord, cx * cx + cz * cz});
+    }
+
+    const std::size_t slots = std::min(candidates.size(), maxInFlight - lightJobsInFlight);
+    std::ranges::partial_sort(candidates, candidates.begin() + static_cast<std::ptrdiff_t>(slots),
+        [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+
+    const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < slots; ++i) {
+        const ChunkCoord coord = candidates[i].coord;
+        LightStatus& status = lightStatus[coord];
+        // The job's own references: these columns stay alive and unchanged
+        // while it runs (writers copy a shared column first, see setBlockAt).
+        std::array<ColumnPtr, 9> window{};
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+                window[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))] = chunks.at({coord.x + dx, coord.z + dz});
+        status.inFlight = true;
+        ++lightJobsInFlight;
+        const std::uint64_t version = status.version;
+        threadPool.enqueueFireAndForget([this, coord, version, jobEpoch, window] {
+            Trace::Scope span("light column");
+            LightResult result{coord, version, jobEpoch, nullptr};
+            try {
+                ColumnWindow columns{};
+                for (std::size_t c = 0; c < columns.size(); ++c)
+                    columns[c] = window[c].get();
+                result.light = computeLight(columns, blockRegistry);
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to light chunk " << coord.x << ", " << coord.z << ": " << e.what() << std::endl;
+            }
+            std::lock_guard results(resultMutex);
+            lightResults.push_back(std::move(result));
+        });
+    }
+}
+
 const BlockRegistry& World::getBlockRegistry() const noexcept {
     return blockRegistry;
 }
@@ -89,6 +220,12 @@ std::vector<GpuMesh> World::pruneRenderStates() {
         return true;
     });
     std::erase_if(meshStatus, [this](const auto& entry) { return !chunks.contains(entry.first); });
+    std::erase_if(lights, [this](const auto& entry) { return !chunks.contains(entry.first); });
+    // A status whose job is running stays until the result comes back (it
+    // keeps lightJobsInFlight balanced); an unloaded idle one goes.
+    std::erase_if(lightStatus, [this](const auto& entry) {
+        return !chunks.contains(entry.first) && !entry.second.inFlight;
+    });
 
     return retiredMeshes;
 }
@@ -177,6 +314,7 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
     }
 
     dirty.insert({chunkX, chunkZ});
+    invalidateLightLocked({chunkX, chunkZ});
 
     return true;
 }
@@ -211,6 +349,13 @@ void World::clear() {
     }
     generatingChunks.clear();
     chunks.clear();
+    lights.clear();
+    lightStatus.clear();
+    lightJobsInFlight = 0;             // their results carry the old epoch
+    {
+        std::lock_guard results(resultMutex);
+        lightResults.clear();
+    }
     dirty.clear();
     playerChunk = {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
 }
@@ -228,11 +373,14 @@ void World::adoptColumn(std::unique_ptr<ChunkColumn> column) {
     for (int dz = -1; dz <= 1; ++dz)
         for (int dx = -1; dx <= 1; ++dx)
             invalidateMeshLocked({coord.x + dx, coord.z + dz});
+    invalidateLightLocked(coord);
 }
 
 void World::dropColumn(const ChunkCoord& coord) {
     std::lock_guard lock(chunk_mutex);
     chunks.erase(coord);                             // pruneRenderStates() retires its meshes
+    lights.erase(coord);
+    lightStatus.erase(coord);
     dirty.erase(coord);
 }
 
@@ -458,6 +606,7 @@ void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
                          */
                         chunks[coord] = std::move(column);
                         generatingChunks.erase(coord);
+                        invalidateLightLocked(coord);   // neighbours' windows changed
                         if (generated)
                             dirty.insert(coord);
                     }
@@ -596,6 +745,8 @@ namespace
 
 void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward,
                               ThreadPool& threadPool) {
+    applyLightResults();
+    scheduleLightJobs(playerPosition, threadPool);
     applyMeshResults();
     scheduleMeshJobs(playerPosition, playerForward, threadPool);
 }
@@ -678,11 +829,12 @@ void World::scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& p
         if (status.meshed || status.inFlight)
             continue;
 
-        // The whole 3x3 neighbourhood must exist, or border faces are wrong.
+        // The whole 3x3 neighbourhood must exist, with light, or border faces are wrong.
         bool neighborsReady = true;
         for (int dz = -1; dz <= 1 && neighborsReady; ++dz)
             for (int dx = -1; dx <= 1 && neighborsReady; ++dx)
-                neighborsReady = chunks.contains({coord.x + dx, coord.z + dz});
+                neighborsReady = chunks.contains({coord.x + dx, coord.z + dz})
+                              && lights.contains({coord.x + dx, coord.z + dz});
         if (!neighborsReady)
             continue;
 
@@ -717,22 +869,28 @@ void World::scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& p
         // The job's own references: these columns stay alive (and unchanged,
         // see setBlockAt) while it runs, whatever the main thread does.
         std::array<ColumnPtr, 9> neighbors{};
+        std::array<std::shared_ptr<const ColumnLight>, 9> neighborLights{};
         for (int dz = -1; dz <= 1; ++dz)
-            for (int dx = -1; dx <= 1; ++dx)
-                neighbors[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))] = chunks.at({coord.x + dx, coord.z + dz});
+            for (int dx = -1; dx <= 1; ++dx) {
+                const auto n = static_cast<std::size_t>((dz + 1) * 3 + (dx + 1));
+                neighbors[n] = chunks.at({coord.x + dx, coord.z + dz});
+                neighborLights[n] = lights.at({coord.x + dx, coord.z + dz});
+            }
 
         status.inFlight = true;
         ++meshJobsInFlight;
         const std::uint64_t version = status.version;
-        threadPool.enqueueFireAndForget([this, coord, version, jobEpoch, neighbors] {
+        threadPool.enqueueFireAndForget([this, coord, version, jobEpoch, neighbors, neighborLights] {
             Trace::Scope span("mesh column");
             MeshResult result{coord, 0, jobEpoch, {}};
             try {
                 ChunkNeighborhood neighborhood(neighbors[4].get());
                 for (int dz = -1; dz <= 1; ++dz)
-                    for (int dx = -1; dx <= 1; ++dx)
-                        neighborhood.setNeighbor(dx, dz,
-                            neighbors[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))].get());
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const auto n = static_cast<std::size_t>((dz + 1) * 3 + (dx + 1));
+                        neighborhood.setNeighbor(dx, dz, neighbors[n].get());
+                        neighborhood.setLight(dx, dz, neighborLights[n].get());
+                    }
                 result.states = meshColumn(*neighbors[4], neighborhood, blockRegistry);
                 result.version = version;
             } catch (const std::exception& e) {
