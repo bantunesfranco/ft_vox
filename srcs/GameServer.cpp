@@ -30,10 +30,6 @@ int chebyshev(const ChunkCoord& a, const ChunkCoord& b) noexcept {
 	return std::max(std::abs(a.x - b.x), std::abs(a.z - b.z));
 }
 
-bool finite(const glm::vec3& v) noexcept {
-	return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-
 bool validName(const std::string& name) {
 	return !name.empty() && name.size() <= proto::MAX_NAME_BYTES
 	    && std::ranges::all_of(name, [](const char c) { return c >= 0x20 && c < 0x7F; });
@@ -180,7 +176,7 @@ std::optional<net::DisconnectReason> GameServer::onLogin(const net::ConnId id, c
 	if (auto record = loadPlayer(playerFile(_world.folder, name))) {
 		p.savedEye  = record->eye;
 		p.yaw       = record->yaw;
-		p.pitch     = std::clamp(record->pitch, -90.0f, 90.0f);
+		p.pitch     = record->pitch;               // loadPlayer clamps it
 		p.inventory = record->inventory;
 	}
 	log("%s joined (player %u%s)", name.c_str(), static_cast<unsigned>(id), p.savedEye ? "" : ", new");
@@ -239,10 +235,7 @@ void GameServer::onPlayerMove(Player& p, net::ByteReader& body) {
 	const float pitch = body.readF32();
 	if (!body.ok())
 		return;                                        // the transport kicks
-	if (!body.atEnd() || !finite(pos) || !std::isfinite(yaw) || !std::isfinite(pitch)
-	    || std::abs(pos.x) > 3.0e7f || std::abs(pos.z) > 3.0e7f
-	    || pos.y < static_cast<float>(ChunkColumn::MIN_WORLD_Y - 512)
-	    || pos.y > static_cast<float>(ChunkColumn::MAX_WORLD_Y + 512)) {
+	if (!body.atEnd() || !PlayerCollision::plausibleEye(pos) || !std::isfinite(yaw) || !std::isfinite(pitch)) {
 		violation(p, "bad PlayerMove");
 		return;
 	}
@@ -423,9 +416,7 @@ std::optional<glm::vec3> GameServer::spawnEyeFor(const Player& p) {
 
 	// Every column the player's box touches, so it is not wedged at a chunk edge.
 	const glm::vec3 eye = *p.savedEye;
-	constexpr float hw = PlayerCollision::HALF_WIDTH;
-	const ChunkCoord lo = chunkOf(eye - glm::vec3(hw, 0.0f, hw));
-	const ChunkCoord hi = chunkOf(eye + glm::vec3(hw, 0.0f, hw));
+	const auto [lo, hi] = PlayerCollision::columnsUnderBox(eye);
 	bool ready = true;
 	for (int cz = lo.z; cz <= hi.z; ++cz) {
 		for (int cx = lo.x; cx <= hi.x; ++cx) {

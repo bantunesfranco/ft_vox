@@ -22,6 +22,14 @@ std::string goodBytes(const fs::path& dir) {
 	return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
+// Overwrites the little-endian float at `offset`.
+std::string withFloat(std::string bytes, const std::size_t offset, const float value) {
+	const auto bits = std::bit_cast<std::uint32_t>(value);
+	for (std::size_t i = 0; i < 4; ++i)
+		bytes[offset + i] = static_cast<char>((bits >> (8 * i)) & 0xFF);
+	return bytes;
+}
+
 std::optional<PlayerRecord> loadBytes(const fs::path& dir, const std::string& bytes) {
 	const fs::path file = dir / "damaged.bin";
 	{
@@ -98,19 +106,43 @@ SELFTEST(PlayerStore, damaged_files_are_new_players) {
 	CHECK(!loadBytes(dir.path(), good.substr(0, good.size() - 1)).has_value());
 	CHECK(!loadBytes(dir.path(), good + '\0').has_value());
 
-	damaged = good;                                       // x = NaN (quiet NaN bit pattern, little-endian)
-	const auto nan = std::bit_cast<std::uint32_t>(std::numeric_limits<float>::quiet_NaN());
-	for (int i = 0; i < 4; ++i)
-		damaged[8 + static_cast<std::size_t>(i)] = static_cast<char>((nan >> (8 * i)) & 0xFF);
-	CHECK(!loadBytes(dir.path(), damaged).has_value());
-
-	damaged = good;                                       // yaw = +Inf (the 4th float, at offset 20)
-	const auto inf = std::bit_cast<std::uint32_t>(std::numeric_limits<float>::infinity());
-	for (int i = 0; i < 4; ++i)
-		damaged[20 + static_cast<std::size_t>(i)] = static_cast<char>((inf >> (8 * i)) & 0xFF);
-	CHECK(!loadBytes(dir.path(), damaged).has_value());
+	// Floats: x at offset 8, y 12, z 16, yaw 20, pitch 24.
+	CHECK(!loadBytes(dir.path(), withFloat(good, 8, std::numeric_limits<float>::quiet_NaN())).has_value());
+	CHECK(!loadBytes(dir.path(), withFloat(good, 20, std::numeric_limits<float>::infinity())).has_value());
+	CHECK(!loadBytes(dir.path(), withFloat(good, 8, 1.0e30f)).has_value());      // finite, but far outside the world
+	CHECK(!loadBytes(dir.path(), withFloat(good, 12, -1.0e6f)).has_value());     // far below it
 
 	damaged = good;                                       // inventory byte 0 is "selected"
 	damaged[4 + 4 + 5 * 4] = 9;
 	CHECK(!loadBytes(dir.path(), damaged).has_value());
+}
+
+SELFTEST(PlayerStore, pitch_is_clamped) {
+	const selftest::TempDir dir;
+	const std::optional<PlayerRecord> loaded = loadBytes(dir.path(), withFloat(goodBytes(dir.path()), 24, 120.0f));
+	CHECK(loaded.has_value());
+	if (loaded)
+		CHECK(loaded->pitch == 90.0f);
+}
+
+SELFTEST(PlayerStore, damaged_file_is_kept_aside) {
+	const selftest::TempDir dir;
+	const fs::path file = dir.path() / "damaged.bin";
+	const fs::path bad  = dir.path() / "damaged.bin.bad";
+
+	CHECK(!loadBytes(dir.path(), "first").has_value());
+	CHECK(!fs::exists(file));                             // the next save cannot overwrite it...
+	CHECK(fs::exists(bad));                               // ...because it is here now
+
+	CHECK(!loadBytes(dir.path(), "second").has_value());  // a newer damaged file replaces the old .bad
+	CHECK(!fs::exists(file));
+	std::ifstream in(bad, std::ios::binary);
+	const std::string kept((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	CHECK(kept == "second");
+
+	CHECK(!loadPlayer(dir.path() / "missing.bin").has_value());
+	CHECK(!fs::exists(dir.path() / "missing.bin.bad"));   // a missing file is just a new player
+
+	CHECK(loadBytes(dir.path(), goodBytes(dir.path())).has_value());
+	CHECK(fs::exists(file));                              // a good file stays where it is
 }

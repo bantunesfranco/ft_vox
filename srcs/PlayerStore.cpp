@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "LittleEndian.hpp"
+#include "PlayerCollision.hpp"
 
 namespace fs = std::filesystem;
 
@@ -32,8 +33,18 @@ bool getFloat(const std::string& in, std::size_t& pos, float& value) {
 	return true;
 }
 
-void logDamaged(const fs::path& file, const char* reason) {
-	std::cerr << "player file " << file.string() << " ignored: " << reason << '\n';
+// Renames a damaged file to <file>.bad (replacing an older one), so the next
+// save cannot overwrite the only copy.
+void keepAside(const fs::path& file, const char* reason) {
+	fs::path bad = file;
+	bad += ".bad";
+	std::error_code ec;
+	fs::rename(file, bad, ec);
+	std::cerr << "player file " << file.string() << " ignored (" << reason << "): ";
+	if (ec)
+		std::cerr << "could not keep it as " << bad.string() << ": " << ec.message() << '\n';
+	else
+		std::cerr << "kept as " << bad.string() << '\n';
 }
 
 } // namespace
@@ -95,50 +106,64 @@ bool savePlayer(const fs::path& file, PlayerRecord record, std::string& error) {
 	return true;
 }
 
-std::optional<PlayerRecord> loadPlayer(const fs::path& file) {
-	std::ifstream in(file, std::ios::binary);
-	if (!in) {
-		std::error_code ec;
-		if (fs::exists(file, ec))
-			logDamaged(file, "cannot be opened");         // there but unreadable (e.g. locked); missing stays silent
-		return std::nullopt;
-	}
-	const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+namespace {
 
+// The record in a player file's bytes, or nullopt and why not.
+std::optional<PlayerRecord> parsePlayer(const std::string& data, const char*& reason) {
 	if (data.size() < PLAYER_MAGIC.size() || !std::equal(PLAYER_MAGIC.begin(), PLAYER_MAGIC.end(), data.begin())) {
-		logDamaged(file, "bad magic");
+		reason = "bad magic";
 		return std::nullopt;
 	}
 	std::size_t pos = PLAYER_MAGIC.size();
 	std::uint32_t version = 0;
 	if (!le::get(data, pos, version) || version != PLAYER_VERSION) {
-		logDamaged(file, "unknown version");
+		reason = "unknown version";
 		return std::nullopt;
 	}
 
 	PlayerRecord record;
 	if (!getFloat(data, pos, record.eye.x) || !getFloat(data, pos, record.eye.y) || !getFloat(data, pos, record.eye.z)
 	    || !getFloat(data, pos, record.yaw) || !getFloat(data, pos, record.pitch)) {
-		logDamaged(file, "truncated");
+		reason = "truncated";
 		return std::nullopt;
 	}
-	if (!std::isfinite(record.eye.x) || !std::isfinite(record.eye.y) || !std::isfinite(record.eye.z)
-	    || !std::isfinite(record.yaw) || !std::isfinite(record.pitch)) {
-		logDamaged(file, "non-finite position or look");
+	if (!PlayerCollision::plausibleEye(record.eye) || !std::isfinite(record.yaw) || !std::isfinite(record.pitch)) {
+		reason = "position outside the world or non-finite look";
 		return std::nullopt;
 	}
+	record.pitch = std::clamp(record.pitch, -90.0f, 90.0f);
 
 	const std::size_t rest = data.size() - pos;
 	if (rest != Inventory::ENCODED_SIZE) {
-		logDamaged(file, rest < Inventory::ENCODED_SIZE ? "truncated" : "trailing bytes");
+		reason = rest < Inventory::ENCODED_SIZE ? "truncated" : "trailing bytes";
 		return std::nullopt;
 	}
 	const auto* bytes = reinterpret_cast<const std::uint8_t*>(data.data()) + pos;
 	std::optional<Inventory> inventory = decodeInventory(std::span<const std::uint8_t>(bytes, rest));
 	if (!inventory) {
-		logDamaged(file, "invalid inventory");
+		reason = "invalid inventory";
 		return std::nullopt;
 	}
 	record.inventory = *inventory;
 	return record;
+}
+
+} // namespace
+
+std::optional<PlayerRecord> loadPlayer(const fs::path& file) {
+	std::error_code ec;
+	if (!fs::exists(file, ec))
+		return std::nullopt;                              // a new player, silently
+
+	const char* reason = "cannot be opened";              // e.g. locked
+	{
+		std::ifstream in(file, std::ios::binary);         // closed before the rename below
+		if (in) {
+			const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			if (std::optional<PlayerRecord> record = parsePlayer(data, reason))
+				return record;
+		}
+	}
+	keepAside(file, reason);
+	return std::nullopt;
 }
