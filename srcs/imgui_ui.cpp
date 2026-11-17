@@ -62,21 +62,33 @@ ImTextureID textureId(const uintptr_t texture) {
 }
 
 void addAtlasImage(ImDrawList* drawList, const GLuint texture, const AtlasRect rect,
-    const float atlasSize, const ImVec2 min, const ImVec2 max) {
+    const float atlasSize, const ImVec2 min, const ImVec2 max, const ImU32 tint = IM_COL32_WHITE) {
     const ImVec2 uv0(rect.x / atlasSize, rect.y / atlasSize);
     const ImVec2 uv1((rect.x + rect.width) / atlasSize, (rect.y + rect.height) / atlasSize);
-    drawList->AddImage(textureId(texture), min, max, uv0, uv1);
+    drawList->AddImage(textureId(texture), min, max, uv0, uv1, tint);
+}
+
+// The item's block texture (grass: its top), where its picture is in the atlas.
+std::uint16_t itemTexture(const ItemId item) {
+    static const BlockRegistry registry;
+    const BlockDefinition& block = registry.get(ItemRegistry::get(item).placedBlock);
+    return item == ItemId::GrassBlock ? block.textureTop : block.textureSide;
 }
 
 AtlasRect itemIcon(const ItemId item) {
     if (item == ItemId::Empty)
         return {};
-    // The block's top texture for grass (its icon), its side texture otherwise.
-    static const BlockRegistry registry;
-    const BlockDefinition& block = registry.get(ItemRegistry::get(item).placedBlock);
-    const std::uint16_t texture = item == ItemId::GrassBlock ? block.textureTop : block.textureSide;
-    const BlockTextures::Sprite& sprite = BlockTextures::sprite(texture);
-    return {static_cast<float>(sprite.x), static_cast<float>(sprite.y), 16.0f, 16.0f};
+    const BlockTextures::PixelRect px = BlockTextures::pixels(itemTexture(item));
+    return {static_cast<float>(px.x), static_cast<float>(px.y), static_cast<float>(px.w), static_cast<float>(px.h)};
+}
+
+// Grey sprites tinted the way the world tints them (the grass top).
+ImU32 itemTint(const ItemId item) {
+    if (item == ItemId::Empty || itemTexture(item) != 0)
+        return IM_COL32_WHITE;
+    const auto channel = [](const float v) { return static_cast<int>(v * 255.0f); };
+    return IM_COL32(channel(BlockTextures::GRASS_TINT[0]), channel(BlockTextures::GRASS_TINT[1]),
+                    channel(BlockTextures::GRASS_TINT[2]), 255);
 }
 
 void drawStack(const UiItemStack& stack, const ImVec2 min, const float slotSize,
@@ -87,7 +99,7 @@ void drawStack(const UiItemStack& stack, const ImVec2 min, const float slotSize,
     const float inset = (slotSize - itemSize) * 0.5f;
     const ImVec2 itemMin(min.x + inset, min.y + inset);
     const ImVec2 itemMax(itemMin.x + itemSize, itemMin.y + itemSize);
-    addAtlasImage(drawList, blockAtlas, itemIcon(stack.item), 2048.0f, itemMin, itemMax);
+    addAtlasImage(drawList, blockAtlas, itemIcon(stack.item), 2048.0f, itemMin, itemMax, itemTint(stack.item));
     if (stack.count > 1) {
         char countText[8];
         std::snprintf(countText, sizeof(countText), "%u", static_cast<unsigned>(stack.count));
@@ -554,7 +566,7 @@ void renderInventory(const GLuint guiAtlas, const GLuint blockAtlas,
         const ImVec2 iconMin(mouse.x + inset, mouse.y + inset);
         const AtlasRect icon = itemIcon(model.cursorStack.item);
         addAtlasImage(foreground, blockAtlas, icon, 2048.0f, iconMin,
-            ImVec2(mouse.x + 34.0f - inset, mouse.y + 34.0f - inset));
+            ImVec2(mouse.x + 34.0f - inset, mouse.y + 34.0f - inset), itemTint(model.cursorStack.item));
         if (model.cursorStack.count > 1) {
             char countText[8];
             std::snprintf(countText, sizeof(countText), "%u", static_cast<unsigned>(model.cursorStack.count));

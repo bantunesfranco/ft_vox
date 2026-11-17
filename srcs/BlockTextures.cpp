@@ -50,4 +50,9 @@ const Sprite& sprite(const std::uint16_t textureIndex) noexcept {
 	return SPRITES[textureIndex < TEXTURE_COUNT ? textureIndex : 0];
 }
 
+PixelRect pixels(const std::uint16_t textureIndex) noexcept {
+	const Sprite& s = sprite(textureIndex);
+	return {s.x + PADDING, s.y + PADDING, 16, 16};
+}
+
 } // namespace BlockTextures

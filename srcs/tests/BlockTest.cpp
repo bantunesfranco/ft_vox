@@ -137,3 +137,16 @@ SELFTEST(Blocks, torch_needs_solid_ground) {
 		CHECK(!placementAllowed(r, torch, toBlockId(below)));
 	CHECK(placementAllowed(r, toBlockId(BlockType::Stone), AIR_BLOCK));
 }
+
+SELFTEST(Blocks, sprite_pixels_inside_cells) {
+	// The 16 x 16 picture sits 16 px into its 48 x 48 atlas cell (the rest is
+	// padding): icons and the world must read it there, not at the cell origin.
+	for (std::uint16_t i = 0; i < BlockTextures::TEXTURE_COUNT; ++i) {
+		const BlockTextures::Sprite& cell = BlockTextures::sprite(i);
+		const BlockTextures::PixelRect px = BlockTextures::pixels(i);
+		CHECK_EQ(px.x, cell.x + 16);
+		CHECK_EQ(px.y, cell.y + 16);
+		CHECK(px.w == 16 && px.h == 16);
+		CHECK(px.x + px.w <= cell.x + BlockTextures::CELL && px.y + px.h <= cell.y + BlockTextures::CELL);
+	}
+}

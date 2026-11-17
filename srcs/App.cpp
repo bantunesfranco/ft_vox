@@ -872,23 +872,17 @@ void App::loadTextures() {
 		glTextureParameteri(textureAtlas, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		constexpr float atlasSize = 2048.0f;
-		const auto spriteRect = [atlasSize](const int x, const int y) {
-			const float glY = static_cast<float>(y) + 16.0f;
-
-			return glm::vec4(
-				(static_cast<float>(x) + 15.0f) / atlasSize,
-				(glY + 0.5f) / atlasSize,
-				16.0f / atlasSize,
-				16.0f / atlasSize
-			);
+		const auto spriteRect = [atlasSize](const BlockTextures::PixelRect px) {
+			return glm::vec4(static_cast<float>(px.x) / atlasSize, static_cast<float>(px.y) / atlasSize,
+			                 static_cast<float>(px.w) / atlasSize, static_cast<float>(px.h) / atlasSize);
 		};
 
 		std::array<glm::vec4, 64> atlasRects{};
-		atlasRects.fill(spriteRect(0, 0));
+		atlasRects.fill(spriteRect(BlockTextures::pixels(0)));
 		std::vector<std::uint8_t> cell(BlockTextures::CELL * BlockTextures::CELL * 4);
 		for (std::uint16_t i = 0; i < BlockTextures::TEXTURE_COUNT; ++i) {
 			const BlockTextures::Sprite& sprite = BlockTextures::sprite(i);
-			atlasRects[i] = spriteRect(sprite.x, sprite.y);
+			atlasRects[i] = spriteRect(BlockTextures::pixels(i));
 			if (sprite.tint == BlockTextures::NO_TINT)
 				continue;
 			// Grey sprites (leaves): multiply the whole cell by the tint, once.

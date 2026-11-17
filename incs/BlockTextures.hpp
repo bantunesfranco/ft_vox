@@ -47,6 +47,16 @@ struct Sprite {
 // Texture index 0 .. TEXTURE_COUNT - 1.
 [[nodiscard]] const Sprite& sprite(std::uint16_t textureIndex) noexcept;
 
+// Where the 16 x 16 picture itself is in the atlas image: PADDING pixels into
+// its cell (the rest of the cell repeats its edges). Icons and the world
+// both read it from here.
+constexpr int PADDING = 16;
+struct PixelRect { int x; int y; int w; int h; };
+[[nodiscard]] PixelRect pixels(std::uint16_t textureIndex) noexcept;
+
+// The grass top is grey in the atlas; this is the green it is drawn with.
+constexpr float GRASS_TINT[3] = {0.65f, 0.99f, 0.45f};
+
 } // namespace BlockTextures
 
 #endif /* BLOCK_TEXTURES_HPP */
