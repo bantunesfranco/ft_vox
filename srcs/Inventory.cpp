@@ -2,6 +2,15 @@
 
 #include <algorithm>
 
+Inventory Inventory::fromState(const std::array<ItemStack, SLOT_COUNT>& slots, const ItemStack cursor,
+	const std::uint16_t selected) noexcept {
+	Inventory inventory;
+	inventory._slots = slots;
+	inventory._cursor = cursor;
+	inventory._selectedSlot = selected;
+	return inventory;
+}
+
 Inventory::Inventory() noexcept {
 	_slots[0] = {ItemId::AmethystBlock, 64};
 	_slots[1] = {ItemId::Torch, 64};          // no crafting: light comes with the player
@@ -146,4 +155,86 @@ void Inventory::returnCursorStack() noexcept {
 	const ItemStack held = _cursor;
 	if (add(held.item, held.count))
 		_cursor = {};
+}
+
+bool applyAction(Inventory& inventory, const InventoryAction& action) noexcept {
+	switch (action.kind) {
+		case InventoryAction::Kind::Select:
+			if (action.slot >= Inventory::HOTBAR_SIZE)
+				return false;
+			inventory.selectHotbarSlot(action.slot);
+			return true;
+		case InventoryAction::Kind::Click:
+			if (action.slot >= Inventory::SLOT_COUNT)
+				return false;
+			inventory.clickSlot(action.slot, action.secondary);
+			return true;
+		case InventoryAction::Kind::Close:
+			inventory.returnCursorStack();
+			return true;
+	}
+	return false;
+}
+
+namespace {
+
+void putU16(std::vector<std::uint8_t>& out, const std::uint16_t value) {
+	out.push_back(static_cast<std::uint8_t>(value & 0xFF));
+	out.push_back(static_cast<std::uint8_t>(value >> 8));
+}
+
+void putStack(std::vector<std::uint8_t>& out, const ItemStack& stack) {
+	putU16(out, static_cast<std::uint16_t>(stack.item));
+	putU16(out, stack.count);
+}
+
+std::uint16_t getU16(const std::uint8_t* at) noexcept {
+	return static_cast<std::uint16_t>(at[0] | (at[1] << 8));
+}
+
+// A stack that obeys the item rules: empty is {Empty, 0}, anything else is 1..maxStack.
+bool readStack(const std::uint8_t* at, ItemStack& stack) noexcept {
+	const std::uint16_t item = getU16(at);
+	const std::uint16_t count = getU16(at + 2);
+	if (item >= static_cast<std::uint16_t>(ItemId::Count))
+		return false;
+	const ItemId id = static_cast<ItemId>(item);
+	if (id == ItemId::Empty) {
+		if (count != 0)
+			return false;
+	} else if (count == 0 || count > ItemRegistry::get(id).maxStack) {
+		return false;
+	}
+	stack = {id, count};
+	return true;
+}
+
+} // namespace
+
+void encodeInventory(const Inventory& inventory, std::vector<std::uint8_t>& out) {
+	out.reserve(out.size() + Inventory::ENCODED_SIZE);
+	out.push_back(static_cast<std::uint8_t>(inventory.selectedSlot()));
+	for (const ItemStack& stack : inventory.slots())
+		putStack(out, stack);
+	putStack(out, inventory.cursorStack());
+}
+
+std::optional<Inventory> decodeInventory(const std::span<const std::uint8_t> bytes) {
+	if (bytes.size() != Inventory::ENCODED_SIZE)
+		return std::nullopt;
+	const std::uint8_t selected = bytes[0];
+	if (selected >= Inventory::HOTBAR_SIZE)
+		return std::nullopt;
+
+	std::array<ItemStack, Inventory::SLOT_COUNT> slots{};
+	const std::uint8_t* at = bytes.data() + 1;
+	for (ItemStack& slot : slots) {
+		if (!readStack(at, slot))
+			return std::nullopt;
+		at += 4;
+	}
+	ItemStack cursor;
+	if (!readStack(at, cursor))
+		return std::nullopt;
+	return Inventory::fromState(slots, cursor, selected);
 }
