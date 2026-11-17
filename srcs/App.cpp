@@ -381,7 +381,7 @@ void App::run() {
 			// re-declared here: shadowing it would hide the member that
 			// updatePlayerMovement(), renderWorld() and the raycasts use.
 			if (session) {
-				session->update(camera->pos, FPSCounter::getDeltaTime());   // was: world.updateChunks(...)
+				session->update(camera->pos, FPSCounter::getDeltaTime());
 				applySessionEvents();
 			}
 
@@ -393,7 +393,7 @@ void App::run() {
 			if (simulate) {
 				if (const auto serverTime = session->pollTimeOfDay())
 					timeTicks = *serverTime;                                 // the server's clock wins
-				if (const auto spawn = session->pollSpawn()) {              // was: the getSurfaceHeight block
+				if (const auto spawn = session->pollSpawn()) {
 					camera->pos = *spawn;
 					spawnInitialized = true;
 					grounded = true;
@@ -447,8 +447,8 @@ void App::run() {
 			profiler.mark(FrameProfiler::Draw);
 		}
 
-		// Field-by-field, as before: designated initializers require the exact
-		// declaration order of UiFrameModel, and the old line ended in a comma.
+		// Field-by-field: designated initializers would require the exact
+		// declaration order of UiFrameModel.
 		UiFrameModel uiModel;
 		uiModel.state = gameState.currentState;
 		uiModel.selectedHotbarSlot = inventory.selectedSlot();
@@ -515,7 +515,7 @@ void App::run() {
 	}
 
 	endSession();             // the session borrows the pool: destroy it first
-	threadPool.reset();       // joins the workers (same moment the old local pool was destroyed)
+	threadPool.reset();       // joins the workers
 }
 
 void App::destroyBlock() {
