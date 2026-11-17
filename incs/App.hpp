@@ -96,7 +96,7 @@ class App : public Engine
 		bool grounded = false;
 		bool spawnInitialized = false;
 		bool jumpRequested = false;
-		float verticalVelocity = 0.0f;
+		glm::vec3 velocity{0.0f};          // walking physics (PlayerPhysics), unused when flying
 		std::array<float, 4> clearColor{0.075f, 0.33f, 0.61f, 1.0f};
 		bool hasHighlightedBlock = false;
 		glm::ivec3 highlightedBlockPos{};

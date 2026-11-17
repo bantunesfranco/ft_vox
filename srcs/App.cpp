@@ -17,6 +17,7 @@
 #include "ImGuiUI.hpp"
 #include "BlockTextures.hpp"
 #include "Protocol.hpp"
+#include "PlayerPhysics.hpp"
 #include "RemoteSession.hpp"
 
 #include <charconv>
@@ -25,32 +26,16 @@
 #include "stb_image_write.h"
 
 namespace {
-constexpr float GRAVITY = 24.0f;
-constexpr float JUMP_SPEED = 8.5f;
-
 bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
-	const int minX = static_cast<int>(std::floor(eyePosition.x - PlayerCollision::HALF_WIDTH + PlayerCollision::EPSILON));
-	const int maxX = static_cast<int>(std::floor(eyePosition.x + PlayerCollision::HALF_WIDTH - PlayerCollision::EPSILON));
-	const int minY = static_cast<int>(std::floor(eyePosition.y - PlayerCollision::EYE_HEIGHT + PlayerCollision::EPSILON));
-	const int maxY = static_cast<int>(std::floor(eyePosition.y + PlayerCollision::HEIGHT - PlayerCollision::EYE_HEIGHT - PlayerCollision::EPSILON));
-	const int minZ = static_cast<int>(std::floor(eyePosition.z - PlayerCollision::HALF_WIDTH + PlayerCollision::EPSILON));
-	const int maxZ = static_cast<int>(std::floor(eyePosition.z + PlayerCollision::HALF_WIDTH - PlayerCollision::EPSILON));
-
-	for (int y = minY; y <= maxY; ++y) {
-		if (y < ChunkColumn::MIN_WORLD_Y)
+	// Below the world is solid, above it empty; unloaded blocks count as solid.
+	return PlayerPhysics::boxHitsBlocks(eyePosition, [&world](const glm::ivec3& p) {
+		if (p.y < ChunkColumn::MIN_WORLD_Y)
 			return true;
-		if (y >= ChunkColumn::MAX_WORLD_Y)
-			continue;
-		for (int z = minZ; z <= maxZ; ++z) {
-			for (int x = minX; x <= maxX; ++x) {
-				BlockId block = AIR_BLOCK;
-				if (!world.getBlockAt({x, y, z}, block) || world.getBlockRegistry().get(block).solid)
-					return true;
-			}
-		}
-	}
-
-	return false;
+		if (p.y >= ChunkColumn::MAX_WORLD_Y)
+			return false;
+		BlockId block = AIR_BLOCK;
+		return !world.getBlockAt(p, block) || world.getBlockRegistry().get(block).solid;
+	});
 }
 
 // "host" or "host:port" (port defaults to proto::DEFAULT_PORT).
@@ -207,7 +192,7 @@ bool App::startMultiplayer(const UiAction& action, const bool hostLocally) {
 void App::resetPlayerState() {
 	spawnInitialized = false;                       // movement waits until the spawn is known
 	jumpRequested = false;
-	verticalVelocity = 0.0f;
+	velocity = glm::vec3(0.0f);
 }
 
 void App::endSession() {
@@ -329,56 +314,26 @@ void App::updatePlayerMovement(const bool acceptInput) {
 		if (held(VOX_KEY_LEFT_CONTROL)) moveDirection.y -= 1.0f;
 		if (glm::dot(moveDirection, moveDirection) > 0.0f)
 			camera->pos += glm::normalize(moveDirection) * camera->moveSpeed * dt;
-		verticalVelocity = 0.0f;
+		velocity = glm::vec3(0.0f);
 		jumpRequested = false;
 		return;
 	}
 
-	moveDirection.y = 0.0f;
+	PlayerPhysics::Input input;
 	if (glm::dot(moveDirection, moveDirection) > 0.0f) {
-		const glm::vec3 displacement = glm::normalize(moveDirection) * camera->moveSpeed * dt;
-		const auto moveAxis = [this](const int axis, const float amount) {
-			const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(amount) / 0.25f)));
-			const float step = amount / static_cast<float>(steps);
-			for (int i = 0; i < steps; ++i) {
-				glm::vec3 candidate = camera->pos;
-				candidate[axis] += step;
-				if (collidesWithWorld(candidate, world))
-					break;
-				camera->pos = candidate;
-			}
-		};
-		moveAxis(0, displacement.x);
-		moveAxis(2, displacement.z);
+		const glm::vec3 wish = glm::normalize(moveDirection);
+		input.wish = {wish.x, wish.z};
 	}
-
-	grounded = collidesWithWorld(camera->pos - glm::vec3(0.0f, 0.04f, 0.0f), world);
-	if (jumpRequested && grounded) {
-		verticalVelocity = JUMP_SPEED;
-		grounded = false;
-	}
+	input.jump = jumpRequested || held(VOX_KEY_SPACE);       // held: jumps again on landing
+	input.sprint = held(VOX_KEY_LEFT_SHIFT);
+	input.sneak = held(VOX_KEY_LEFT_CONTROL);
 	jumpRequested = false;
 
-	if (grounded && verticalVelocity < 0.0f)
-		verticalVelocity = 0.0f;
-	else
-		verticalVelocity -= GRAVITY * dt;
-
-	const float verticalStep = verticalVelocity * dt;
-	const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(verticalStep) / 0.25f)));
-	const float step = verticalStep / static_cast<float>(steps);
-	for (int i = 0; i < steps; ++i) {
-		glm::vec3 candidate = camera->pos;
-		candidate.y += step;
-		if (collidesWithWorld(candidate, world)) {
-			if (step < 0.0f)
-				grounded = true;
-			verticalVelocity = 0.0f;
-			break;
-		}
-		camera->pos = candidate;
-		grounded = false;
-	}
+	PlayerPhysics::Body body{camera->pos, velocity, grounded};
+	PlayerPhysics::step(body, input, dt, [this](const glm::vec3& eye) { return collidesWithWorld(eye, world); });
+	camera->pos = body.eye;
+	velocity = body.velocity;
+	grounded = body.grounded;
 }
 
 void App::run() {
@@ -557,8 +512,9 @@ void App::placeBlock() {
 	applySessionEvents();
 }
 
+// Shift: a x10 speed toggle while flying; on foot it is held to sprint instead.
 void App::toggleSpeedBoost() {
-	if (!camera)
+	if (!camera || !flyMode)
 		return;
 
 	speedBoostEnabled = !speedBoostEnabled;
@@ -568,7 +524,7 @@ void App::toggleSpeedBoost() {
 
 void App::toggleFlyMode() {
 	flyMode = !flyMode;
-	verticalVelocity = 0.0f;
+	velocity = glm::vec3(0.0f);
 	jumpRequested = false;
 }
 
