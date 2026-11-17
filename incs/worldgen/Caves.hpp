@@ -34,9 +34,31 @@ public:
 	};
 	[[nodiscard]] Sample sample(int x, int y, int z) const noexcept;
 
-	// Whether a block is carved, from interpolated samples. `depth`: blocks
-	// below the column's surface; `ravine`: ravineStrength(x, z).
-	[[nodiscard]] static bool carved(const Sample& s, int y, int depth, float ravine) noexcept;
+	// ---- the carve rule, in the order it is applied (tune here) ---------------
+	// `depth`: blocks below the column's surface. The generator checks them in
+	// this order and stops at the first that decides, so it only interpolates
+	// the noise values it needs.
+	static constexpr float CHEESE_THRESHOLD    = 0.34f;   // caverns where cheese noise is above this
+	static constexpr float CHEESE_NEAR_SURFACE = 0.012f;  // threshold rises per block above depth 24
+	static constexpr float TUNNEL_WIDTH        = 0.075f;  // both tunnel noises within +-this
+	static constexpr int   SURFACE_SEAL        = 4;       // blocks under the surface left alone
+	static constexpr int   RAVINE_DEPTH        = 56;      // deepest a ravine cuts, in blocks
+
+	// 1. Ravines (no 3D noise): the band narrows with depth. `ravine`: ravineStrength(x, z).
+	[[nodiscard]] static bool ravineCarves(const float ravine, const int depth) noexcept {
+		return ravine > 0.0f && depth < RAVINE_DEPTH
+		    && ravine > 0.15f + 0.85f * static_cast<float>(depth) / static_cast<float>(RAVINE_DEPTH);
+	}
+	// 2. Nothing else carves within SURFACE_SEAL of the surface.
+	// 3. Spaghetti: both tunnel noises near zero (a line).
+	[[nodiscard]] static bool nearZero(const float tunnel) noexcept {
+		return tunnel < TUNNEL_WIDTH && tunnel > -TUNNEL_WIDTH;
+	}
+	// 4. Cheese: big caverns, rarer close to the surface.
+	[[nodiscard]] static bool cheeseCarves(const float cheese, const int depth) noexcept {
+		const int nearSurface = depth < 24 ? 24 - depth : 0;
+		return cheese > CHEESE_THRESHOLD + CHEESE_NEAR_SURFACE * static_cast<float>(nearSurface);
+	}
 
 	// 0 outside ravines, up to 1 at a ravine's centre line (2D, per column).
 	[[nodiscard]] float ravineStrength(int x, int z) const noexcept;

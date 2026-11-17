@@ -317,11 +317,18 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 						samples[node(i, gy + 1, k + 1)].*field, samples[node(i + 1, gy + 1, k + 1)].*field,
 						fx, fy, fz);
 				};
-				const CaveCarver::Sample s{lerp(&CaveCarver::Sample::cheese),
-				                           lerp(&CaveCarver::Sample::tunnelA),
-				                           lerp(&CaveCarver::Sample::tunnelB)};
-				const int depth = top - sy;
-				if (CaveCarver::carved(s, ChunkColumn::toWorldY(sy), entrance ? std::max(depth, 4) : depth, ravine))
+				// The carve rule in order, interpolating only what each step needs.
+				int depth = top - sy;
+				if (entrance)
+					depth = std::max(depth, CaveCarver::SURFACE_SEAL);   // tunnels may break through
+				bool carve = CaveCarver::ravineCarves(ravine, depth);
+				if (!carve && depth >= CaveCarver::SURFACE_SEAL) {
+					carve = CaveCarver::nearZero(lerp(&CaveCarver::Sample::tunnelA))
+					     && CaveCarver::nearZero(lerp(&CaveCarver::Sample::tunnelB));
+					if (!carve)
+						carve = CaveCarver::cheeseCarves(lerp(&CaveCarver::Sample::cheese), depth);
+				}
+				if (carve)
 					column.setUnchecked(x, sy, z, sy < deepWater ? WATER_BLOCK : AIR_BLOCK);
 			}
 		}

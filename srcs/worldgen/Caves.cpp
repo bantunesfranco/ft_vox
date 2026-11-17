@@ -11,13 +11,8 @@ namespace {
 
 // ---- tune here -----------------------------------------------------------------------
 
-constexpr float CHEESE_THRESHOLD     = 0.34f;   // caverns where cheese noise is above this
-constexpr float CHEESE_NEAR_SURFACE  = 0.012f;  // threshold rises per block above depth 24
-constexpr float TUNNEL_WIDTH         = 0.075f;  // both tunnel noises within +-this
-constexpr float TUNNEL_Y_SQUASH      = 0.7f;    // < 1: tunnels run more horizontally
-constexpr int   SURFACE_SEAL         = 4;       // blocks under the surface left alone
-constexpr int   RAVINE_DEPTH         = 56;      // deepest a ravine cuts, in blocks
-constexpr float RAVINE_BAND          = 0.06f ;  // half width of the ridge band (noise units)
+constexpr float RAVINE_BAND     = 0.06f;   // half width of the ridge band (noise units)
+constexpr float TUNNEL_Y_SQUASH = 0.7f;    // < 1: tunnels run more horizontally
 
 } // namespace
 
@@ -36,29 +31,6 @@ CaveCarver::Sample CaveCarver::sample(const int x, const int y, const int z) con
 		_tunnelA.at(fx, fy * TUNNEL_Y_SQUASH, fz),
 		_tunnelB.at(fx + 1000.0f, fy * TUNNEL_Y_SQUASH, fz - 1000.0f),
 	};
-}
-
-bool CaveCarver::carved(const Sample& s, const int y, const int depth, const float ravine) noexcept {
-	if (y <= ChunkColumn::MIN_WORLD_Y + 4)
-		return false;                                   // keep a floor above bedrock
-
-	// Ravines: the band narrows with depth (strength 1 at the centre line).
-	if (ravine > 0.0f && depth < RAVINE_DEPTH) {
-		const float need = 0.15f + 0.85f * static_cast<float>(depth) / static_cast<float>(RAVINE_DEPTH);
-		if (ravine > need)
-			return true;
-	}
-	if (depth < SURFACE_SEAL)
-		return false;
-
-	// Spaghetti: where two independent noises are both near zero (a line).
-	if (std::abs(s.tunnelA) < TUNNEL_WIDTH && std::abs(s.tunnelB) < TUNNEL_WIDTH)
-		return true;
-
-	// Cheese: big caverns, rarer close to the surface.
-	const float threshold = CHEESE_THRESHOLD
-	                      + CHEESE_NEAR_SURFACE * static_cast<float>(std::max(0, 24 - depth));
-	return s.cheese > threshold;
 }
 
 float CaveCarver::ravineStrength(const int x, const int z) const noexcept {
