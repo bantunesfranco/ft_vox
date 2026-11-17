@@ -152,6 +152,7 @@ SELFTEST(Light, uniform_sections_cheap) {
 }
 
 SELFTEST(Light, speed) {
+#ifdef NDEBUG                                   // timing means nothing unoptimised
 	const worldgen::TerrainGenerator gen(20261116);
 	const BlockRegistry registry;
 	double total = 0.0;
@@ -170,4 +171,5 @@ SELFTEST(Light, speed) {
 	}
 	std::printf("     %.2f ms per column\n", total / RUNS);
 	CHECK(total / RUNS <= 0.5);
+#endif
 }
