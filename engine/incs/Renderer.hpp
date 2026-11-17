@@ -96,9 +96,9 @@ private:
     std::vector<std::pair<std::size_t, std::size_t>> _freeVertexRanges;
     std::vector<std::pair<std::size_t, std::size_t>> _freeIndexRanges;
 
-    static constexpr std::size_t INITIAL_VERTEX_BUFFER_SIZE = 16 * 1024 * 1024;
+    static constexpr std::size_t INITIAL_VERTEX_BUFFER_SIZE = 64 * 1024 * 1024;
 
-    static constexpr std::size_t INITIAL_INDEX_BUFFER_SIZE = 8 * 1024 * 1024;
+    static constexpr std::size_t INITIAL_INDEX_BUFFER_SIZE = 64 * 1024 * 1024;
 
     static std::optional<std::string>
     loadShaderCode(const char* path);

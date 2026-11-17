@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "worldgen/Spline.hpp"
+#include "worldgen/Structures.hpp"
 
 namespace worldgen {
 namespace {
@@ -239,6 +240,10 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 	// 4. Caves, after the surface rules so cave floors stay stone.
 	if (has(Stages::Caves))
 		carveCaves(column);
+
+	// 5. Trees, cactus, boulders (they read the ground from surfaceHeight).
+	if (has(Stages::Structures))
+		placeStructures(*this, mixSeed(_seed, 30), column);
 }
 
 void TerrainGenerator::carveCaves(ChunkColumn& column) const {

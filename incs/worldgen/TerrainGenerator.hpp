@@ -66,6 +66,7 @@ public:
 	[[nodiscard]] glm::ivec2 findSpawn() const;
 
 	[[nodiscard]] std::uint64_t seed() const noexcept { return _seed; }
+	[[nodiscard]] const CaveCarver& caves() const noexcept { return _caves; }
 
 private:
 	struct Shape {
