@@ -394,10 +394,10 @@ void App::run() {
 			updateFluidFog();
 			worldUBO.eye = glm::vec4(camera->pos, 1.0f);
 			worldUBO.fog = fluidFog;
-			// Haze at the edge of the loaded world: the sky colour, paler.
-			const glm::vec3 sky(clearColor[0], clearColor[1], clearColor[2]);
-			worldUBO.skyFog = glm::vec4(glm::mix(sky, glm::vec3(1.0f), 0.5f),
-			                            static_cast<float>(World::CHUNK_RADIUS * ChunkSection::SIZE));
+			// Haze at the edge of the loaded world: the sky's horizon colour.
+			const glm::vec3 zenith(clearColor[0], clearColor[1], clearColor[2]);
+			const glm::vec3 horizon = glm::mix(zenith, glm::vec3(1.0f), 0.5f);
+			worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_RADIUS * ChunkSection::SIZE));
 			world.frustum.updateFrustum(camera->proj, camera->view);
 
 			for (auto& gpuMesh : world.pruneRenderStates())
@@ -411,6 +411,8 @@ void App::run() {
 			renderer->beginFrame(worldUBO);
 			processMeshUploads(world);
 			profiler.mark(FrameProfiler::Upload);
+			if (fluidFog.w <= 0.0f)                    // under water the fog colour is the sky
+				renderer->drawSky(glm::inverse(camera->proj * glm::mat4(glm::mat3(camera->view))), zenith, horizon);
 			toggleWireframe(showWireframe);
 			renderWorld(world);
 

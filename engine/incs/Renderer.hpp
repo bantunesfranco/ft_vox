@@ -69,6 +69,11 @@ private:
 class Renderer {
 private:
     GLuint _shaderprog = 0;
+    GLuint _skyProgram = 0;
+    GLuint _skyVao = 0;          // empty: the sky triangle comes from gl_VertexID
+    GLint  _skyInverseLocation = -1;
+    GLint  _skyZenithLocation = -1;
+    GLint  _skyHorizonLocation = -1;
 
     GLuint _vao = 0;
     GLuint _vbo = 0;
@@ -107,6 +112,7 @@ private:
     loadShaderCode(const char* path);
 
     static GLuint compileShader(const std::string& code, GLenum type);
+    static GLuint buildProgram(const char* vertexPath, const char* fragmentPath);
 
     void createBuffers();
     void createVertexLayout();
@@ -140,6 +146,10 @@ public:
     );
 
     void beginFrame(const WorldUBO& worldUbo) const;
+
+    // Sky gradient behind everything; call before drawing the world.
+    // `inverseViewProj`: inverse of projection * camera rotation (no translation).
+    void drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon) const;
 
     void uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh);
     void releaseMesh(GpuMesh& gpuMesh);

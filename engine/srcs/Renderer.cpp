@@ -14,6 +14,8 @@
 
 const auto VSHADER_PATH = "./engine/shaders/vertex.glsl";
 const auto FSHADER_PATH = "./engine/shaders/fragment.glsl";
+const auto SKY_VSHADER_PATH = "./engine/shaders/sky_vertex.glsl";
+const auto SKY_FSHADER_PATH = "./engine/shaders/sky_fragment.glsl";
 
 Renderer::Renderer() {
     const std::string vertexCode = loadShaderCode(VSHADER_PATH).value_or("");
@@ -89,12 +91,65 @@ Renderer::Renderer() {
 
     glUseProgram(0);
 
+    _skyProgram = buildProgram(SKY_VSHADER_PATH, SKY_FSHADER_PATH);
+    _skyInverseLocation = glGetUniformLocation(_skyProgram, "uInverseViewProj");
+    _skyZenithLocation = glGetUniformLocation(_skyProgram, "uZenith");
+    _skyHorizonLocation = glGetUniformLocation(_skyProgram, "uHorizon");
+    glGenVertexArrays(1, &_skyVao);
+
     if (glGetError() != GL_NO_ERROR)
         throw Engine::EngineException(VOX_GLADFAIL);
 }
 
+GLuint Renderer::buildProgram(const char* vertexPath, const char* fragmentPath) {
+    const GLuint vertexShader = compileShader(loadShaderCode(vertexPath).value_or(""), GL_VERTEX_SHADER);
+    const GLuint fragmentShader = compileShader(loadShaderCode(fragmentPath).value_or(""), GL_FRAGMENT_SHADER);
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader)
+            glDeleteShader(vertexShader);
+        if (fragmentShader)
+            glDeleteShader(fragmentShader);
+        throw Engine::EngineException(VOX_FRAGFAIL);
+    }
+    const GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    GLint success = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char infoLog[1024]{};
+        glGetProgramInfoLog(program, sizeof(infoLog), nullptr, infoLog);
+        std::cerr << "Shader Program Linking Failed (" << vertexPath << "): " << infoLog << std::endl;
+        glDeleteProgram(program);
+        throw Engine::EngineException(VOX_SHDRFAIL);
+    }
+    return program;
+}
+
+void Renderer::drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon) const {
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glUseProgram(_skyProgram);
+    glUniformMatrix4fv(_skyInverseLocation, 1, GL_FALSE, &inverseViewProj[0][0]);
+    glUniform3fv(_skyZenithLocation, 1, &zenith[0]);
+    glUniform3fv(_skyHorizonLocation, 1, &horizon[0]);
+    glBindVertexArray(_skyVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+}
+
 
 Renderer::~Renderer() {
+    if (_skyVao)
+        glDeleteVertexArrays(1, &_skyVao);
+    if (_skyProgram)
+        glDeleteProgram(_skyProgram);
     if (_boundsIbo)
         glDeleteBuffers(1, &_boundsIbo);
     if (_boundsVbo)
