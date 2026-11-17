@@ -31,6 +31,23 @@ std::uint32_t densityPerMille(const Biome biome) noexcept {
 }
 
 constexpr int MAX_SLOPE = 2;   // most a neighbour's ground may differ, in blocks
+constexpr int SPACING = 2;     // no two structure bases within this many blocks (Chebyshev)
+
+// Whether another candidate within SPACING beats the one at (x, z): the lowest
+// (hash, x, z) wins. Hashes only, so every column decides the same way.
+bool crowded(const std::uint64_t seed, const int x, const int z, const std::uint32_t h) noexcept {
+	for (int dz = -SPACING; dz <= SPACING; ++dz)
+		for (int dx = -SPACING; dx <= SPACING; ++dx) {
+			if (dx == 0 && dz == 0)
+				continue;
+			const std::uint32_t other = hash3(seed, x + dx, 0, z + dz);
+			if (other % 1000u >= MAX_DENSITY)
+				continue;                                  // not a candidate
+			if (other < h || (other == h && (dx < 0 || (dx == 0 && dz < 0))))
+				return true;
+		}
+	return false;
+}
 
 enum class Fill { Air, AirOrLeaves };
 
@@ -127,6 +144,8 @@ void placeStructures(const TerrainGenerator& gen, const std::uint64_t seed, Chun
 			const std::uint32_t roll = h % 1000u;
 			if (roll >= MAX_DENSITY)
 				continue;                                  // most positions: no noise evaluated
+			if (crowded(seed, x, z, h))
+				continue;                                  // a neighbour wins this spot
 			const Biome biome = gen.biomeAt(x, z);
 			if (roll >= densityPerMille(biome))
 				continue;

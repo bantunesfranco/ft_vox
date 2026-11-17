@@ -2,6 +2,8 @@
 #include "worldgen/Structures.hpp"
 #include "worldgen/TerrainGenerator.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -144,4 +146,31 @@ SELFTEST(Structures, cactus_on_sand) {
 	CHECK(columns.size() >= 8);
 	CHECK(cacti > 0);
 	CHECK_EQ(misplaced, 0);
+}
+
+SELFTEST(Structures, trees_never_touch) {
+	// Trunk bases (a log on non-log ground) are at least 3 blocks apart, so
+	// two trees never stand side by side.
+	const TerrainGenerator gen(20261116);
+	int trunks = 0, touching = 0;
+	for (const Biome biome : {Biome::Forest, Biome::Taiga}) {
+		for (const ChunkCoord c : columnsIn(gen, biome, 12)) {
+			const auto column = make(gen, c);
+			std::vector<std::array<int, 2>> bases;
+			for (int z = 0; z < 16; ++z)
+				for (int x = 0; x < 16; ++x)
+					for (int sy = 1; sy < ChunkColumn::HEIGHT; ++sy)
+						if (isLog(column->getUnchecked(x, sy, z)) && !isLog(column->getUnchecked(x, sy - 1, z))) {
+							bases.push_back({x, z});
+							break;
+						}
+			trunks += static_cast<int>(bases.size());
+			for (std::size_t i = 0; i < bases.size(); ++i)
+				for (std::size_t j = i + 1; j < bases.size(); ++j)
+					touching += std::max(std::abs(bases[i][0] - bases[j][0]), std::abs(bases[i][1] - bases[j][1])) <= 2 ? 1 : 0;
+		}
+	}
+	std::printf("     %d trunks, %d pairs closer than 3 blocks\n", trunks, touching);
+	CHECK(trunks > 20);
+	CHECK_EQ(touching, 0);
 }
