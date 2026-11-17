@@ -25,6 +25,7 @@ struct WorldUBO {
     glm::vec4 ambientData{0.5f, 0.0f, 0.0f, 0.0f};
     glm::vec4 eye{0.0f};      // xyz = camera position
     glm::vec4 fog{0.0f};      // rgb = colour, w = distance it fades over (0 = off)
+    glm::vec4 skyFog{0.0f};   // rgb = colour, w = view distance: hides the edge of the loaded world (0 = off)
 };
 
 

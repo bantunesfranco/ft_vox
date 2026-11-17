@@ -12,6 +12,7 @@ layout(std140, binding = 0) uniform WorldUBO
     vec4 ambientData; // x = ambient
     vec4 eye;         // xyz = camera position
     vec4 fog;         // rgb = colour, w = distance (0 = off)
+    vec4 skyFog;      // rgb = colour, w = view distance (0 = off)
 };
 
 uniform bool uHighlightPass;

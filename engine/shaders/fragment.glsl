@@ -20,6 +20,7 @@ layout(std140, binding = 0) uniform WorldUBO
     vec4 ambientData;
     vec4 eye;         // xyz = camera position
     vec4 fog;         // rgb = colour, w = distance (0 = off): eye inside water / lava
+    vec4 skyFog;      // rgb = colour, w = view distance (0 = off): far terrain fades out
 };
 
 out vec4 FragColor;
@@ -56,6 +57,12 @@ void main()
     float brightness = (ambient + lightFactor) * vAO * 1.25;
 
     vec3 color = tex.rgb * brightness;
+    if (fog.w <= 0.0 && skyFog.w > 0.0) {
+        // Horizontal distance: columns load in a square around the player,
+        // the last 40 % of the view distance fades into the haze.
+        float d = distance(vWorldPos.xz, eye.xz);
+        color = mix(color, skyFog.rgb, smoothstep(skyFog.w * 0.6, skyFog.w, d));
+    }
     if (fog.w > 0.0) {
         float f = clamp(distance(vWorldPos, eye.xyz) / fog.w, 0.0, 1.0);
         color = mix(color, fog.rgb, f);
