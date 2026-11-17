@@ -104,6 +104,25 @@ void Engine::toggleFullscreen()
 	_height = _windowedHeight;
 }
 
+#ifndef NDEBUG
+// KHR_debug / GL 4.3 message callback (debug builds only). Prints to stderr.
+static void APIENTRY glDebugCallback(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* message, const void*) {
+	if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
+		return;
+	const char* t = "other";
+	switch (type) {
+		case GL_DEBUG_TYPE_ERROR:               t = "error"; break;
+		case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: t = "deprecated"; break;
+		case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  t = "undefined"; break;
+		case GL_DEBUG_TYPE_PORTABILITY:         t = "portability"; break;
+		case GL_DEBUG_TYPE_PERFORMANCE:         t = "performance"; break;
+		default: break;
+	}
+	const char* sev = severity == GL_DEBUG_SEVERITY_HIGH ? "high" : severity == GL_DEBUG_SEVERITY_MEDIUM ? "medium" : "low";
+	std::cerr << "[gl] " << t << ' ' << sev << ": " << (severity == GL_DEBUG_SEVERITY_HIGH ? "!! " : "") << message << std::endl;
+}
+#endif
+
 void Engine::initWindow(const int32_t width, const int32_t height, const char* title)
 {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -117,6 +136,9 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 		glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	#endif
 	glfwWindowHint(GLFW_RESIZABLE, settings[VOX_RESIZE]);
+	#ifndef NDEBUG
+		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
+	#endif
 
 	_width = width;
 	_height = height;
@@ -130,6 +152,13 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 
 	glfwMakeContextCurrent(window);
 	gladLoadGL();
+	#ifndef NDEBUG
+		if (GLAD_GL_VERSION_4_3) {
+			glEnable(GL_DEBUG_OUTPUT);
+			glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+			glDebugMessageCallback(glDebugCallback, nullptr);
+		}
+	#endif
 	glfwSwapInterval(1);
 	glfwSetWindowUserPointer(window, (void*)this);
 	glfwSetFramebufferSizeCallback(window, framebuffer_callback);

@@ -185,7 +185,8 @@ void Renderer::createBuffers() {
     glGenVertexArrays(1, &_vao);
     glGenBuffers(1, &_vbo);
     glGenBuffers(1, &_ibo);
-    glGenBuffers(1, &_indirectBuffer);
+    // Created (not just named) up front: it is only ever filled with glNamedBufferData.
+    glCreateBuffers(1, &_indirectBuffer);
     glGenBuffers(1, &_instanceBuffer);
 
     if (!_vao || !_vbo || !_ibo || !_indirectBuffer || !_instanceBuffer)
