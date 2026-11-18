@@ -80,6 +80,46 @@ constexpr Spline<5> MOUNTAIN{{{
 constexpr Spline<4> HILLS{{{
 	{-0.40f, 1.00f}, {0.20f, 0.80f}, {0.60f, 0.35f}, {1.00f, 0.15f}}}};
 
+// The column's blocks as raw arrays, for the generation loops: no uniform
+// section check on every access. Sections up to `denseUpTo` are made dense
+// (generate() compacts the column when done); above it a section still all
+// air is read from a shared air array and must not be written.
+class DenseBlocks {
+public:
+	DenseBlocks(ChunkColumn& column, const int denseUpTo) {
+		static_assert(AIR_BLOCK == 0, "a zeroed array reads as air");
+		static const ChunkSection::Blocks air{};
+		for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s) {
+			ChunkSection& section = column.section(s);
+			const auto i = static_cast<std::size_t>(s);
+			if (s > denseUpTo && section.isUniform() && section.uniformBlock() == AIR_BLOCK) {
+				_read[i] = air.data();
+				_write[i] = nullptr;
+			} else {
+				_write[i] = section.makeDense().data();
+				_read[i] = _write[i];
+			}
+		}
+	}
+
+	[[nodiscard]] BlockId get(const int x, const int y, const int z) const noexcept { return _read[section(y)][at(x, y, z)]; }
+
+	void set(const int x, const int y, const int z, const BlockId block) noexcept {
+		assert(_write[section(y)] != nullptr);
+		_write[section(y)][at(x, y, z)] = block;
+	}
+
+private:
+	std::array<const BlockId*, ChunkColumn::SECTION_COUNT> _read{};
+	std::array<BlockId*, ChunkColumn::SECTION_COUNT> _write{};
+
+	[[nodiscard]] static std::size_t section(const int y) noexcept { return static_cast<std::size_t>(y >> 4); }
+
+	[[nodiscard]] static std::size_t at(const int x, const int y, const int z) noexcept {
+		return static_cast<std::size_t>(x + (z << 4) + ((y & 15) << 8));
+	}
+};
+
 } // namespace
 
 TerrainGenerator::TerrainGenerator(const std::uint64_t seed)
@@ -194,6 +234,15 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 
 	// 2. Stone where the interpolated density is positive, water below sea level.
 	static_assert(ChunkColumn::HEIGHT % CELL_Y == 0, "the cells must fill the column exactly");
+	// Stone only in cells with a positive corner: the highest written block is
+	// under the cell above the highest positive node, or the sea surface.
+	int highest = ChunkColumn::toStorageY(SEA_LEVEL);
+	for (std::size_t n = 0; n < density.size(); ++n)
+		if (density[n] > 0.0f) {
+			const int gy = static_cast<int>(n / NODES_XZ % NODES_Y);
+			highest = std::max(highest, std::min(ChunkColumn::HEIGHT - 1, gy * CELL_Y + CELL_Y - 1));
+		}
+	DenseBlocks blocks(column, highest / ChunkSection::SIZE);
 	for (int z = 0; z < ChunkSection::SIZE; ++z)
 		for (int x = 0; x < ChunkSection::SIZE; ++x) {
 			const int i = x / CELL_XZ, k = z / CELL_XZ;
@@ -207,9 +256,9 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 				for (int sy = gy * CELL_Y; sy < gy * CELL_Y + CELL_Y; ++sy) {
 					const float d = lerpYZ(cell, fraction(sy, CELL_Y), fz);
 					if (d > 0.0f)
-						column.setUnchecked(x, sy, z, STONE);
+						blocks.set(x, sy, z, STONE);
 					else if (ChunkColumn::toWorldY(sy) <= SEA_LEVEL)
-						column.setUnchecked(x, sy, z, WATER_BLOCK);
+						blocks.set(x, sy, z, WATER_BLOCK);
 				}
 			}
 		}
@@ -228,7 +277,7 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 			int depth = 0;
 			bool underwater = false;
 			for (int sy = ChunkColumn::HEIGHT - 1; sy >= 0; --sy) {
-				const BlockId current = column.getUnchecked(x, sy, z);
+				const BlockId current = blocks.get(x, sy, z);
 				if (current != STONE) {
 					depth = 0;
 					underwater = current == WATER_BLOCK;
@@ -237,18 +286,18 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 				if (depth < 20) {
 					const BlockId surface = surfaceBlock(biome, depth, ChunkColumn::toWorldY(sy), underwater, variation);
 					if (surface != AIR_BLOCK)
-						column.setUnchecked(x, sy, z, surface);
+						blocks.set(x, sy, z, surface);
 				}
 				++depth;
 			}
 
 			const int bedrockTop = static_cast<int>(hash3(bedrockSeed, wx, 0, wz) % 3u);
 			for (int sy = 0; sy <= bedrockTop; ++sy)
-				column.setUnchecked(x, sy, z, BEDROCK);
+				blocks.set(x, sy, z, BEDROCK);
 
 			const int seaTop = ChunkColumn::toStorageY(SEA_LEVEL);
-			if (shape.climate.temperature < -0.45f && column.getUnchecked(x, seaTop, z) == WATER_BLOCK)
-				column.setUnchecked(x, seaTop, z, ICE);
+			if (shape.climate.temperature < -0.45f && blocks.get(x, seaTop, z) == WATER_BLOCK)
+				blocks.set(x, seaTop, z, ICE);
 		}
 
 	// 4. Caves, after the surface rules so cave floors stay stone.
@@ -258,9 +307,13 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 	// 5. Trees, cactus, boulders (they read the ground from surfaceHeight).
 	if (has(Stages::Structures))
 		placeStructures(*this, mixSeed(_seed, 30), column);
+
+	// Sections left all one block (deep stone, open sky) store just the id.
+	column.compact();
 }
 
 void TerrainGenerator::carveCaves(ChunkColumn& column) const {
+	DenseBlocks blocks(column, -1);          // carves only solid blocks: sections still air stay so
 	const ChunkCoord coord = column.coord();
 	const int baseX = coord.x * ChunkSection::SIZE;
 	const int baseZ = coord.z * ChunkSection::SIZE;
@@ -273,7 +326,7 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 		for (int x = 0; x < ChunkSection::SIZE; ++x) {
 			int top = 0;
 			for (int sy = ChunkColumn::HEIGHT - 1; sy > 0; --sy)
-				if (!isOpen(column.getUnchecked(x, sy, z))) {
+				if (!isOpen(blocks.get(x, sy, z))) {
 					top = sy;
 					break;
 				}
@@ -321,7 +374,7 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 			// on the coast hold water that must not drain into a cave).
 			int sinceWater = 1000;
 			for (int sy = top; sy >= lowest; --sy) {
-				const BlockId current = column.getUnchecked(x, sy, z);
+				const BlockId current = blocks.get(x, sy, z);
 				++sinceWater;
 				if (current == WATER_BLOCK)
 					sinceWater = 0;
@@ -356,7 +409,7 @@ void TerrainGenerator::carveCaves(ChunkColumn& column) const {
 						carve = CaveCarver::cheeseCarves(lerp(2, &CaveCarver::Sample::cheese), depth);
 				}
 				if (carve)
-					column.setUnchecked(x, sy, z, sy < deepLava ? LAVA_BLOCK : AIR_BLOCK);
+					blocks.set(x, sy, z, sy < deepLava ? LAVA_BLOCK : AIR_BLOCK);
 			}
 		}
 }

@@ -10,8 +10,11 @@ namespace ChunkCodec {
 void encode(const ChunkColumn& column, net::ByteWriter& out) {
 	std::uint32_t mask = 0;
 	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s) {
-		const auto& blocks = column.section(s).blocks();
-		if (std::ranges::any_of(blocks, [](const BlockId b) { return b != AIR_BLOCK; }))
+		const ChunkSection& section = column.section(s);
+		const bool present = section.isUniform()
+			? section.uniformBlock() != AIR_BLOCK
+			: std::ranges::any_of(*section.dense(), [](const BlockId b) { return b != AIR_BLOCK; });
+		if (present)
 			mask |= std::uint32_t{1} << s;
 	}
 	out.writeU32(mask);
@@ -21,7 +24,14 @@ void encode(const ChunkColumn& column, net::ByteWriter& out) {
 	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s) {
 		if (!(mask & (std::uint32_t{1} << s)))
 			continue;
-		const auto& blocks = column.section(s).blocks();
+		const ChunkSection& section = column.section(s);
+		if (section.isUniform()) {                // one run, as a dense section of that id
+			out.writeU16(1);
+			out.writeU16(static_cast<std::uint16_t>(ChunkSection::BLOCK_COUNT));
+			out.writeU16(section.uniformBlock());
+			continue;
+		}
+		const auto& blocks = *section.dense();
 
 		runs.clear();
 		std::size_t i = 0;
@@ -49,7 +59,8 @@ bool decode(net::ByteReader& in, ChunkColumn& column) {
 		if (!(mask & (std::uint32_t{1} << s)))
 			continue;                         // stays air
 
-		auto& blocks = column.section(s).blocks();
+		ChunkSection& section = column.section(s);
+		auto& blocks = section.makeDense();
 		const std::uint16_t runCount = in.readU16();
 		if (!in.ok() || runCount == 0 || runCount > ChunkSection::BLOCK_COUNT
 		    || in.remaining() < std::size_t{runCount} * 4)
@@ -66,6 +77,7 @@ bool decode(net::ByteReader& in, ChunkColumn& column) {
 		}
 		if (filled != blocks.size())
 			return false;
+		section.compact();
 	}
 	return in.ok();
 }

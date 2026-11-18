@@ -26,7 +26,7 @@ std::unique_ptr<ChunkColumn> makeColumn(const ChunkCoord coord, const std::uint3
 
 bool sameBlocks(const ChunkColumn& a, const ChunkColumn& b) {
 	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s)
-		if (a.section(s).blocks() != b.section(s).blocks())
+		if (!(a.section(s) == b.section(s)))
 			return false;
 	return a.coord() == b.coord();
 }

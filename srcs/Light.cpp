@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -27,6 +28,18 @@ struct Scratch {
 };
 thread_local Scratch scratch;
 
+// 4096 copies of `id`: what a uniform section reads as, so the lighting loops
+// index every section the same way. Built once, read-only after.
+const BlockId* uniformBlocks(const BlockId id) noexcept {
+	static const auto table = [] {
+		auto t = std::make_unique<std::array<ChunkSection::Blocks, BLOCK_TYPE_COUNT>>();
+		for (std::size_t b = 0; b < BLOCK_TYPE_COUNT; ++b)
+			(*t)[b].fill(static_cast<BlockId>(b));
+		return t;
+	}();
+	return (*table)[id].data();
+}
+
 class Lighter {
 public:
 	Lighter(const ColumnWindow& window, const BlockRegistry& registry) {
@@ -48,14 +61,22 @@ public:
 		int highest = -1;
 		for (std::size_t c = 0; c < 9; ++c)
 			for (int s = 0; s < SECTIONS; ++s) {
-				const auto& blocks = window[c]->section(s).blocks();
-				_blocks[c][static_cast<std::size_t>(s)] = blocks.data();
+				const ChunkSection& section = window[c]->section(s);
 				std::uint64_t any = 0, emitters = 0;
-				for (std::size_t i = 0; i < blocks.size(); i += 4) {
-					std::uint64_t word;
-					std::memcpy(&word, blocks.data() + i, sizeof(word));
-					any |= word;
-					emitters |= (word + bias) & topBits;
+				if (section.isUniform()) {               // the same answers from the one id
+					const BlockId id = section.uniformBlock();
+					_blocks[c][static_cast<std::size_t>(s)] = uniformBlocks(id);
+					any = id;
+					emitters = id >= _firstEmitter ? 1 : 0;
+				} else {
+					const auto& blocks = *section.dense();
+					_blocks[c][static_cast<std::size_t>(s)] = blocks.data();
+					for (std::size_t i = 0; i < blocks.size(); i += 4) {
+						std::uint64_t word;
+						std::memcpy(&word, blocks.data() + i, sizeof(word));
+						any |= word;
+						emitters |= (word + bias) & topBits;
+					}
 				}
 				_empty[c][static_cast<std::size_t>(s)] = any == 0;
 				_hasEmitter[c][static_cast<std::size_t>(s)] = emitters != 0;

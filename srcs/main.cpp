@@ -97,11 +97,15 @@ int runColumnHash(const int argc, char** argv) {
 
 	std::uint64_t hash = 14695981039346656037ull;
 	const auto mix = [&hash](const std::uint8_t byte) { hash = (hash ^ byte) * 1099511628211ull; };
-	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s)
-		for (const BlockId block : column.section(s).blocks()) {
+	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s) {
+		const ChunkSection& section = column.section(s);
+		for (int i = 0; i < ChunkSection::BLOCK_COUNT; ++i) {
+			const BlockId block = section.isUniform() ? section.uniformBlock()
+			                                          : (*section.dense())[static_cast<std::size_t>(i)];
 			mix(static_cast<std::uint8_t>(block & 0xFFu));
 			mix(static_cast<std::uint8_t>(block >> 8));
 		}
+	}
 	std::printf("%016llx\n", static_cast<unsigned long long>(hash));
 	return EXIT_SUCCESS;
 }

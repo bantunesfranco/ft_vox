@@ -1,6 +1,8 @@
 #include "Chunk.hpp"
 #include "Light.hpp"
 
+#include <algorithm>
+
 BlockId ChunkSection::get(int x, int y, int z) const noexcept {
     assert(x >= 0 && x < SIZE);
     assert(y >= 0 && y < SIZE);
@@ -17,31 +19,74 @@ void ChunkSection::set(int x, int y, int z, BlockId block) noexcept {
     setUnchecked(x, y, z, block);
 }
 
-BlockId ChunkSection::getUnchecked(int x, int y, int z) const noexcept {
-    return _blocks[index(x, y, z)];
-}
-
-void ChunkSection::setUnchecked(int x, int y, int z, BlockId block) noexcept {
-    _blocks[index(x, y, z)] = block;
-}
-
 void ChunkSection::fill(BlockId block) noexcept {
-    _blocks.fill(block);
+    _dense.reset();
+    _uniform = block;
 }
 
-const std::array<BlockId, ChunkSection::BLOCK_COUNT>& ChunkSection::blocks() const noexcept {
-    return _blocks;
+ChunkSection::ChunkSection(const ChunkSection& other)
+    : _uniform(other._uniform),
+      _dense(other._dense ? std::make_unique<Blocks>(*other._dense) : nullptr) {}
+
+ChunkSection& ChunkSection::operator=(const ChunkSection& other) {
+    if (this != &other) {
+        _uniform = other._uniform;
+        if (!other._dense)
+            _dense.reset();
+        else if (_dense)
+            *_dense = *other._dense;
+        else
+            _dense = std::make_unique<Blocks>(*other._dense);
+    }
+    return *this;
 }
 
-std::array<BlockId, ChunkSection::BLOCK_COUNT>& ChunkSection::blocks() noexcept {
-    return _blocks;
+void ChunkSection::allocateDense() noexcept {
+    _dense = std::make_unique_for_overwrite<Blocks>();
+    _dense->fill(_uniform);
+}
+
+ChunkSection::Blocks& ChunkSection::makeDense() {
+    if (!_dense)
+        allocateDense();
+    return *_dense;
+}
+
+void ChunkSection::compact() noexcept {
+    if (!_dense)
+        return;
+    const BlockId first = (*_dense)[0];
+    if (std::ranges::all_of(*_dense, [first](const BlockId b) { return b == first; }))
+        fill(first);
+}
+
+std::size_t ChunkSection::heapBytes() const noexcept {
+    return _dense ? sizeof(Blocks) : 0;
+}
+
+bool operator==(const ChunkSection& a, const ChunkSection& b) noexcept {
+    if (!a._dense && !b._dense)
+        return a._uniform == b._uniform;
+    if (a._dense && b._dense)
+        return *a._dense == *b._dense;
+    const ChunkSection& uniform = a._dense ? b : a;
+    const ChunkSection& dense = a._dense ? a : b;
+    return std::ranges::all_of(*dense._dense, [&uniform](const BlockId x) { return x == uniform._uniform; });
 }
 
 
 ChunkColumn::ChunkColumn(ChunkCoord coord) noexcept : _coord(coord) {}
 
+void ChunkColumn::compact() noexcept {
+    for (ChunkSection& section : _sections)
+        section.compact();
+}
+
 std::size_t ChunkColumn::heapBytes() const noexcept {
-    return SECTION_COUNT * ChunkSection::BLOCK_COUNT * sizeof(BlockId);
+    std::size_t bytes = 0;
+    for (const ChunkSection& section : _sections)
+        bytes += section.heapBytes();
+    return bytes;
 }
 
 const ChunkCoord& ChunkColumn::coord() const noexcept {

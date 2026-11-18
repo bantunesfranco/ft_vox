@@ -103,7 +103,7 @@ SELFTEST(Caves, deterministic) {
 		const auto ca = make(a, {i * 9 - 30, i * 5});
 		const auto cb = make(b, {i * 9 - 30, i * 5});
 		for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s)
-			different += ca->section(s).blocks() == cb->section(s).blocks() ? 0 : 1;
+			different += ca->section(s) == cb->section(s) ? 0 : 1;
 	}
 	CHECK_EQ(different, 0);
 }

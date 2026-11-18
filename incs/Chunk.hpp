@@ -6,6 +6,7 @@
 #include <array>
 #include <cassert>
 #include <functional>
+#include <memory>
 
 #include "Block.hpp"
 
@@ -40,25 +41,63 @@ public:
     static constexpr int SIZE = 16;
     static constexpr int BLOCK_COUNT = SIZE * SIZE * SIZE;
 
+    using Blocks = std::array<BlockId, BLOCK_COUNT>;
+
     ChunkSection() noexcept = default;
+
+    // Copies are deep; moves hand the dense array over.
+    ChunkSection(const ChunkSection& other);
+    ChunkSection& operator=(const ChunkSection& other);
+    ChunkSection(ChunkSection&&) noexcept = default;
+    ChunkSection& operator=(ChunkSection&&) noexcept = default;
 
     [[nodiscard]]
     BlockId get(int x, int y, int z) const noexcept;
 
+    // A uniform section turns dense on its first differing write.
     void set(int x, int y, int z, BlockId block) noexcept;
 
     [[nodiscard]]
-    BlockId getUnchecked(int x, int y, int z) const noexcept;
+    BlockId getUnchecked(int x, int y, int z) const noexcept {
+        return _dense ? (*_dense)[static_cast<std::size_t>(index(x, y, z))] : _uniform;
+    }
 
-    void setUnchecked(int x, int y, int z, BlockId block) noexcept;
+    void setUnchecked(int x, int y, int z, BlockId block) noexcept {
+        if (!_dense) {
+            if (block == _uniform)
+                return;
+            allocateDense();
+        }
+        (*_dense)[static_cast<std::size_t>(index(x, y, z))] = block;
+    }
 
+    // Makes the section uniform `block`, freeing the dense array.
     void fill(BlockId block) noexcept;
 
-    [[nodiscard]]
-    const std::array<BlockId, BLOCK_COUNT>& blocks() const noexcept;
+    // Collapses the section to uniform if every block is the same.
+    void compact() noexcept;
 
     [[nodiscard]]
-    std::array<BlockId, BLOCK_COUNT>& blocks() noexcept;
+    bool isUniform() const noexcept { return !_dense; }
+
+    // The id of every block while uniform (meaningless while dense).
+    [[nodiscard]]
+    BlockId uniformBlock() const noexcept { return _uniform; }
+
+    // The blocks, or nullptr while uniform.
+    [[nodiscard]]
+    const Blocks* dense() const noexcept { return _dense.get(); }
+
+    // The dense array (allocated, filled with the uniform id, if needed), for
+    // bulk writers; call compact() when done.
+    Blocks& makeDense();
+
+    // Bytes held on the heap (the dense array, if any).
+    [[nodiscard]]
+    std::size_t heapBytes() const noexcept;
+
+    // Same blocks, whatever the storage.
+    friend bool operator==(const ChunkSection& a, const ChunkSection& b) noexcept;
 
 private:
     /*
@@ -72,9 +111,12 @@ private:
      * z changes next
      * y changes slowest
      *
-     * 4096 contiguous uint16_t values.
+     * 4096 contiguous uint16_t values, or none while every block is _uniform.
      */
-    std::array<BlockId, BLOCK_COUNT> _blocks{};
+    BlockId _uniform = AIR_BLOCK;
+    std::unique_ptr<Blocks> _dense;
+
+    void allocateDense() noexcept;
 
     [[nodiscard]]
     static constexpr int index(int x, int y, int z) noexcept {
@@ -121,7 +163,10 @@ public:
 
     void setUnchecked(int x, int y, int z, BlockId block) noexcept;
 
-    // Bytes held by block storage.
+    // Collapses every section whose blocks are all the same.
+    void compact() noexcept;
+
+    // Bytes held by block storage (the dense sections).
     [[nodiscard]]
     std::size_t heapBytes() const noexcept;
 

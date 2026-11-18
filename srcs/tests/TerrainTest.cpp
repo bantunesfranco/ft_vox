@@ -19,7 +19,7 @@ std::unique_ptr<ChunkColumn> generated(const TerrainGenerator& gen, const ChunkC
 
 bool sameBlocks(const ChunkColumn& a, const ChunkColumn& b) {
 	for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s)
-		if (a.section(s).blocks() != b.section(s).blocks())
+		if (!(a.section(s) == b.section(s)))
 			return false;
 	return true;
 }

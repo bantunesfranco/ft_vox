@@ -11,9 +11,10 @@
 //                                         (absent = all air)
 //    per present section, lowest first:
 //      u16 runCount                       1..4096
-//      runCount * {u16 length, u16 block} run-length encoding of
-//                                         ChunkSection::blocks(), whose order
-//                                         is x + (z << 4) + (y << 8)
+//      runCount * {u16 length, u16 block} run-length encoding of the
+//                                         section's 4096 ids, in the order
+//                                         x + (z << 4) + (y << 8) (a uniform
+//                                         section is one run of 4096)
 // ============================================================================
 
 #include "Chunk.hpp"

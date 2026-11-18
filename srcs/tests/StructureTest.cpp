@@ -97,7 +97,7 @@ SELFTEST(Structures, structures_deterministic) {
 		const auto ca = make(a, c);
 		const auto cb = make(b, c);
 		for (int s = 0; s < ChunkColumn::SECTION_COUNT; ++s)
-			different += ca->section(s).blocks() == cb->section(s).blocks() ? 0 : 1;
+			different += ca->section(s) == cb->section(s) ? 0 : 1;
 	}
 	CHECK(!columns.empty());
 	CHECK_EQ(different, 0);

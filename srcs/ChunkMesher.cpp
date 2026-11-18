@@ -14,9 +14,11 @@ void ChunkMesher::build(
     output.clear();
     transparentOutput.clear();
 
-    if (std::all_of(section.blocks().begin(), section.blocks().end(), [](const BlockId block) {
-        return block == AIR_BLOCK;
-    }))
+    // All air: no faces (the faces against it belong to the neighbours' blocks).
+    const bool allAir = section.isUniform()
+        ? section.uniformBlock() == AIR_BLOCK
+        : std::ranges::all_of(*section.dense(), [](const BlockId block) { return block == AIR_BLOCK; });
+    if (allAir)
         return;
 
     constexpr int size = ChunkSection::SIZE;
