@@ -52,6 +52,12 @@ public:
 	// No light job running or waiting: every column with a full 3x3 has
 	// light matching its current blocks (tests).
 	[[nodiscard]] bool lightIdle() const;
+	// Light and mesh jobs running now (tests).
+	struct JobCounts {
+		std::size_t lightInFlight = 0;
+		std::size_t meshInFlight  = 0;
+	};
+	[[nodiscard]] JobCounts jobCounts() const;
 
 	[[nodiscard]]
 	const std::vector<ChunkRenderState>& getRenderStates() const noexcept;
@@ -142,6 +148,8 @@ private:
 	// The blocks of `coord` changed: the light of every column whose window
 	// holds it (the 3x3 around it) is out of date. chunk_mutex held.
 	void invalidateLightLocked(const ChunkCoord& coord);
+	// The 3x3 around `coord` is loaded: its light can be computed. chunk_mutex held.
+	[[nodiscard]] bool windowLoadedLocked(const ChunkCoord& coord) const;
 
 	void applyMeshResults();
 	void scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& playerForward,

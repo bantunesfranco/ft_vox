@@ -73,17 +73,26 @@ bool World::lightIdle() const {
             return false;
     }
     for (const auto& coord : chunks | std::views::keys) {
-        bool windowLoaded = true;
-        for (int dz = -1; dz <= 1 && windowLoaded; ++dz)
-            for (int dx = -1; dx <= 1 && windowLoaded; ++dx)
-                windowLoaded = chunks.contains({coord.x + dx, coord.z + dz});
-        if (!windowLoaded)
+        if (!windowLoadedLocked(coord))
             continue;
         const ColumnJobTracker::Status* status = lightJobs.find(coord);
         if (!status || !status->current())
             return false;
     }
     return true;
+}
+
+bool World::windowLoadedLocked(const ChunkCoord& coord) const {
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+            if (!chunks.contains({coord.x + dx, coord.z + dz}))
+                return false;
+    return true;
+}
+
+World::JobCounts World::jobCounts() const {
+    std::lock_guard lock(chunk_mutex);
+    return {lightJobs.inFlight(), meshJobs.inFlight()};
 }
 
 void World::invalidateLightLocked(const ChunkCoord& coord) {
@@ -136,11 +145,7 @@ void World::scheduleLightJobs(const glm::vec3& playerPosition, ThreadPool& threa
         const ColumnJobTracker::Status& status = lightJobs.track(coord);
         if (status.inFlight || status.current())
             continue;
-        bool windowLoaded = true;
-        for (int dz = -1; dz <= 1 && windowLoaded; ++dz)
-            for (int dx = -1; dx <= 1 && windowLoaded; ++dx)
-                windowLoaded = chunks.contains({coord.x + dx, coord.z + dz});
-        if (!windowLoaded)
+        if (!windowLoadedLocked(coord))
             continue;
         const float cx = (static_cast<float>(coord.x) + 0.5f) * static_cast<float>(ChunkSection::SIZE) - playerPosition.x;
         const float cz = (static_cast<float>(coord.z) + 0.5f) * static_cast<float>(ChunkSection::SIZE) - playerPosition.z;
@@ -831,6 +836,21 @@ void World::scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& p
                               && lights.contains({coord.x + dx, coord.z + dz});
         if (!neighborsReady)
             continue;
+        // A column that has a mesh keeps it while a light it shows is being
+        // redone (after an edit): remeshing with the old light would show the
+        // newly exposed faces dark until the new light lands. Only lights
+        // that can be redone (their own 3x3 loaded) are waited for.
+        if (status.done != 0) {
+            bool lightPending = false;
+            for (int dz = -1; dz <= 1 && !lightPending; ++dz)
+                for (int dx = -1; dx <= 1 && !lightPending; ++dx) {
+                    const ChunkCoord n{coord.x + dx, coord.z + dz};
+                    const ColumnJobTracker::Status* light = lightJobs.find(n);
+                    lightPending = light && !light->current() && windowLoadedLocked(n);
+                }
+            if (lightPending)
+                continue;
+        }
 
         const float minX = static_cast<float>(coord.x) * CHUNK_SIZE;
         const float minZ = static_cast<float>(coord.z) * CHUNK_SIZE;

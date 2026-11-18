@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <future>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -163,4 +164,40 @@ SELFTEST(LightWorld, meshes_two_rings_inside_loaded) {
 		world.buildRenderStates({8.0f, 100.0f, 8.0f}, {1.0f, 0.0f, 0.0f}, pool);
 	for (const ChunkRenderState& s : world.getRenderStates())
 		CHECK(s.coord.x == 0 && s.coord.z == 0);
+}
+
+SELFTEST(LightWorld, mesh_waits_for_pending_light) {
+	// Breaking a block while light jobs are busy: a column that has a mesh
+	// keeps it until its light is redone, instead of remeshing with the old
+	// light (the newly exposed faces would be dark until the light lands).
+	const worldgen::TerrainGenerator gen(SEED);
+	World world;
+	world.open(SEED, nullptr);
+	ThreadPool pool(1);
+	for (const ChunkCoord c : patch(false))
+		world.adoptColumn(generated(gen, c));
+	const auto centreVertices = [&world] {
+		std::vector<std::size_t> counts;
+		for (const ChunkRenderState& s : world.getRenderStates())
+			if (s.coord == ChunkCoord{0, 0})
+				counts.push_back(s.mesh.vertices.size());
+		return counts;
+	};
+	CHECK(pump(world, pool, [&] {
+		const World::JobCounts jobs = world.jobCounts();
+		return world.lightIdle() && !centreVertices().empty() && jobs.lightInFlight == 0 && jobs.meshInFlight == 0;
+	}));
+	const std::vector<std::size_t> before = centreVertices();
+
+	std::promise<void> release;
+	const std::shared_future<void> gate = release.get_future().share();
+	pool.enqueueFireAndForget([gate] { gate.wait(); });             // the only worker is busy
+	const int y = gen.surfaceHeight(8, 8);
+	CHECK(world.setBlockAt({8, y, 8}, AIR_BLOCK));
+	world.buildRenderStates({8.0f, 100.0f, 8.0f}, {1.0f, 0.0f, 0.0f}, pool);
+	CHECK(world.jobCounts().lightInFlight > 0);
+	CHECK_EQ(world.jobCounts().meshInFlight, std::size_t{0});
+	release.set_value();
+
+	CHECK(pump(world, pool, [&] { return world.lightIdle() && centreVertices() != before; }));
 }
