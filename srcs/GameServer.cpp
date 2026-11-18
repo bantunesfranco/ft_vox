@@ -57,14 +57,21 @@ GameServer::~GameServer() {
 }
 
 bool GameServer::start(std::string& error) {
+	// Lock first: two servers started at once on a new folder must not both
+	// write a level.bin (with different seeds).
+	std::error_code ec;
+	std::filesystem::create_directories(_config.worldFolder, ec);
+	_lock = WorldLock::acquire(_config.worldFolder, error);
+	if (!_lock) {
+		error = "world " + _config.worldFolder.string() + " is locked: " + error;
+		return false;
+	}
+	const bool existed = std::filesystem::exists(_config.worldFolder / "level.bin", ec);
 	const auto world = openOrCreateWorld(_config.worldFolder, _config.seed.value_or(randomSeed()), error);
 	if (!world)
 		return false;
-	_lock = WorldLock::acquire(world->folder, error);
-	if (!_lock) {
-		error = "world " + world->folder.string() + " is locked: " + error;
-		return false;
-	}
+	if (existed && _config.seed && *_config.seed != world->seed)
+		log("--seed ignored: the world already exists (its seed is %lld)", static_cast<long long>(world->seed));
 	_seed  = world->seed;
 	_world = *world;
 	_timeOfDay = world->timeOfDay % TimeOfDay::TICKS_PER_DAY;
