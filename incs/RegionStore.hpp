@@ -23,6 +23,11 @@
 //  At most MAX_OPEN_FILES region files are open at once (least recently
 //  used ones are closed), so a long session never runs out of handles.
 //
+//  Background saves: stage() records the newest snapshot of a column, which
+//  load() returns until it is on disk. One writeStaged() per column writes
+//  it (and any snapshot staged meanwhile), so saves of one column never
+//  overlap or land out of order, and a reload never sees an older version.
+//
 //  Thread-safe: one mutex per region file.
 // ============================================================================
 
@@ -40,11 +45,20 @@ class RegionStore {
 public:
 	explicit RegionStore(std::filesystem::path regionDir);   // created on first save
 
-	// The saved column, or nullptr when absent or unreadable.
+	// The saved column (or the staged snapshot), or nullptr when absent or unreadable.
 	[[nodiscard]] std::unique_ptr<ChunkColumn> load(const ChunkCoord& coord);
 
 	// False when the file could not be written (the previous version stays).
 	bool save(const ChunkColumn& column);
+
+	// Records `column` as the newest version of its coordinates, to be written
+	// by writeStaged(). True: no write of it is pending, so the caller must
+	// run writeStaged(coord) once (on any thread). False: the pending one
+	// writes this snapshot too. The snapshot must not change afterwards.
+	bool stage(std::shared_ptr<const ChunkColumn> column);
+	// Writes the staged snapshot of `coord` until none newer is staged, then
+	// forgets it. False when a write failed.
+	bool writeStaged(const ChunkCoord& coord);
 
 	static constexpr int REGION_SIZE = 32;
 	static constexpr std::size_t MAX_OPEN_FILES = 64;
@@ -75,6 +89,9 @@ private:
 	std::mutex _regionsMutex;     // _regions and _open
 	std::unordered_map<ChunkCoord, std::unique_ptr<Region>> _regions;
 	std::list<Region*> _open;     // regions with an open file, most recent first
+
+	std::mutex _stagedMutex;
+	std::unordered_map<ChunkCoord, std::shared_ptr<const ChunkColumn>> _staged;
 };
 
 #endif /* REGION_STORE_HPP */

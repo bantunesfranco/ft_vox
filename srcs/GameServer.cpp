@@ -95,13 +95,18 @@ void GameServer::run() {
 }
 
 void GameServer::saveColumn(ColumnPtr column) {
+	// Staged first, so a reload of this column (even one that runs before the
+	// save job) gets this snapshot. A save of it already queued writes it too.
+	const ChunkCoord coord = column->coord();
+	if (!_store->stage(std::move(column)))
+		return;
 	{
 		std::lock_guard lock(_saveMutex);
 		++_savesInFlight;
 	}
-	_pool->enqueueFireAndForget([this, store = _store, column = std::move(column)] {
-		if (!store->save(*column))
-			std::fprintf(stderr, "[server] failed to save chunk %d,%d\n", column->coord().x, column->coord().z);
+	_pool->enqueueFireAndForget([this, store = _store, coord] {
+		if (!store->writeStaged(coord))
+			std::fprintf(stderr, "[server] failed to save chunk %d,%d\n", coord.x, coord.z);
 		std::lock_guard lock(_saveMutex);
 		--_savesInFlight;
 		_saveDone.notify_all();

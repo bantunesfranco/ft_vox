@@ -160,6 +160,8 @@ private:
 	std::mutex saveMutex;
 	std::condition_variable saveDone;
 	std::size_t savesInFlight = 0;
+	// Stages `column` in the store (loads see it from now on) and, unless a
+	// save of it is already queued, queues one. chunk_mutex held.
 	void enqueueSave(ThreadPool& threadPool, ColumnPtr column);
 
 	// Marks `coord` for remeshing; its current mesh stays visible until the

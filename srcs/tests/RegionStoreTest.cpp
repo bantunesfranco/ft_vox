@@ -194,6 +194,32 @@ SELFTEST(RegionStore, resave_reuses_space) {
 	CHECK(again && sameBlocks(*column, *again));
 }
 
+SELFTEST(RegionStore, staged_snapshot_loads_first) {
+	const selftest::TempDir dir;
+	RegionStore store(dir.path());
+	auto v1 = makeColumn({6, 6}, 20);
+	CHECK(store.save(*v1));                                    // on disk: v1
+
+	auto v2 = std::make_shared<ChunkColumn>(*v1);
+	v2->setUnchecked(5, 150, 5, toBlockId(BlockType::Snow));
+	CHECK(store.stage(v2));                                    // the caller must write it
+	auto loaded = store.load({6, 6});                          // not written yet: the snapshot
+	CHECK(loaded && sameBlocks(*v2, *loaded));
+
+	auto v3 = std::make_shared<ChunkColumn>(*v2);
+	v3->setUnchecked(5, 151, 5, toBlockId(BlockType::Sand));
+	CHECK(!store.stage(v3));                                   // the pending writer takes it
+	loaded = store.load({6, 6});
+	CHECK(loaded && sameBlocks(*v3, *loaded));
+
+	CHECK(store.writeStaged({6, 6}));                          // writes the newest
+	RegionStore reopened(dir.path());
+	loaded = reopened.load({6, 6});
+	CHECK(loaded && sameBlocks(*v3, *loaded));
+	CHECK(store.stage(v2));                                    // nothing pending any more
+	CHECK(store.writeStaged({6, 6}));
+}
+
 SELFTEST(RegionStore, concurrent_saves) {
 	const selftest::TempDir dir;
 	RegionStore store(dir.path());

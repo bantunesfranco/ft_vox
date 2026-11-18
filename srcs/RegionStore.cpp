@@ -208,6 +208,18 @@ bool RegionStore::open(Region& region, const ChunkCoord& regionCoord, const bool
 }
 
 std::unique_ptr<ChunkColumn> RegionStore::load(const ChunkCoord& coord) {
+	{
+		// A snapshot not written yet is newer than anything on disk.
+		std::shared_ptr<const ChunkColumn> staged;
+		{
+			std::lock_guard lock(_stagedMutex);
+			if (const auto it = _staged.find(coord); it != _staged.end())
+				staged = it->second;
+		}
+		if (staged)
+			return std::make_unique<ChunkColumn>(*staged);
+	}
+
 	const ChunkCoord r = regionOf(coord);
 	Region& region = regionFor(r);
 	std::lock_guard lock(region.mutex);
@@ -282,4 +294,37 @@ bool RegionStore::save(const ChunkColumn& column) {
 		return false;
 	}
 	return true;
+}
+
+bool RegionStore::stage(std::shared_ptr<const ChunkColumn> column) {
+	const ChunkCoord coord = column->coord();
+	std::lock_guard lock(_stagedMutex);
+	const auto [it, inserted] = _staged.try_emplace(coord, column);
+	if (!inserted)
+		it->second = std::move(column);
+	return inserted;
+}
+
+bool RegionStore::writeStaged(const ChunkCoord& coord) {
+	std::shared_ptr<const ChunkColumn> column;
+	{
+		std::lock_guard lock(_stagedMutex);
+		const auto it = _staged.find(coord);
+		if (it == _staged.end())
+			return true;
+		column = it->second;
+	}
+	bool ok = true;
+	for (;;) {
+		ok = save(*column) && ok;
+		// Forget the snapshot only once it is on disk (loads read it until
+		// then), unless a newer one was staged meanwhile: write that too.
+		std::lock_guard lock(_stagedMutex);
+		const auto it = _staged.find(coord);
+		if (it->second == column) {
+			_staged.erase(it);
+			return ok;
+		}
+		column = it->second;
+	}
 }

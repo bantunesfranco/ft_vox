@@ -3,6 +3,7 @@
 #include "ThreadPool.hpp"
 #include "World.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 
@@ -117,4 +118,63 @@ SELFTEST(WorldSave, unload_saves_dirty) {
 	CHECK(saved != nullptr);
 	if (saved)
 		CHECK_EQ(saved->getUnchecked(EDIT_POS.x, ChunkColumn::toStorageY(EDIT_POS.y), EDIT_POS.z), edit);
+}
+
+// Unloading an edited column and coming straight back, before the pool ran
+// the save, must load the edited version (not the older one on disk, nor a
+// fresh generation). One worker stays held, so the other runs the load before
+// the save whenever the save sits in the held worker's queue (it steals from
+// the back): over a few rounds that happens almost surely.
+SELFTEST(WorldSave, reload_before_save_keeps_edit) {
+	const selftest::TempDir dir;
+	const auto store = std::make_shared<RegionStore>(dir.path());
+	World world;
+	ThreadPool pool(2);
+	world.open(1, store);
+	const glm::vec3 near{8, 100, 8};
+	const glm::vec3 away{static_cast<float>((World::CHUNK_LOAD_RADIUS + 1) * 16 + 8), 100, 8};
+	CHECK(waitLoaded(world, pool, near, EDIT_POS));
+	world.flush(pool);                              // (0, 0) on disk, unedited
+
+	for (int round = 0; round < 6; ++round) {
+		const BlockId edit = changeEditBlock(world);
+
+		std::atomic<int> held{0};
+		std::atomic<int> left{0};
+		std::atomic<bool> releaseFirst{false};
+		std::atomic<bool> releaseAll{false};
+		for (int i = 0; i < 2; ++i)
+			pool.enqueueFireAndForget([&held, &left, &releaseFirst, &releaseAll] {
+				const int me = held++;
+				while (!(me == 0 ? releaseFirst.load() : releaseAll.load()))
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				++left;
+			});
+		while (held < 2)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		for (int i = 0; i < round; ++i)
+			pool.enqueueFireAndForget([] {});      // shifts which queue the save lands in
+
+		BlockId block = AIR_BLOCK;
+		for (int i = 0; i < 1000 && world.getBlockAt(EDIT_POS, block); ++i)
+			world.updateChunks(away, pool);         // the save of (0, 0) is queued, not run
+		CHECK(!world.getBlockAt(EDIT_POS, block));
+		for (int i = 0; i < 4; ++i)
+			world.updateChunks(near, pool);         // the reload of (0, 0) is queued too
+		releaseFirst = true;
+
+		CHECK(waitLoaded(world, pool, near, EDIT_POS));
+		CHECK(world.getBlockAt(EDIT_POS, block));
+		CHECK_EQ(block, edit);
+		releaseAll = true;
+		while (left < 2)                            // they point at this round's locals
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		world.flush(pool);
+		if (block != edit)
+			break;
+	}
+	BlockId block = AIR_BLOCK;
+	CHECK(world.getBlockAt(EDIT_POS, block));
+	const auto saved = store->load({0, 0});
+	CHECK(saved && saved->getUnchecked(EDIT_POS.x, ChunkColumn::toStorageY(EDIT_POS.y), EDIT_POS.z) == block);
 }

@@ -398,15 +398,20 @@ glm::ivec2 World::spawnPoint() const {
 }
 
 void World::enqueueSave(ThreadPool& threadPool, ColumnPtr column) {
+    // Staged first, so a load of this column (even one that runs before the
+    // save job) gets this snapshot. A save of it already queued writes it too.
+    const ChunkCoord coord = column->coord();
+    if (!store->stage(std::move(column)))
+        return;
     {
         std::lock_guard lock(saveMutex);
         ++savesInFlight;
     }
-    threadPool.enqueueFireAndForget([this, columnStore = store, column = std::move(column)] {
+    threadPool.enqueueFireAndForget([this, columnStore = store, coord] {
         {
             Trace::Scope span("save column");
-            if (!columnStore->save(*column))
-                std::cerr << "Failed to save chunk " << column->coord().x << ", " << column->coord().z << std::endl;
+            if (!columnStore->writeStaged(coord))
+                std::cerr << "Failed to save chunk " << coord.x << ", " << coord.z << std::endl;
         }
         std::lock_guard lock(saveMutex);
         --savesInFlight;
