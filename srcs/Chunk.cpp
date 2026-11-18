@@ -227,6 +227,49 @@ BlockId ChunkNeighborhood::getBlock(int x, int y, int z) const noexcept {
     return column->getUnchecked(localX, y, localZ);
 }
 
+void ChunkNeighborhood::copyBlocks(int x0, const int x1, const int y, const int z, BlockId* out) const noexcept {
+    assert(x0 >= -ChunkSection::SIZE && x0 <= x1 && x1 <= 2 * ChunkSection::SIZE);
+    assert(z >= -ChunkSection::SIZE && z < 2 * ChunkSection::SIZE);
+    if (y < 0 || y >= ChunkColumn::HEIGHT) {
+        std::fill_n(out, x1 - x0, AIR_BLOCK);
+        return;
+    }
+    const int dz = z < 0 ? -1 : (z >= ChunkSection::SIZE ? 1 : 0);
+    while (x0 < x1) {
+        const int dx = x0 < 0 ? -1 : (x0 >= ChunkSection::SIZE ? 1 : 0);
+        const int end = std::min(x1, (dx + 1) * ChunkSection::SIZE);
+        const ChunkColumn* column = _columns[static_cast<std::size_t>(index(dx, dz))];
+        if (column == nullptr)
+            std::fill_n(out, end - x0, AIR_BLOCK);   // as getBlock: a missing column reads as air
+        else
+            column->section(y >> 4).copyRow(x0 - dx * ChunkSection::SIZE, y & 15, z - dz * ChunkSection::SIZE,
+                                            end - x0, out);
+        out += end - x0;
+        x0 = end;
+    }
+}
+
+void ChunkNeighborhood::copyLight(int x0, const int x1, const int y, const int z, std::uint8_t* out) const noexcept {
+    assert(x0 >= -ChunkSection::SIZE && x0 <= x1 && x1 <= 2 * ChunkSection::SIZE);
+    assert(z >= -ChunkSection::SIZE && z < 2 * ChunkSection::SIZE);
+    if (y < 0 || y >= ChunkColumn::HEIGHT) {
+        std::fill_n(out, x1 - x0, y < 0 ? std::uint8_t{0} : ColumnLight::FULL_SKY);
+        return;
+    }
+    const int dz = z < 0 ? -1 : (z >= ChunkSection::SIZE ? 1 : 0);
+    while (x0 < x1) {
+        const int dx = x0 < 0 ? -1 : (x0 >= ChunkSection::SIZE ? 1 : 0);
+        const int end = std::min(x1, (dx + 1) * ChunkSection::SIZE);
+        const ColumnLight* light = _lights[static_cast<std::size_t>(index(dx, dz))];
+        if (light == nullptr)
+            std::fill_n(out, end - x0, ColumnLight::FULL_SKY);
+        else
+            light->copyRow(x0 - dx * ChunkSection::SIZE, y, z - dz * ChunkSection::SIZE, end - x0, out);
+        out += end - x0;
+        x0 = end;
+    }
+}
+
 void ChunkNeighborhood::setLight(const int dx, const int dz, const ColumnLight* light) noexcept {
     if (dx < -1 || dx > 1 || dz < -1 || dz > 1)
         return;

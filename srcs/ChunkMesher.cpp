@@ -59,11 +59,33 @@ void ChunkMesher::build(
     const auto cell = [](const int x, const int y, const int z) noexcept {
         return static_cast<std::size_t>((x + 1) + (z + 1) * padded + (y + 1) * padded * padded);
     };
+    // Steps between neighbouring cells along x, y, z.
+    constexpr std::array<int, 3> stride = {1, padded * padded, padded};
     const int baseY = sectionY * size;
+    // Per block id, looked up once per section instead of once per cell.
+    std::array<const BlockDefinition*, BLOCK_TYPE_COUNT> definitions{};
+    std::array<std::uint8_t, BLOCK_TYPE_COUNT> opaqueId{};
     // Blocks drawn with their own model (torches), not as cube faces.
     std::array<bool, BLOCK_TYPE_COUNT> modelled{};
-    for (std::size_t id = 0; id < BLOCK_TYPE_COUNT; ++id)
-        modelled[id] = registry.get(static_cast<BlockId>(id)).model != BlockModel::Cube;
+    for (std::size_t id = 0; id < BLOCK_TYPE_COUNT; ++id) {
+        definitions[id] = &registry.get(static_cast<BlockId>(id));
+        opaqueId[id] = registry.isOpaque(static_cast<BlockId>(id)) ? 1 : 0;
+        modelled[id] = definitions[id]->model != BlockModel::Cube;
+    }
+
+    // Row by row (x fastest): the section's own rows, the border from the neighbours.
+    for (int y = -1; y <= size; ++y)
+        for (int z = -1; z <= size; ++z) {
+            BlockId* row = &blocks[cell(-1, y, z)];
+            if (y >= 0 && y < size && z >= 0 && z < size) {
+                neighborhood.copyBlocks(-1, 0, y + baseY, z, row);
+                section.copyRow(0, y, z, size, row + 1);
+                neighborhood.copyBlocks(size, size + 1, y + baseY, z, row + size + 1);
+            } else {
+                neighborhood.copyBlocks(-1, size + 1, y + baseY, z, row);
+            }
+        }
+
     std::vector<std::array<int, 3>> modelCells;
     // Buried: the section and every border cell sharing a face with it are
     // opaque, so no face can be visible (deep stone). Border edges and
@@ -72,29 +94,26 @@ void ChunkMesher::build(
     for (int y = -1; y <= size; ++y) {
         for (int z = -1; z <= size; ++z) {
             const bool interiorRow = y >= 0 && y < size && z >= 0 && z < size;
+            const int rowOutside = (y < 0 || y >= size) + (z < 0 || z >= size);
             for (int x = -1; x <= size; ++x) {
+                const std::size_t index = cell(x, y, z);
+                const BlockId block = blocks[index];
+                const std::uint8_t isOpaque = opaqueId[block];
+                opaque[index] = isOpaque;
                 const bool interior = interiorRow && x >= 0 && x < size;
-                const BlockId block = interior
-                    ? section.getUnchecked(x, y, z)
-                    : neighborhood.getBlock(x, y + baseY, z);
-                const bool isOpaque = registry.isOpaque(block);
-                blocks[cell(x, y, z)] = block;
-                opaque[cell(x, y, z)] = isOpaque ? 1 : 0;
                 if (interior && modelled[block])
                     modelCells.push_back({x, y, z});
-                light[cell(x, y, z)] = neighborhood.getLight(x, y + baseY, z);
-
-                const int outside = (x < 0 || x >= size) + (y < 0 || y >= size) + (z < 0 || z >= size);
-                if (!isOpaque && outside <= 1)
+                if (!isOpaque && rowOutside + (x < 0 || x >= size) <= 1)
                     buried = false;
             }
         }
     }
     if (buried)
         return;
-    const auto blockAt  = [&](const std::array<int, 3>& p) { return blocks[cell(p[0], p[1], p[2])]; };
-    const auto opaqueAt = [&](const std::array<int, 3>& p) { return opaque[cell(p[0], p[1], p[2])] != 0; };
-    const auto lightAt  = [&](const std::array<int, 3>& p) { return light[cell(p[0], p[1], p[2])]; };
+
+    for (int y = -1; y <= size; ++y)
+        for (int z = -1; z <= size; ++z)
+            neighborhood.copyLight(-1, size + 1, y + baseY, z, &light[cell(-1, y, z)]);
 
     output.reserve(2048);
     transparentOutput.reserve(512);
@@ -106,30 +125,40 @@ void ChunkMesher::build(
         for (int directionIndex = axis * 2; directionIndex < axis * 2 + 2; ++directionIndex) {
             const NormalDir direction = directions[directionIndex];
             const int sign = directionIndex % 2 == 0 ? 1 : -1;
+            const int front = sign * stride[axis];        // from a block to the cell its face looks into
+
+            // Per corner, from the front cell: the two side cells and the diagonal one.
+            struct CornerCells {
+                int sideOne;
+                int sideTwo;
+                int diagonal;
+            };
+            std::array<CornerCells, 4> cornerCells{};
+            for (std::size_t corner = 0; corner < cornerCells.size(); ++corner) {
+                const int uStep = (cornerUv[directionIndex][corner][0] == 0 ? -1 : 1) * stride[uAxis];
+                const int vStep = (cornerUv[directionIndex][corner][1] == 0 ? -1 : 1) * stride[vAxis];
+                cornerCells[corner] = {uStep, vStep, uStep + vStep};
+            }
 
             for (int slice = 0; slice < size; ++slice) {
                 mask.fill(empty);
                 maskAo.fill(nonUniformAo);
+                const std::size_t sliceCell = cell(0, 0, 0) + static_cast<std::size_t>(slice * stride[axis]);
 
                 for (int v = 0; v < size; ++v) {
                     for (int u = 0; u < size; ++u) {
-                        std::array<int, 3> position{};
-                        position[axis] = slice;
-                        position[uAxis] = u;
-                        position[vAxis] = v;
-
-                        const BlockId block = blockAt(position);
+                        const std::size_t position = sliceCell + static_cast<std::size_t>(u * stride[uAxis] + v * stride[vAxis]);
+                        const BlockId block = blocks[position];
                         if (block == AIR_BLOCK)
                             continue;
 
-                        std::array<int, 3> neighborPosition = position;
-                        neighborPosition[axis] += sign;
-                        if (opaqueAt(neighborPosition))
+                        const std::size_t neighbor = position + static_cast<std::size_t>(front);
+                        if (opaque[neighbor] != 0)
                             continue;                       // hidden face: the common case
                         if (modelled[block])
                             continue;                       // drawn below, with its model
-                        const BlockDefinition& definition = registry.get(block);
-                        if (definition.transparent && blockAt(neighborPosition) == block)
+                        const BlockDefinition& definition = *definitions[block];
+                        if (definition.transparent && blocks[neighbor] == block)
                             continue;
 
                         const std::uint16_t texture = axis == 1
@@ -138,23 +167,13 @@ void ChunkMesher::build(
                         std::array<std::uint8_t, 4> faceAo{};
                         std::array<std::uint8_t, 4> faceLight{};
                         for (std::size_t corner = 0; corner < faceAo.size(); ++corner) {
-                            std::array<int, 3> sideOne = position;
-                            std::array<int, 3> sideTwo = position;
-                            std::array<int, 3> diagonal = position;
-                            sideOne[axis] += sign;
-                            sideTwo[axis] += sign;
-                            diagonal[axis] += sign;
+                            const std::size_t sideOne = neighbor + static_cast<std::size_t>(cornerCells[corner].sideOne);
+                            const std::size_t sideTwo = neighbor + static_cast<std::size_t>(cornerCells[corner].sideTwo);
+                            const std::size_t diagonal = neighbor + static_cast<std::size_t>(cornerCells[corner].diagonal);
 
-                            const int uSign = cornerUv[directionIndex][corner][0] == 0 ? -1 : 1;
-                            const int vSign = cornerUv[directionIndex][corner][1] == 0 ? -1 : 1;
-                            sideOne[uAxis] += uSign;
-                            sideTwo[vAxis] += vSign;
-                            diagonal[uAxis] += uSign;
-                            diagonal[vAxis] += vSign;
-
-                            const bool sideOneOpaque = opaqueAt(sideOne);
-                            const bool sideTwoOpaque = opaqueAt(sideTwo);
-                            const bool diagonalOpaque = opaqueAt(diagonal);
+                            const bool sideOneOpaque = opaque[sideOne] != 0;
+                            const bool sideTwoOpaque = opaque[sideTwo] != 0;
+                            const bool diagonalOpaque = opaque[diagonal] != 0;
                             faceAo[corner] = sideOneOpaque && sideTwoOpaque
                                 ? 0
                                 : static_cast<std::uint8_t>(3 - static_cast<int>(sideOneOpaque)
@@ -163,13 +182,13 @@ void ChunkMesher::build(
                             // Smooth light: the average of the open cells among the
                             // four in front of this corner (as Minecraft does).
                             int skySum = 0, blockSum = 0, samples = 0;
-                            const auto add = [&](const std::array<int, 3>& p) {
-                                const std::uint8_t packed = lightAt(p);
+                            const auto add = [&](const std::size_t at) {
+                                const std::uint8_t packed = light[at];
                                 skySum += packed >> 4;
                                 blockSum += packed & 0x0F;
                                 ++samples;
                             };
-                            add(neighborPosition);
+                            add(neighbor);
                             if (!sideOneOpaque)
                                 add(sideOne);
                             if (!sideTwoOpaque)
@@ -264,7 +283,7 @@ void ChunkMesher::build(
 
     for (const auto& [x, y, z] : modelCells) {
         const BlockId block = blocks[cell(x, y, z)];
-        const BlockDefinition& definition = registry.get(block);
+        const BlockDefinition& definition = *definitions[block];
         const std::uint8_t packed = light[cell(x, y, z)];
         const auto blockLight = static_cast<std::uint8_t>(std::max<int>(packed & 0x0F, definition.lightEmission));
         const auto cellLight = static_cast<std::uint8_t>((packed & 0xF0) | blockLight);

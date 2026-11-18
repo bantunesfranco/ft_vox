@@ -1,6 +1,7 @@
 #include "SelfTest.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #include "BlockTextures.hpp"
 #include "ChunkMesher.hpp"
@@ -311,4 +312,95 @@ SELFTEST(Mesher, vertices_are_quads) {
 	}
 	CHECK(meshes > 4);
 	CHECK_EQ(bad, 0);
+}
+
+namespace {
+
+// FNV-1a 64 over every section's mesh of generated column `c` (seed 1234):
+// per section the opaque then the transparent vertex count and vertices
+// (a, b as little-endian u32). All 3x3 lights are computed, as in the game.
+std::uint64_t columnMeshHash(const ChunkCoord c) {
+	const worldgen::TerrainGenerator gen(1234);
+	std::array<std::unique_ptr<ChunkColumn>, 25> columns;   // 5x5 around c: the 3x3 lights need it
+	for (int dz = -2; dz <= 2; ++dz)
+		for (int dx = -2; dx <= 2; ++dx) {
+			auto column = std::make_unique<ChunkColumn>(ChunkCoord{c.x + dx, c.z + dz});
+			gen.generate(*column);
+			columns[static_cast<std::size_t>((dz + 2) * 5 + (dx + 2))] = std::move(column);
+		}
+	const auto at = [&](const int dx, const int dz) { return columns[static_cast<std::size_t>((dz + 2) * 5 + (dx + 2))].get(); };
+	const BlockRegistry registry;
+	std::array<std::shared_ptr<const ColumnLight>, 9> lights;
+	ChunkNeighborhood neighborhood(at(0, 0));
+	for (int dz = -1; dz <= 1; ++dz)
+		for (int dx = -1; dx <= 1; ++dx) {
+			ColumnWindow window{};
+			for (int wz = -1; wz <= 1; ++wz)
+				for (int wx = -1; wx <= 1; ++wx)
+					window[static_cast<std::size_t>((wz + 1) * 3 + (wx + 1))] = at(dx + wx, dz + wz);
+			const auto i = static_cast<std::size_t>((dz + 1) * 3 + (dx + 1));
+			lights[i] = computeLight(window, registry);
+			neighborhood.setNeighbor(dx, dz, at(dx, dz));
+			neighborhood.setLight(dx, dz, lights[i].get());
+		}
+
+	std::uint64_t hash = 14695981039346656037ull;
+	const auto mix = [&hash](const std::uint32_t word) {
+		for (int shift = 0; shift < 32; shift += 8)
+			hash = (hash ^ ((word >> shift) & 0xFFu)) * 1099511628211ull;
+	};
+	MeshData opaque, transparent;
+	for (int sectionY = 0; sectionY < ChunkColumn::SECTION_COUNT; ++sectionY) {
+		ChunkMesher::build(at(0, 0)->section(sectionY), sectionY, neighborhood, registry, opaque, transparent);
+		for (const MeshData* data : {&opaque, &transparent}) {
+			mix(static_cast<std::uint32_t>(data->vertices.size()));
+			for (const PackedVertex& v : data->vertices) {
+				mix(v.a);
+				mix(v.b);
+			}
+		}
+	}
+	return hash;
+}
+
+} // namespace
+
+// The mesher's output for five generated columns, pinned: optimizations must
+// not change a single vertex.
+SELFTEST(Mesher, output_hash) {
+	const std::array<std::pair<ChunkCoord, std::uint64_t>, 5> expected = {{
+		{{0, 0}, 0x16e9ed869bb4e2a5ull},
+		{{5, -3}, 0xec57a508ab6a257aull},
+		{{-40, 17}, 0x9db630ca5e244cefull},
+		{{200, 200}, 0x6d3d37ea6e45f01aull},
+		{{-7, -900}, 0xce11d784f0e86514ull},
+	}};
+	for (const auto& [coord, hash] : expected) {
+		CHECK_EQ(columnMeshHash(coord), hash);
+	}
+}
+
+// The mesher's row copies read exactly what getBlock / getLight read, also
+// for a missing column, a missing light and rows above and below the world.
+SELFTEST(Mesher, row_copies_match_lookups) {
+	TestWorld w(FLOOR);
+	w.set(-1, FLOOR + 1, 3, toBlockId(BlockType::Glowstone));
+	w.set(16, 5, 16, toBlockId(BlockType::Dirt));
+	const auto light = w.light();
+	ChunkNeighborhood neighborhood = neighborhoodOf(w, light.get());
+	neighborhood.setNeighbor(1, -1, nullptr);          // a missing column reads as air
+	int wrong = 0;
+	std::array<BlockId, 18> blocks{};
+	std::array<std::uint8_t, 18> lights{};
+	for (const int y : {-1, 0, 5, FLOOR, FLOOR + 1, FLOOR + 2, ChunkColumn::HEIGHT - 1, ChunkColumn::HEIGHT})
+		for (int z = -1; z <= 16; ++z) {
+			neighborhood.copyBlocks(-1, 17, y, z, blocks.data());
+			neighborhood.copyLight(-1, 17, y, z, lights.data());
+			for (int x = -1; x <= 16; ++x) {
+				const auto i = static_cast<std::size_t>(x + 1);
+				wrong += blocks[i] == neighborhood.getBlock(x, y, z) ? 0 : 1;
+				wrong += lights[i] == neighborhood.getLight(x, y, z) ? 0 : 1;
+			}
+		}
+	CHECK_EQ(wrong, 0);
 }

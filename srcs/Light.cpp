@@ -271,6 +271,15 @@ std::uint8_t ColumnLight::at(const int x, const int storageY, const int z) const
 	return (*s.values)[static_cast<std::size_t>(x + (z << 4) + ((storageY % ChunkSection::SIZE) << 8))];
 }
 
+void ColumnLight::copyRow(const int x, const int storageY, const int z, const int count, std::uint8_t* out) const noexcept {
+	assert(x >= 0 && count >= 0 && x + count <= ChunkSection::SIZE);
+	const Section& s = _sections[static_cast<std::size_t>(storageY / ChunkSection::SIZE)];
+	if (!s.values)
+		std::fill_n(out, count, s.uniform);
+	else
+		std::copy_n(s.values->data() + x + (z << 4) + ((storageY % ChunkSection::SIZE) << 8), count, out);
+}
+
 std::size_t ColumnLight::heapBytes() const noexcept {
 	std::size_t bytes = 0;
 	for (const Section& s : _sections)

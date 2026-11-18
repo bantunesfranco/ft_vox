@@ -29,6 +29,8 @@ class ColumnLight {
 public:
 	// Packed (sky << 4) | block; 0 <= x, z < 16, 0 <= storageY < HEIGHT.
 	[[nodiscard]] std::uint8_t at(int x, int storageY, int z) const noexcept;
+	// at() for the `count` cells of row (storageY, z) from x on, into `out`.
+	void copyRow(int x, int storageY, int z, int count, std::uint8_t* out) const noexcept;
 	[[nodiscard]] static std::uint8_t sky(const std::uint8_t packed) noexcept { return static_cast<std::uint8_t>(packed >> 4); }
 	[[nodiscard]] static std::uint8_t block(const std::uint8_t packed) noexcept { return static_cast<std::uint8_t>(packed & 0x0F); }
 

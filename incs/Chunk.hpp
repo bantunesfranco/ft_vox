@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <functional>
@@ -60,6 +61,15 @@ public:
     [[nodiscard]]
     BlockId getUnchecked(int x, int y, int z) const noexcept {
         return _dense ? (*_dense)[static_cast<std::size_t>(index(x, y, z))] : _uniform;
+    }
+
+    // Copies the `count` blocks of row (y, z) from x on into `out`.
+    void copyRow(const int x, const int y, const int z, const int count, BlockId* out) const noexcept {
+        assert(x >= 0 && count >= 0 && x + count <= SIZE);
+        if (_dense)
+            std::copy_n(_dense->data() + index(x, y, z), count, out);
+        else
+            std::fill_n(out, count, _uniform);
     }
 
     void setUnchecked(int x, int y, int z, BlockId block) noexcept {
@@ -194,6 +204,11 @@ public:
 
     [[nodiscard]]
     BlockId getBlock(int x, int y, int z) const noexcept;
+
+    // getBlock for x0 <= x < x1 of row (y, z) into out[0 .. x1 - x0), and
+    // getLight the same way: whole rows, one column lookup per column.
+    void copyBlocks(int x0, int x1, int y, int z, BlockId* out) const noexcept;
+    void copyLight(int x0, int x1, int y, int z, std::uint8_t* out) const noexcept;
 
     // Light of the 3x3 columns (null: not computed yet, reads as full sky).
     void setLight(int dx, int dz, const ColumnLight* light) noexcept;
