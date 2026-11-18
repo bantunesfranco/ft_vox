@@ -397,7 +397,8 @@ void App::renderFrame() {
 	const TimeOfDay::SkyColours sky = TimeOfDay::skyColours(ticks, {clearColor[0], clearColor[1], clearColor[2]});
 	const glm::vec3 zenith = sky.zenith;
 	const glm::vec3 horizon = sky.horizon;
-	worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_RADIUS * ChunkSection::SIZE));
+	// Full haze where the meshed terrain ends (from a chunk's edge, the worst case).
+	worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_MESH_RADIUS * ChunkSection::SIZE));
 	world.frustum.updateFrustum(camera->proj, camera->view);
 
 	for (auto& gpuMesh : world.pruneRenderStates())

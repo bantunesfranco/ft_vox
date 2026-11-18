@@ -22,6 +22,9 @@ public:
 	static constexpr int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
 	static constexpr int CHUNK_LOAD_RADIUS = CHUNK_RADIUS + 1;
 	static constexpr int CHUNK_LOAD_DIAMETER = CHUNK_LOAD_RADIUS * 2 + 1;
+	// Columns get meshes this far out: a mesh needs the light of its 3x3,
+	// and each light needs its own 3x3 of loaded columns.
+	static constexpr int CHUNK_MESH_RADIUS = CHUNK_LOAD_RADIUS - 2;
 
 	World();   // generates with seed 0 until open() is called
 

@@ -144,3 +144,23 @@ SELFTEST(LightWorld, same_light_any_order) {
 		}
 	CHECK_EQ(different, 0);
 }
+
+SELFTEST(LightWorld, meshes_two_rings_inside_loaded) {
+	// The haze ends at World::CHUNK_MESH_RADIUS = CHUNK_LOAD_RADIUS - 2: with
+	// 5 x 5 columns loaded (radius 2), only the centre gets a mesh.
+	static_assert(World::CHUNK_MESH_RADIUS == World::CHUNK_LOAD_RADIUS - 2);
+	const worldgen::TerrainGenerator gen(SEED);
+	World world;
+	world.open(SEED, nullptr);
+	ThreadPool pool(2);
+	for (const ChunkCoord c : patch(false))
+		world.adoptColumn(generated(gen, c));
+	const auto meshed = [&world](const ChunkCoord c) {
+		return std::ranges::any_of(world.getRenderStates(), [c](const ChunkRenderState& s) { return s.coord == c; });
+	};
+	CHECK(pump(world, pool, [&] { return world.lightIdle() && meshed({0, 0}); }));
+	for (int i = 0; i < 20; ++i)
+		world.buildRenderStates({8.0f, 100.0f, 8.0f}, {1.0f, 0.0f, 0.0f}, pool);
+	for (const ChunkRenderState& s : world.getRenderStates())
+		CHECK(s.coord.x == 0 && s.coord.z == 0);
+}
