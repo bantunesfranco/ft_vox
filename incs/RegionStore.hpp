@@ -10,17 +10,25 @@
 //    (cx - rx*32) + (cz - rz*32) * 32; length 0 = absent), then blobs.
 //  A blob is {i32 cx, i32 cz} + the ChunkCodec encoding of the column.
 //
-//  Saving appends the blob, flushes, and only then points the table entry
-//  at it: a crash leaves either the old or the new version, never a broken
-//  file. Re-saving leaves the old blob as dead space (no compaction).
+//  Saving writes the blob into space no table entry uses (a gap left by an
+//  older blob when it fits, else the end of the file), flushes, and only
+//  then points the table entry at it: if the process dies, the file holds
+//  either the old or the new version, never a broken one. Writes are
+//  flushed, not fsynced, so a power loss or OS crash gives no such promise.
 //  Anything unreadable (damaged file, bad range, failed decode) loads as
-//  absent, so the column is simply generated again.
+//  absent, so the column is simply generated again. A damaged file is kept
+//  as r.<rx>.<rz>.bin.bad before a save starts it again; a file from a newer
+//  version of the game is never written.
+//
+//  At most MAX_OPEN_FILES region files are open at once (least recently
+//  used ones are closed), so a long session never runs out of handles.
 //
 //  Thread-safe: one mutex per region file.
 // ============================================================================
 
 #include <filesystem>
 #include <fstream>
+#include <list>
 #include <vector>
 #include <memory>
 #include <mutex>
@@ -39,26 +47,34 @@ public:
 	bool save(const ChunkColumn& column);
 
 	static constexpr int REGION_SIZE = 32;
+	static constexpr std::size_t MAX_OPEN_FILES = 64;
 
 private:
-	// An open region file and its table, kept for the life of the store.
+	// A region file and its table. Entries live as long as the store; the
+	// file is open only while the region is among the most recently used.
 	struct Region {
 		std::mutex        mutex;
 		std::fstream      file;
-		std::vector<char> header;     // the table as on disk
-		bool              opened = false;
-		bool              valid  = false;   // file open and table read
+		std::vector<char> header;     // the table as on disk (while valid)
+		bool              valid   = false;   // file open and table read
+		bool              newer   = false;   // a newer version's file: never touched
+		bool              listed  = false;   // in _open
+		std::list<Region*>::iterator lru;    // its place in _open (while listed)
 	};
-	// Opens the file (and reads the table) once; `create` starts a missing
-	// or damaged file. Region mutex held.
+	// Opens the file (and reads the table) when it is not open; `create`
+	// starts a missing or damaged file. Region mutex held.
 	bool open(Region& region, const ChunkCoord& regionCoord, bool create);
+	// `region` was just used: most recent in _open, closing the least recently
+	// used files beyond MAX_OPEN_FILES. Region mutex held.
+	void touch(Region& region);
 
 	Region& regionFor(const ChunkCoord& regionCoord);
 	[[nodiscard]] std::filesystem::path fileFor(const ChunkCoord& regionCoord) const;
 
 	std::filesystem::path _dir;
-	std::mutex _regionsMutex;
+	std::mutex _regionsMutex;     // _regions and _open
 	std::unordered_map<ChunkCoord, std::unique_ptr<Region>> _regions;
+	std::list<Region*> _open;     // regions with an open file, most recent first
 };
 
 #endif /* REGION_STORE_HPP */

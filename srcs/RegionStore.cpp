@@ -1,9 +1,12 @@
 #include "RegionStore.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "ChunkCodec.hpp"
@@ -46,14 +49,20 @@ std::uint32_t getU32(const char* in) {
 	return v;
 }
 
-// The table of a region file, or false when the file is absent or damaged.
-bool readHeader(std::fstream& file, std::vector<char>& header) {
+enum class Header { Ok, Damaged, Newer };
+
+// The table of an open region file.
+Header readHeader(std::fstream& file, std::vector<char>& header) {
 	header.assign(HEADER_SIZE, 0);
+	file.clear();
 	file.seekg(0);
-	if (!file.read(header.data(), static_cast<std::streamsize>(HEADER_SIZE)))
-		return false;
-	return std::memcmp(header.data(), MAGIC.data(), MAGIC.size()) == 0
-	    && getU32(header.data() + MAGIC.size()) == VERSION;
+	if (!file.read(header.data(), static_cast<std::streamsize>(HEADER_SIZE))
+	    || std::memcmp(header.data(), MAGIC.data(), MAGIC.size()) != 0)
+		return Header::Damaged;
+	const std::uint32_t version = getU32(header.data() + MAGIC.size());
+	if (version > VERSION)
+		return Header::Newer;
+	return version == VERSION ? Header::Ok : Header::Damaged;
 }
 
 bool writeFreshFile(const fs::path& path) {
@@ -61,7 +70,48 @@ bool writeFreshFile(const fs::path& path) {
 	std::memcpy(header.data(), MAGIC.data(), MAGIC.size());
 	putU32(header.data() + MAGIC.size(), VERSION);
 	std::ofstream file(path, std::ios::binary | std::ios::trunc);
-	return static_cast<bool>(file.write(header.data(), static_cast<std::streamsize>(header.size())));
+	file.write(header.data(), static_cast<std::streamsize>(header.size()));
+	file.close();
+	return static_cast<bool>(file);
+}
+
+// Renames a damaged file to <file>.bad (replacing an older one), so starting
+// it again never destroys the only copy. False when it could not be moved.
+bool keepAside(const fs::path& file) {
+	fs::path bad = file;
+	bad += ".bad";
+	std::error_code ec;
+	fs::rename(file, bad, ec);
+	if (ec) {
+		std::cerr << "region file " << file.filename().string() << " is damaged and could not be kept as "
+		          << bad.filename().string() << ": " << ec.message() << '\n';
+		return false;
+	}
+	std::cerr << "region file " << file.filename().string() << " is damaged: kept as "
+	          << bad.filename().string() << ", started again\n";
+	return true;
+}
+
+// Where a blob of `length` bytes can go without touching any blob the table
+// points at: the first gap that fits, else past the last one.
+std::uint64_t freeOffset(const std::vector<char>& header, const std::size_t length) {
+	std::vector<std::pair<std::uint64_t, std::uint64_t>> used;   // {offset, end}
+	used.reserve(ENTRIES);
+	for (std::size_t i = 0; i < ENTRIES; ++i) {
+		const char* entry = header.data() + MAGIC.size() + 4 + i * ENTRY_SIZE;
+		const std::uint32_t offset = getU32(entry);
+		const std::uint32_t size = getU32(entry + 4);
+		if (size != 0 && offset >= HEADER_SIZE)
+			used.emplace_back(offset, std::uint64_t{offset} + size);
+	}
+	std::ranges::sort(used);
+	std::uint64_t cursor = HEADER_SIZE;
+	for (const auto& [offset, end] : used) {
+		if (offset >= cursor + length)
+			return cursor;
+		cursor = std::max(cursor, end);
+	}
+	return cursor;
 }
 
 } // namespace
@@ -80,29 +130,80 @@ fs::path RegionStore::fileFor(const ChunkCoord& r) const {
 	return _dir / ("r." + std::to_string(r.x) + "." + std::to_string(r.z) + ".bin");
 }
 
+void RegionStore::touch(Region& region) {
+	std::lock_guard lock(_regionsMutex);
+	if (region.listed) {
+		_open.splice(_open.begin(), _open, region.lru);
+	} else {
+		_open.push_front(&region);
+		region.lru = _open.begin();
+		region.listed = true;
+	}
+	// Close the least recently used files. A region another thread is using
+	// is skipped (try_lock: never wait for a region mutex while holding ours).
+	auto it = _open.end();
+	while (_open.size() > MAX_OPEN_FILES && it != _open.begin()) {
+		--it;
+		Region* victim = *it;
+		if (victim == &region)
+			continue;
+		std::unique_lock victimLock(victim->mutex, std::try_to_lock);
+		if (!victimLock)
+			continue;
+		victim->file.close();
+		victim->valid = false;
+		victim->header.clear();
+		victim->header.shrink_to_fit();
+		victim->listed = false;
+		it = _open.erase(it);
+	}
+}
+
 bool RegionStore::open(Region& region, const ChunkCoord& regionCoord, const bool create) {
-	if (region.valid)
+	if (region.valid) {
+		touch(region);
 		return true;
+	}
+	if (region.newer)
+		return false;
 
 	const fs::path path = fileFor(regionCoord);
 	region.file.close();
 	region.file.clear();
-	region.file.open(path, std::ios::binary | std::ios::in | std::ios::out);
-	if (region.file && readHeader(region.file, region.header)) {
-		region.valid = true;
-		return true;
-	}
-	if (!create)
-		return false;                       // absent or damaged: loads find nothing
-
-	region.file.close();
-	region.file.clear();
 	std::error_code ec;
+	if (fs::exists(path, ec)) {
+		region.file.open(path, std::ios::binary | std::ios::in | std::ios::out);
+		if (!region.file)
+			return false;                   // there but not openable now: never start it again
+		switch (readHeader(region.file, region.header)) {
+			case Header::Ok:
+				region.valid = true;
+				touch(region);
+				return true;
+			case Header::Newer:
+				region.file.close();
+				region.newer = true;
+				std::cerr << "region file " << path.filename().string()
+				          << " is from a newer version of the game: left untouched\n";
+				return false;
+			case Header::Damaged:
+				region.file.close();
+				if (!create || !keepAside(path))
+					return false;           // loads find nothing
+				break;
+		}
+	} else if (!create) {
+		return false;
+	}
+
+	region.file.clear();
 	fs::create_directories(_dir, ec);
-	if (!writeFreshFile(path))              // start a missing or damaged file again
+	if (!writeFreshFile(path))              // start a missing or damaged file
 		return false;
 	region.file.open(path, std::ios::binary | std::ios::in | std::ios::out);
-	region.valid = region.file && readHeader(region.file, region.header);
+	region.valid = region.file && readHeader(region.file, region.header) == Header::Ok;
+	if (region.valid)
+		touch(region);
 	return region.valid;
 }
 
@@ -158,12 +259,14 @@ bool RegionStore::save(const ChunkColumn& column) {
 	if (!open(region, r, true))
 		return false;
 
-	std::fstream& file = region.file;
-	file.clear();
-	file.seekp(0, std::ios::end);
-	const auto offset = static_cast<std::uint64_t>(file.tellp());
+	// Space no table entry points at (the column's current blob included):
+	// a crash while writing it only damages dead space.
+	const std::uint64_t offset = freeOffset(region.header, length);
 	if (offset + length > std::numeric_limits<std::uint32_t>::max())
 		return false;                       // a region file never grows past 4 GiB
+	std::fstream& file = region.file;
+	file.clear();
+	file.seekp(static_cast<std::streamoff>(offset));
 	if (!file.write(blob, static_cast<std::streamsize>(length)) || !file.flush()) {
 		region.valid = false;               // reopen next time
 		return false;

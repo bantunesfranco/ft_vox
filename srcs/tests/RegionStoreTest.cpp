@@ -2,6 +2,8 @@
 #include "RegionStore.hpp"
 
 #include <fstream>
+#include <iterator>
+#include <string>
 #include <random>
 #include <thread>
 #include <vector>
@@ -121,11 +123,75 @@ SELFTEST(RegionStore, garbage_file) {
 	RegionStore store(dir.path());
 	CHECK(store.load({0, 0}) == nullptr);
 	CHECK(store.load({7, 9}) == nullptr);
-	// Saving over a damaged file starts it again rather than failing forever.
+	CHECK(!fs::exists(dir.path() / "r.0.0.bin.bad"));             // loading never moves it
+	// Saving over a damaged file starts it again rather than failing forever,
+	// and keeps the damaged one aside first.
 	const auto column = makeColumn({4, 4}, 6);
 	CHECK(store.save(*column));
 	const auto loaded = store.load({4, 4});
 	CHECK(loaded && sameBlocks(*column, *loaded));
+	CHECK(fs::exists(dir.path() / "r.0.0.bin.bad"));
+	if (fs::exists(dir.path() / "r.0.0.bin.bad"))
+		CHECK_EQ(fs::file_size(dir.path() / "r.0.0.bin.bad"), std::uintmax_t{5000});
+}
+
+SELFTEST(RegionStore, newer_version_untouched) {
+	// A region file written by a later version of the game: never overwritten.
+	const selftest::TempDir dir;
+	std::string bytes = "FVRG";
+	bytes += std::string("\x09\x00\x00\x00", 4);                  // version 9
+	bytes.resize(8 + 1024 * 8 + 100, '\x01');
+	std::ofstream(dir.path() / "r.0.0.bin", std::ios::binary) << bytes;
+	{
+		RegionStore store(dir.path());
+		CHECK(store.load({1, 1}) == nullptr);
+		CHECK(!store.save(*makeColumn({1, 1}, 7)));
+	}
+	std::ifstream in(dir.path() / "r.0.0.bin", std::ios::binary);
+	const std::string after((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	CHECK(after == bytes);
+	CHECK(!fs::exists(dir.path() / "r.0.0.bin.bad"));
+}
+
+SELFTEST(RegionStore, many_regions) {
+	// More regions than the C runtime has file handles: handles are reused.
+	const selftest::TempDir dir;
+	RegionStore store(dir.path());
+	constexpr int REGIONS = 600;
+	int bad = 0;
+	for (int i = 0; i < REGIONS; ++i) {
+		ChunkColumn column({i * RegionStore::REGION_SIZE, -i * RegionStore::REGION_SIZE});
+		column.setUnchecked(1, 1, 1, static_cast<BlockId>(1 + i % (BLOCK_TYPE_COUNT - 1)));
+		if (!store.save(column))
+			++bad;
+	}
+	CHECK_EQ(bad, 0);
+	for (int i = 0; i < REGIONS; ++i) {
+		const auto loaded = store.load({i * RegionStore::REGION_SIZE, -i * RegionStore::REGION_SIZE});
+		if (!loaded || loaded->getUnchecked(1, 1, 1) != static_cast<BlockId>(1 + i % (BLOCK_TYPE_COUNT - 1)))
+			++bad;
+	}
+	CHECK_EQ(bad, 0);
+}
+
+SELFTEST(RegionStore, resave_reuses_space) {
+	const selftest::TempDir dir;
+	RegionStore store(dir.path());
+	const auto column = makeColumn({2, 3}, 8);
+	CHECK(store.save(*column));
+	const fs::path file = onlyRegionFile(dir.path());
+	const std::uintmax_t once = fs::file_size(file);
+	for (int i = 0; i < 20; ++i)
+		CHECK(store.save(*column));
+	// The new blob goes into the dead space of an older one when it fits:
+	// the file holds at most the live blob and one dead one.
+	const std::uintmax_t blob = once - (8 + 1024 * 8);
+	CHECK(fs::file_size(file) <= once + blob);
+	const auto loaded = store.load({2, 3});
+	CHECK(loaded && sameBlocks(*column, *loaded));
+	RegionStore reopened(dir.path());
+	const auto again = reopened.load({2, 3});
+	CHECK(again && sameBlocks(*column, *again));
 }
 
 SELFTEST(RegionStore, concurrent_saves) {
