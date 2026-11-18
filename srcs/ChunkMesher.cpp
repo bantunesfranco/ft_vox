@@ -1,6 +1,7 @@
 #include "ChunkMesher.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <vector>
 
 void ChunkMesher::build(
@@ -95,8 +96,8 @@ void ChunkMesher::build(
     const auto opaqueAt = [&](const std::array<int, 3>& p) { return opaque[cell(p[0], p[1], p[2])] != 0; };
     const auto lightAt  = [&](const std::array<int, 3>& p) { return light[cell(p[0], p[1], p[2])]; };
 
-    output.reserve(2048, 3072);
-    transparentOutput.reserve(512, 768);
+    output.reserve(2048);
+    transparentOutput.reserve(512);
 
     for (int axis = 0; axis < 3; ++axis) {
         const int uAxis = faceAxes[axis][0];
@@ -290,6 +291,9 @@ void ChunkMesher::build(
                 emitBox(output, x, y, z, {0, 0, 0}, {16, 16, 16}, ends, textures, cellLight);
         }
     }
+
+    // The renderer's shared index buffer covers this many quads (see Mesh.hpp).
+    assert(output.quadCount() + transparentOutput.quadCount() <= MAX_QUADS_PER_SECTION);
 }
 
 void ChunkMesher::emitVertex(
@@ -326,7 +330,6 @@ void ChunkMesher::emitQuad(
     const std::array<std::uint8_t, 4>& ao,
     const std::array<std::uint8_t, 4>& light
 ) {
-    const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
     using VertexPosition = std::array<std::uint8_t, 3>;
     const auto vertex = [](const int x, const int y, const int z) {
         return VertexPosition{
@@ -358,7 +361,23 @@ void ChunkMesher::emitQuad(
             break;
     }
 
-    for (std::size_t corner = 0; corner < corners.size(); ++corner) {
+    /*
+     * Every quad is drawn with the shared pattern 0 1 2, 2 3 0:
+     *
+     * 0 ---- 1
+     * |    / |
+     * |  /   |
+     * 3 ---- 2
+     *
+     * That splits along the 0-2 diagonal. When the AO is brighter along
+     * 0-2 the split must run along 1-3 instead (or the shading creases), so
+     * the corners go out as 1 2 3 0: the pattern then draws (1 2 3), (3 0 1),
+     * the same triangles and winding. Each vertex keeps its own corner number,
+     * AO and light.
+     */
+    const std::size_t first = ao[0] + ao[2] > ao[1] + ao[3] ? 1 : 0;
+    for (std::size_t slot = 0; slot < corners.size(); ++slot) {
+        const std::size_t corner = (first + slot) % corners.size();
         const auto& position = corners[corner];
         emitVertex(
             mesh,
@@ -366,35 +385,6 @@ void ChunkMesher::emitQuad(
             normal, texture, ao[corner], static_cast<std::uint8_t>(corner),
             light[corner]
         );
-    }
-
-    /*
-     * Two triangles:
-     *
-     * 0 ---- 1
-     * |    / |
-     * |  /   |
-     * 3 ---- 2
-     *
-     * Winding:
-     *
-     * 0 1 2
-     * 2 3 0
-     */
-    if (ao[0] + ao[2] > ao[1] + ao[3]) {
-        mesh.indices.push_back(base + 0);
-        mesh.indices.push_back(base + 1);
-        mesh.indices.push_back(base + 3);
-        mesh.indices.push_back(base + 1);
-        mesh.indices.push_back(base + 2);
-        mesh.indices.push_back(base + 3);
-    } else {
-        mesh.indices.push_back(base + 0);
-        mesh.indices.push_back(base + 1);
-        mesh.indices.push_back(base + 2);
-        mesh.indices.push_back(base + 2);
-        mesh.indices.push_back(base + 3);
-        mesh.indices.push_back(base + 0);
     }
 }
 
@@ -424,7 +414,6 @@ void ChunkMesher::emitBox(MeshData& mesh, const int x, const int y, const int z,
     for (const Face& face : all) {
         if ((faces & face.flag) == 0)
             continue;
-        const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
         for (std::size_t corner = 0; corner < face.corners.size(); ++corner) {
             const Corner& s = face.corners[corner];
             mesh.vertices.push_back(packVertex(
@@ -432,7 +421,5 @@ void ChunkMesher::emitBox(MeshData& mesh, const int x, const int y, const int z,
                 face.normal, static_cast<std::uint8_t>(face.texture & 0x3F), 3, static_cast<std::uint8_t>(corner),
                 sky, block, s[0], s[1], s[2]));
         }
-        for (const std::uint32_t i : {0u, 1u, 2u, 2u, 3u, 0u})
-            mesh.indices.push_back(base + i);
     }
 }

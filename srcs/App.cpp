@@ -959,10 +959,10 @@ void App::renderWorld(const World& _world) {
 		if (!_world.frustum.isBoxInFrustum(renderState.worldMin, renderState.worldMax))
 			continue;
 
-		if (renderState.gpuMesh.uploaded && renderState.gpuMesh.indexCount > 0)
+		if (renderState.gpuMesh.uploaded && renderState.gpuMesh.quadCount > 0)
 			opaqueBatch.push_back({&renderState.gpuMesh, renderState.worldPosition});
 
-		if (renderState.transparentGpuMesh.uploaded && renderState.transparentGpuMesh.indexCount > 0) {
+		if (renderState.transparentGpuMesh.uploaded && renderState.transparentGpuMesh.quadCount > 0) {
 			const float distance = glm::length2(renderState.worldPosition + centerOffset - camera->pos);
 			transparentSort.emplace_back(distance, DrawItem{&renderState.transparentGpuMesh, renderState.worldPosition});
 		}

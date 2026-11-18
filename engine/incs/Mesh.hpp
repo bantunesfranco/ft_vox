@@ -5,6 +5,7 @@
 #ifndef MESH_HPP
 #define MESH_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -74,30 +75,53 @@ constexpr PackedVertex packVertex(
 }
 
 
+/*
+ * The most quads ChunkMesher emits for one 16^3 section, its two meshes
+ * (opaque and transparent) together. The renderer's shared index buffer
+ * holds the pattern for this many quads.
+ *
+ * Proof: every quad belongs to one cell of the section.
+ *   - Cube faces: a greedy quad is emitted from its first face in the slice
+ *     mask and clears every face it covers, so each face of each cell is in
+ *     at most one quad: at most 6 quads a cell (one per direction).
+ *   - Torch: one box, 4 sides + top = 5 quads.
+ *   - Cactus: 2 x-sides + 2 z-sides + at most top and bottom = 6 quads.
+ * A cell is exactly one of these, so a section has at most 6 * 16^3 quads.
+ * The bound is reached by a 3D checkerboard of leaves and cacti: leaves are
+ * neither opaque nor transparent, so they show all 6 faces against a cactus,
+ * no two faces in a mask touch (no merging), and each cactus gets both ends.
+ * (The stone-and-air checkerboard reaches half: 6 faces for half the cells.)
+ * 4 * 24576 = 98304 vertices > 65536, so the indices are 32-bit.
+ */
+constexpr std::size_t MAX_QUADS_PER_SECTION = 6 * 16 * 16 * 16;
+
+// Quads of 4 vertices. They are drawn through the renderer's one shared index
+// buffer (0 1 2, 2 3 0 for every quad), so a mesh has no indices of its own.
 struct MeshData
 {
     std::vector<PackedVertex> vertices;
-    std::vector<std::uint32_t> indices;
 
     void clear() noexcept {
         vertices.clear();
-        indices.clear();
     }
 
     // Like clear(), but gives the memory back (clear() keeps the capacity).
     void release() noexcept {
         std::vector<PackedVertex>().swap(vertices);
-        std::vector<std::uint32_t>().swap(indices);
     }
 
-    void reserve(std::size_t vertexCount, std::size_t indexCount) {
+    void reserve(std::size_t vertexCount) {
         vertices.reserve(vertexCount);
-        indices.reserve(indexCount);
     }
 
     [[nodiscard]]
     bool empty() const noexcept {
         return vertices.empty();
+    }
+
+    [[nodiscard]]
+    std::size_t quadCount() const noexcept {
+        return vertices.size() / 4;
     }
 };
 

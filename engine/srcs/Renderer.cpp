@@ -167,8 +167,8 @@ Renderer::~Renderer() {
     if (_instanceBuffer)
         glDeleteBuffers(1, &_instanceBuffer);
 
-    if (_ibo)
-        glDeleteBuffers(1, &_ibo);
+    if (_quadIndices)
+        glDeleteBuffers(1, &_quadIndices);
 
     if (_vbo)
         glDeleteBuffers(1, &_vbo);
@@ -184,16 +184,15 @@ Renderer::~Renderer() {
 void Renderer::createBuffers() {
     glGenVertexArrays(1, &_vao);
     glGenBuffers(1, &_vbo);
-    glGenBuffers(1, &_ibo);
-    // Created (not just named) up front: it is only ever filled with glNamedBufferData.
+    // Created (not just named) up front: filled only through the glNamedBuffer* calls.
+    glCreateBuffers(1, &_quadIndices);
     glCreateBuffers(1, &_indirectBuffer);
     glGenBuffers(1, &_instanceBuffer);
 
-    if (!_vao || !_vbo || !_ibo || !_indirectBuffer || !_instanceBuffer)
+    if (!_vao || !_vbo || !_quadIndices || !_indirectBuffer || !_instanceBuffer)
         throw Engine::EngineException(VOX_GLADFAIL);
 
     _vertexBufferCapacity = INITIAL_VERTEX_BUFFER_SIZE;
-    _indexBufferCapacity = INITIAL_INDEX_BUFFER_SIZE;
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
 
@@ -204,17 +203,16 @@ void Renderer::createBuffers() {
         GL_DYNAMIC_DRAW
     );
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-
-    glBufferData(
-        GL_ELEMENT_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(_indexBufferCapacity),
-        nullptr,
-        GL_DYNAMIC_DRAW
-    );
+    // Every mesh is quads of 4 vertices, so one index pattern serves them all:
+    // quad q is 4q+0 4q+1 4q+2, 4q+2 4q+3 4q+0 (each draw's baseVertex picks its mesh).
+    std::vector<QuadIndex> pattern;
+    pattern.reserve(MAX_QUADS_PER_SECTION * 6);
+    for (std::size_t quad = 0; quad < MAX_QUADS_PER_SECTION; ++quad)
+        for (const std::size_t corner : {0u, 1u, 2u, 2u, 3u, 0u})
+            pattern.push_back(static_cast<QuadIndex>(quad * 4 + corner));
+    glNamedBufferStorage(_quadIndices, static_cast<GLsizeiptr>(QUAD_INDEX_BYTES), pattern.data(), 0);
 
     _vertexBufferUsed = 0;
-    _indexBufferUsed = 0;
 }
 
 
@@ -222,7 +220,7 @@ void Renderer::createVertexLayout() {
     glBindVertexArray(_vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _quadIndices);
 
     /*
      * PackedVertex: two 32-bit words, unpacked by the shader (see Mesh.hpp).
@@ -313,47 +311,6 @@ void Renderer::ensureVertexCapacity(const std::size_t required, const std::size_
      * The VAO stores the vertex-buffer binding.
      * Rebind the new VBO to the vertex attribute layout.
      */
-    createVertexLayout();
-}
-
-void Renderer::ensureIndexCapacity(const std::size_t required, const std::size_t bytesToPreserve) {
-    if (required <= _indexBufferCapacity)
-        return;
-
-    std::size_t newCapacity = _indexBufferCapacity;
-
-    while (newCapacity < required)
-        newCapacity *= 2;
-
-    GLuint newBuffer = 0;
-    glGenBuffers(1, &newBuffer);
-
-    glBindBuffer(GL_COPY_WRITE_BUFFER, newBuffer);
-
-    glBufferData(
-        GL_COPY_WRITE_BUFFER,
-        static_cast<GLsizeiptr>(newCapacity),
-        nullptr,
-        GL_DYNAMIC_DRAW
-    );
-
-    glBindBuffer(GL_COPY_READ_BUFFER, _ibo);
-
-    if (bytesToPreserve > 0) {
-        glCopyBufferSubData(
-            GL_COPY_READ_BUFFER,
-            GL_COPY_WRITE_BUFFER,
-            0,
-            0,
-            static_cast<GLsizeiptr>(bytesToPreserve)
-        );
-    }
-
-    glDeleteBuffers(1, &_ibo);
-
-    _ibo = newBuffer;
-    _indexBufferCapacity = newCapacity;
-
     createVertexLayout();
 }
 
@@ -500,25 +457,17 @@ void Renderer::freeRange(
 }
 
 void Renderer::uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh) {
-    if (mesh.vertices.empty() || mesh.indices.empty()) {
+    if (mesh.quadCount() == 0) {
         gpuMesh = {};
         return;
     }
 
-    const std::size_t vertexBytes = mesh.vertices.size() * sizeof(PackedVertex);
-    const std::size_t indexBytes = mesh.indices.size() * sizeof(std::uint32_t);
+    const std::size_t vertexBytes = mesh.quadCount() * 4 * sizeof(PackedVertex);
     const std::size_t vertexBytesToPreserve = _vertexBufferUsed;
-    const std::size_t indexBytesToPreserve = _indexBufferUsed;
-
     const std::size_t vertexOffsetBytes = allocateRange(_freeVertexRanges, _vertexBufferUsed, vertexBytes);
-    const std::size_t indexOffsetBytes = allocateRange(_freeIndexRanges, _indexBufferUsed, indexBytes);
-
     ensureVertexCapacity(vertexOffsetBytes + vertexBytes, vertexBytesToPreserve);
-    ensureIndexCapacity(indexOffsetBytes + indexBytes, indexBytesToPreserve);
 
-    /* Upload vertices */
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-
     glBufferSubData(
         GL_ARRAY_BUFFER,
         static_cast<GLintptr>(vertexOffsetBytes),
@@ -526,25 +475,9 @@ void Renderer::uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh) {
         mesh.vertices.data()
     );
 
-    /* Upload indices */
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-
-    glBufferSubData(
-        GL_ELEMENT_ARRAY_BUFFER,
-        static_cast<GLintptr>(indexOffsetBytes),
-        static_cast<GLsizeiptr>(indexBytes),
-        mesh.indices.data()
-    );
-
-    /* Store offsets in units of elements, not bytes */
     gpuMesh.vertexOffset = static_cast<std::uint32_t>(vertexOffsetBytes / sizeof(PackedVertex));
-    gpuMesh.indexOffset = static_cast<std::uint32_t>(indexOffsetBytes / sizeof(std::uint32_t));
-
-    gpuMesh.vertexCount = static_cast<std::uint32_t>(mesh.vertices.size());
-    gpuMesh.indexCount = static_cast<std::uint32_t>(mesh.indices.size());
-
+    gpuMesh.quadCount = static_cast<std::uint32_t>(mesh.quadCount());
     gpuMesh.uploaded = true;
-
 }
 
 void Renderer::releaseMesh(GpuMesh& gpuMesh) {
@@ -555,13 +488,7 @@ void Renderer::releaseMesh(GpuMesh& gpuMesh) {
         _freeVertexRanges,
         _vertexBufferUsed,
         static_cast<std::size_t>(gpuMesh.vertexOffset) * sizeof(PackedVertex),
-        static_cast<std::size_t>(gpuMesh.vertexCount) * sizeof(PackedVertex)
-    );
-    freeRange(
-        _freeIndexRanges,
-        _indexBufferUsed,
-        static_cast<std::size_t>(gpuMesh.indexOffset) * sizeof(std::uint32_t),
-        static_cast<std::size_t>(gpuMesh.indexCount) * sizeof(std::uint32_t)
+        static_cast<std::size_t>(gpuMesh.quadCount) * 4 * sizeof(PackedVertex)
     );
 
     gpuMesh = {};
@@ -572,11 +499,15 @@ void Renderer::drawBatch(const std::vector<DrawItem>& items) {
     _positions.clear();
     for (const DrawItem& item : items) {
         const GpuMesh& mesh = *item.mesh;
-        if (!mesh.uploaded || mesh.indexCount == 0)
+        if (!mesh.uploaded || mesh.quadCount == 0)
             continue;
-        // {count, instanceCount, firstIndex, baseVertex, baseInstance}
-        _commands.push_back({mesh.indexCount, 1u, mesh.indexOffset, mesh.vertexOffset,
-                             static_cast<std::uint32_t>(_positions.size())});
+        // {count, instanceCount, firstIndex, baseVertex, baseInstance}; the
+        // pieces of a mesh too big for the index pattern share its position.
+        const auto instance = static_cast<std::uint32_t>(_positions.size());
+        for (std::uint32_t quad = 0; quad < mesh.quadCount; quad += MAX_QUADS_PER_SECTION) {
+            const auto quads = std::min<std::uint32_t>(mesh.quadCount - quad, MAX_QUADS_PER_SECTION);
+            _commands.push_back({quads * 6, 1u, 0u, mesh.vertexOffset + quad * 4, instance});
+        }
         _positions.push_back(item.position);
     }
     if (_commands.empty())
@@ -595,7 +526,7 @@ void Renderer::drawBatch(const std::vector<DrawItem>& items) {
         glUniform1i(_highlightPassLocation, GL_FALSE);
     glBindTextureUnit(0, _textureAtlas);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _indirectBuffer);
-    glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT, nullptr,
+    glMultiDrawElementsIndirect(GL_TRIANGLES, QUAD_INDEX_TYPE, nullptr,
                                 static_cast<GLsizei>(_commands.size()), 0);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 }

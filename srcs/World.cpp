@@ -41,8 +41,6 @@ namespace
 
     void appendSectionMesh(MeshData& columnMesh, const MeshData& sectionMesh, const int sectionY)
     {
-        const auto baseVertex = static_cast<std::uint32_t>(columnMesh.vertices.size());
-
         // Section-local y becomes column y; everything else (word b too) is kept.
         constexpr std::uint32_t Y_MASK = 0x1FFu << 5u;
         for (PackedVertex vertex : sectionMesh.vertices) {
@@ -51,9 +49,6 @@ namespace
                      | (((localY + static_cast<std::uint32_t>(sectionY * ChunkSection::SIZE)) & 0x1FFu) << 5u);
             columnMesh.vertices.push_back(vertex);
         }
-
-        for (const std::uint32_t index : sectionMesh.indices)
-            columnMesh.indices.push_back(baseVertex + index);
     }
 }
 
@@ -184,7 +179,7 @@ const BlockRegistry& World::getBlockRegistry() const noexcept {
 
 World::MemoryStats World::memoryStats() const {
     const auto capacityBytes = [](const MeshData& mesh) {
-        return mesh.vertices.capacity() * sizeof(PackedVertex) + mesh.indices.capacity() * sizeof(std::uint32_t);
+        return mesh.vertices.capacity() * sizeof(PackedVertex);
     };
     std::lock_guard lock(chunk_mutex);
     MemoryStats stats;

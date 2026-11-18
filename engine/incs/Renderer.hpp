@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -30,12 +31,11 @@ struct WorldUBO {
 };
 
 
+// A mesh in the shared vertex buffer: quadCount quads of 4 vertices from
+// vertexOffset, drawn through the shared quad index buffer.
 struct GpuMesh {
     std::uint32_t vertexOffset = 0;
-    std::uint32_t vertexCount = 0;
-
-    std::uint32_t indexOffset = 0;
-    std::uint32_t indexCount = 0;
+    std::uint32_t quadCount = 0;
 
     bool uploaded = false;
 };
@@ -79,7 +79,8 @@ private:
 
     GLuint _vao = 0;
     GLuint _vbo = 0;
-    GLuint _ibo = 0;
+    // Immutable: the pattern 0 1 2, 2 3 0 (+4 per quad) for MAX_QUADS_PER_SECTION quads.
+    GLuint _quadIndices = 0;
 
     GLuint _cameraUBO = 0;
     GLuint _textureAtlas = 0;
@@ -98,17 +99,16 @@ private:
     GLuint _boundsIbo = 0;
 
     std::size_t _vertexBufferCapacity = 0;
-    std::size_t _indexBufferCapacity = 0;
-
     std::size_t _vertexBufferUsed = 0;
-    std::size_t _indexBufferUsed = 0;
-
     std::vector<std::pair<std::size_t, std::size_t>> _freeVertexRanges;
-    std::vector<std::pair<std::size_t, std::size_t>> _freeIndexRanges;
 
     static constexpr std::size_t INITIAL_VERTEX_BUFFER_SIZE = 128 * 1024 * 1024;   // 8-byte vertices
 
-    static constexpr std::size_t INITIAL_INDEX_BUFFER_SIZE = 64 * 1024 * 1024;
+    // 16-bit indices when every vertex of the largest draw fits in them.
+    static constexpr bool SHORT_QUAD_INDICES = 4 * MAX_QUADS_PER_SECTION <= 65536;
+    using QuadIndex = std::conditional_t<SHORT_QUAD_INDICES, std::uint16_t, std::uint32_t>;
+    static constexpr GLenum QUAD_INDEX_TYPE = SHORT_QUAD_INDICES ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
+    static constexpr std::size_t QUAD_INDEX_BYTES = MAX_QUADS_PER_SECTION * 6 * sizeof(QuadIndex);
 
     static std::optional<std::string>
     loadShaderCode(const char* path);
@@ -121,7 +121,6 @@ private:
     void createCameraUBO();
     
     void ensureVertexCapacity(std::size_t required, std::size_t bytesToPreserve);
-    void ensureIndexCapacity(std::size_t required, std::size_t bytesToPreserve);
     static std::size_t allocateRange(
         std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
         std::size_t& used,
@@ -158,15 +157,18 @@ public:
     void releaseMesh(GpuMesh& gpuMesh);
 
     // Draws every item with ONE glMultiDrawElementsIndirect call, in order
-    // (so a back-to-front sorted transparent batch stays sorted).
+    // (so a back-to-front sorted transparent batch stays sorted). A mesh of
+    // more than MAX_QUADS_PER_SECTION quads (a column's opaque mesh joins its
+    // sections) takes one command per MAX_QUADS_PER_SECTION quads.
     void drawBatch(const std::vector<DrawItem>& items);
     void beginTransparentPass() const;
     void endTransparentPass() const;
 
-    // Bytes of the shared vertex / index buffers handed out (the high-water mark
-    // of the allocator, free gaps below it included), not their capacity.
+    // Bytes of the shared vertex buffer handed out (the high-water mark of the
+    // allocator, free gaps below it included), not its capacity.
     [[nodiscard]] std::size_t gpuVertexBytes() const noexcept { return _vertexBufferUsed; }
-    [[nodiscard]] std::size_t gpuIndexBytes() const noexcept { return _indexBufferUsed; }
+    // The one shared quad index buffer (fixed size).
+    [[nodiscard]] static constexpr std::size_t gpuIndexBytes() noexcept { return QUAD_INDEX_BYTES; }
 
     void setTextureAtlas(GLuint textureAtlas) noexcept;
     void setAtlasRects(const std::array<glm::vec4, 64>& rects);
