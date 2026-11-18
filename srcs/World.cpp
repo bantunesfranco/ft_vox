@@ -306,20 +306,16 @@ bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
 
     column.setUnchecked(localX, storageY, localZ, block);
 
-    static const std::array<glm::ivec3, 7> affectedOffsets = {{
-        {0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
-        {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
-    }};
-
-    for (const glm::ivec3& offset : affectedOffsets) {
-        const glm::ivec3 affected = worldPos + offset;
-        if (affected.y < ChunkColumn::MIN_WORLD_Y || affected.y >= ChunkColumn::MAX_WORLD_Y)
-            continue;
-
-        const int affectedChunkX = floorDiv(affected.x, ChunkSection::SIZE);
-        const int affectedChunkZ = floorDiv(affected.z, ChunkSection::SIZE);
-        invalidateMeshLocked({affectedChunkX, affectedChunkZ});
-    }
+    // Every column whose mesh reads this cell: the mesher reads a one-cell
+    // border around its column, corners included (faces and AO), so an edit
+    // on a column corner also touches the diagonal neighbour.
+    const int firstChunkX = floorDiv(worldPos.x - 1, ChunkSection::SIZE);
+    const int lastChunkX = floorDiv(worldPos.x + 1, ChunkSection::SIZE);
+    const int firstChunkZ = floorDiv(worldPos.z - 1, ChunkSection::SIZE);
+    const int lastChunkZ = floorDiv(worldPos.z + 1, ChunkSection::SIZE);
+    for (int cz = firstChunkZ; cz <= lastChunkZ; ++cz)
+        for (int cx = firstChunkX; cx <= lastChunkX; ++cx)
+            invalidateMeshLocked({cx, cz});
 
     dirty.insert({chunkX, chunkZ});
     invalidateLightLocked({chunkX, chunkZ});
