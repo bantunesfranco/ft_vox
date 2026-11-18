@@ -62,7 +62,8 @@ struct BlockBox {
 
 // The torch's stick: a 2 x 10 x 2 box in the middle of the cell. The mesher
 // draws it and the highlight outlines it.
-constexpr BlockBox TORCH_BOX{{7, 0, 7}, {9, 10, 9}};
+// GLM_CONSTEXPR is empty when GLM uses SIMD (its intrinsics are not constexpr).
+inline GLM_CONSTEXPR const BlockBox TORCH_BOX{{7, 0, 7}, {9, 10, 9}};
 
 constexpr std::size_t BLOCK_TYPE_COUNT = static_cast<std::size_t>(BlockType::Count);
 
