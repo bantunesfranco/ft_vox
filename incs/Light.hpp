@@ -56,6 +56,11 @@ using ColumnWindow = std::array<const ChunkColumn*, 9>;
 
 [[nodiscard]] std::shared_ptr<const ColumnLight> computeLight(const ColumnWindow& window, const BlockRegistry& registry);
 
+// How bright a cell with these levels looks, 0.05 (level 0) .. 1 (level 15):
+// the fragment shader's curve, max(sky * daylight, block) through
+// v / (4 - 3v) with a 5 % floor (without its fixed 0.625 scale).
+[[nodiscard]] float lightBrightness(int sky, int block, float daylight) noexcept;
+
 // Which meshes show a cell whose light differs between `before` and `after`
 // (a column's light, recomputed): bit (dz + 1) * 3 + (dx + 1) for the column
 // at (dx, dz) from it. A mesh reads its own column's light and the one-cell

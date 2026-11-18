@@ -4,6 +4,7 @@
 #include "worldgen/TerrainGenerator.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -209,4 +210,14 @@ SELFTEST(Light, change_mask_border_and_corner) {
 	const auto lit = c.light();
 	CHECK_EQ(lightChangeMask(dark.get(), *lit),
 	         maskOf(0, 0) | maskOf(-1, 0) | maskOf(0, -1) | maskOf(-1, -1));
+}
+
+SELFTEST(Light, brightness_curve) {
+	const auto near = [](const float a, const float b) { return std::abs(a - b) < 1e-5f; };
+	CHECK(near(lightBrightness(15, 0, 1.0f), 1.0f));            // noon, open sky
+	CHECK(near(lightBrightness(0, 0, 1.0f), 0.05f));            // pitch black
+	CHECK(near(lightBrightness(0, 15, 0.2f), 1.0f));            // a lamp at midnight
+	// Midnight sky: level 3 -> 0.2 / (4 - 0.6) through the curve.
+	CHECK(near(lightBrightness(15, 0, 0.2f), 0.05f + 0.95f * (0.2f / 3.4f)));
+	CHECK(near(lightBrightness(15, 7, 0.2f), lightBrightness(0, 7, 0.2f)));   // the brighter of the two
 }

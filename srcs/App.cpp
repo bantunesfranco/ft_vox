@@ -570,16 +570,30 @@ void App::jump() {
 }
 
 // Fog of the block the camera's eye is in (water: blue), for the shader and the sky.
+// It is as bright as the light at the eye (dark at night and in caves), except
+// for a glowing fluid (lava), which lights itself.
 void App::updateFluidFog() {
 	fluidFog = glm::vec4(0.0f);
 	BlockId eyeBlock = AIR_BLOCK;
-	if (!camera || !world.getBlockAt(glm::ivec3(glm::floor(camera->pos)), eyeBlock))
+	const glm::ivec3 eye = camera ? glm::ivec3(glm::floor(camera->pos)) : glm::ivec3(0);
+	if (!camera || !world.getBlockAt(eye, eyeBlock))
 		return;
 	const BlockDefinition& block = world.getBlockRegistry().get(eyeBlock);
 	if (block.fogDistance <= 0.0f)
 		return;
-	const auto channel = [&block](const int shift) {
-		return static_cast<float>((block.fogColor >> shift) & 0xFFu) / 255.0f;
+	float brightness = 1.0f;
+	if (block.lightEmission == 0) {
+		int sky = 15, blockLight = 0;               // no light yet: as under open sky
+		const ChunkCoord column{eye.x >> 4, eye.z >> 4};
+		if (const auto light = world.lightOf(column)) {
+			const std::uint8_t packed = light->at(eye.x & 15, ChunkColumn::toStorageY(eye.y), eye.z & 15);
+			sky = ColumnLight::sky(packed);
+			blockLight = ColumnLight::block(packed);
+		}
+		brightness = lightBrightness(sky, blockLight, TimeOfDay::daylight(static_cast<std::uint32_t>(timeTicks)));
+	}
+	const auto channel = [&block, brightness](const int shift) {
+		return brightness * static_cast<float>((block.fogColor >> shift) & 0xFFu) / 255.0f;
 	};
 	fluidFog = glm::vec4(channel(16), channel(8), channel(0), block.fogDistance);
 }

@@ -350,3 +350,9 @@ std::uint16_t lightChangeMask(const ColumnLight* before, const ColumnLight& afte
 	}
 	return mask;
 }
+
+float lightBrightness(const int sky, const int block, const float daylight) noexcept {
+	const float level = std::max(static_cast<float>(sky) * daylight, static_cast<float>(block)) / 15.0f;
+	const float curve = level / (4.0f - 3.0f * level);
+	return 0.05f + 0.95f * curve;
+}
