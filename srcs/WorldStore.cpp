@@ -25,6 +25,7 @@ namespace {
 constexpr std::array<char, 4> LEVEL_MAGIC{'F', 'V', 'L', 'V'};
 constexpr std::uint32_t LEVEL_VERSION = 2;          // 2: time of day appended
 constexpr const char* LEVEL_FILE = "level.bin";
+constexpr const char* LOCK_FILE = "session.lock";
 constexpr std::size_t MAX_FOLDER_CHARS = 32;
 
 std::int64_t nowMillis() {
@@ -254,7 +255,23 @@ bool deleteWorld(const WorldInfo& world, std::string& error) {
 		error = "not a world folder: " + world.folder.string();
 		return false;
 	}
-	fs::remove_all(world.folder, ec);
+	// Never delete a world another game or server is playing: take its lock first,
+	// remove everything but the lock file, then release it and remove the folder.
+	auto lock = WorldLock::acquire(world.folder, error);
+	if (!lock)
+		return false;
+	std::vector<fs::path> contents;
+	for (const fs::directory_entry& entry : fs::directory_iterator(world.folder, ec))
+		if (entry.path().filename() != LOCK_FILE)
+			contents.push_back(entry.path());
+	for (const fs::path& path : contents) {
+		if (ec)
+			break;
+		fs::remove_all(path, ec);
+	}
+	lock.reset();
+	if (!ec)
+		fs::remove_all(world.folder, ec);
 	if (ec) {
 		error = "cannot delete " + world.folder.string() + ": " + ec.message();
 		return false;

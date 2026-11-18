@@ -53,7 +53,8 @@ std::optional<WorldInfo> openOrCreateWorld(const std::filesystem::path& folder, 
 // Sets lastPlayed to now and rewrites level.bin.
 bool markPlayed(WorldInfo& world, std::string& error);
 
-// Removes the world's folder (and nothing else).
+// Removes the world's folder (and nothing else). Refuses (false, `error` says
+// why) while the world is open in another game or server (its WorldLock).
 bool deleteWorld(const WorldInfo& world, std::string& error);
 
 // Exclusive use of a world folder by one process; released when destroyed.

@@ -171,3 +171,26 @@ SELFTEST(WorldStore, v1_level_loads) {
 		CHECK_EQ(worlds[0].timeOfDay, TimeOfDay::NEW_WORLD);
 	}
 }
+
+SELFTEST(WorldStore, delete_refuses_locked_world) {
+	const selftest::TempDir dir;
+	std::string error;
+	const auto world = createWorld(dir.path(), "Busy", "4", error);
+	CHECK(world.has_value());
+	if (!world)
+		return;
+	fs::create_directories(world->folder / "region");
+	std::ofstream(world->folder / "region" / "r.0.0.bin", std::ios::binary) << "data";
+	auto lock = WorldLock::acquire(world->folder, error);
+	CHECK(lock != nullptr);
+
+	std::string deleteError;
+	CHECK(!deleteWorld(*world, deleteError));                    // another process plays it
+	CHECK(!deleteError.empty());
+	CHECK(fs::exists(world->folder / "level.bin"));              // nothing removed
+	CHECK(fs::exists(world->folder / "region" / "r.0.0.bin"));
+
+	lock.reset();
+	CHECK(deleteWorld(*world, error));
+	CHECK(!fs::exists(world->folder));
+}
