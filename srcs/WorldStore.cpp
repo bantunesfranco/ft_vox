@@ -6,9 +6,11 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cerrno>
 #include <chrono>
 #include <fstream>
 #include <random>
+#include <system_error>
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -284,21 +286,25 @@ bool deleteWorld(const WorldInfo& world, std::string& error) {
 // ============================================================================
 
 std::unique_ptr<WorldLock> WorldLock::acquire(const fs::path& folder, std::string& error) {
-	const fs::path path = folder / "session.lock";
+	const fs::path path = folder / LOCK_FILE;
 	std::unique_ptr<WorldLock> lock(new WorldLock());
 #if defined(_WIN32)
 	// Share mode 0: any other open of the file fails until we close it.
 	const HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
 	                                  OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (handle == INVALID_HANDLE_VALUE) {
-		error = "the world is already open in another game or server";
+		const DWORD code = GetLastError();
+		if (code == ERROR_SHARING_VIOLATION)
+			error = "the world is already open in another game or server";
+		else
+			error = "cannot open " + path.string() + ": " + std::system_category().message(static_cast<int>(code));
 		return nullptr;
 	}
 	lock->_handle = handle;
 #else
 	const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
 	if (fd < 0) {
-		error = "cannot open " + path.string();
+		error = "cannot open " + path.string() + ": " + std::generic_category().message(errno);
 		return nullptr;
 	}
 	if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {

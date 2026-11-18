@@ -194,3 +194,11 @@ SELFTEST(WorldStore, delete_refuses_locked_world) {
 	CHECK(deleteWorld(*world, error));
 	CHECK(!fs::exists(world->folder));
 }
+
+SELFTEST(WorldStore, lock_error_names_the_cause) {
+	const selftest::TempDir dir;
+	std::string error;
+	const auto lock = WorldLock::acquire(dir.path() / "missing", error);   // no such folder
+	CHECK(lock == nullptr);
+	CHECK(error.find("already open") == std::string::npos);
+}
