@@ -180,6 +180,10 @@ BlockBox outlineBox(const BlockDefinition& definition) noexcept {
     return {{inset, 0, inset}, {16 - inset, 16, 16 - inset}};
 }
 
+bool breakAllowed(const BlockRegistry& registry, const BlockId block) noexcept {
+    return block != toBlockId(BlockType::Bedrock) && !registry.get(block).replaceable;
+}
+
 bool placementAllowed(const BlockRegistry& registry, const BlockId block, const BlockId below) noexcept {
     if (registry.get(block).model != BlockModel::Torch)
         return true;

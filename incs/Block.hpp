@@ -132,4 +132,8 @@ private:
 // opaque block under it; everything else can go anywhere.
 [[nodiscard]] bool placementAllowed(const BlockRegistry& registry, BlockId block, BlockId below) noexcept;
 
+// Whether `block` can be broken: not bedrock, and not something you build
+// into (air, water, lava). Singleplayer and the server alike.
+[[nodiscard]] bool breakAllowed(const BlockRegistry& registry, BlockId block) noexcept;
+
 #endif

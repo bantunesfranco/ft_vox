@@ -118,8 +118,8 @@ void RemoteSession::requestBreakBlock(const glm::ivec3& pos) {
 			return;                          // already waiting on this cell
 
 	BlockId current = AIR_BLOCK;
-	if (!_world.getBlockAt(pos, current) || current == AIR_BLOCK)
-		return;
+	if (!_world.getBlockAt(pos, current) || !breakAllowed(_world.getBlockRegistry(), current))
+		return;                              // the server would refuse it
 	if (!_inventory.view().canTakeDropOf(current))
 		return;                              // its item would not fit
 

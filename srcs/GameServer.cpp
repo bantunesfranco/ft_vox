@@ -266,7 +266,7 @@ void GameServer::onBreakBlock(Player& p, net::ByteReader& body) {
 
 	BlockId current = AIR_BLOCK;
 	const bool allowed = p.spawned && inReach(p, pos) && blockAt(pos, current)
-	                  && current != AIR_BLOCK && current != BEDROCK_BLOCK
+	                  && breakAllowed(_blocks, current)       // not air, bedrock or a fluid
 	                  && p.inventory.canTakeDropOf(current);   // nothing is lost to a full inventory
 	if (!allowed) {
 		sendBlockTo(p, pos);                           // tell it what is really there

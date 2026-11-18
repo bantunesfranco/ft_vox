@@ -191,3 +191,14 @@ SELFTEST(Blocks, replaceable) {
 	CHECK(world.getBlockAt({0, 64, 1}, placed));
 	CHECK_EQ(placed, toBlockId(BlockType::Dirt));
 }
+
+SELFTEST(Blocks, break_allowed) {
+	const BlockRegistry registry;
+	CHECK(breakAllowed(registry, toBlockId(BlockType::Stone)));
+	CHECK(breakAllowed(registry, toBlockId(BlockType::Torch)));
+	CHECK(breakAllowed(registry, toBlockId(BlockType::Glowstone)));
+	CHECK(!breakAllowed(registry, AIR_BLOCK));
+	CHECK(!breakAllowed(registry, toBlockId(BlockType::Bedrock)));
+	CHECK(!breakAllowed(registry, WATER_BLOCK));       // a modified client must not drain the sea
+	CHECK(!breakAllowed(registry, LAVA_BLOCK));        // the spec: lava cannot be broken
+}
