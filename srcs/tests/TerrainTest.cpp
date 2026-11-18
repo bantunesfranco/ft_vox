@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 using namespace worldgen;
 
@@ -165,4 +166,128 @@ SELFTEST(Terrain, generation_speed) {
 	std::printf("     %.2f ms per column\n", ms);
 	CHECK(ms <= 2.0);
 #endif
+}
+
+namespace {
+
+// Biome borders crossed by rows of a scan: (x, z) is the first block of the
+// row in the eastern biome, and those biomes.
+struct Border {
+	int x, z;
+	Biome west, east;
+};
+
+std::vector<Border> bordersOf(const TerrainGenerator& gen, const int wanted) {
+	std::vector<Border> found;
+	for (int z = -3000; z < 3000 && static_cast<int>(found.size()) < wanted; z += 97)
+		for (int x = -3000; x < 3000 && static_cast<int>(found.size()) < wanted; x += 48) {
+			const Biome west = gen.biomeAt(x, z), east = gen.biomeAt(x + 48, z);
+			if (west == east)
+				continue;
+			int at = x + 1;
+			while (gen.biomeAt(at, z) == west)
+				++at;
+			found.push_back({at, z, west, east});
+		}
+	return found;
+}
+
+BlockId topBlock(const ChunkColumn& column, const int x, const int z) {
+	for (int sy = ChunkColumn::HEIGHT - 1; sy >= 0; --sy) {
+		const BlockId b = column.getUnchecked(x, sy, z);
+		if (b != AIR_BLOCK)
+			return b;
+	}
+	return AIR_BLOCK;
+}
+
+} // namespace
+
+SELFTEST(Terrain, biome_borders_blend) {
+	// Along a row crossing a border between two biomes, the biome switches back
+	// and forth over a band of a few blocks, not once on a straight contour.
+	const TerrainGenerator gen(20261116), again(20261116);
+	constexpr int BAND = 16;
+	int twoBiome = 0, dithered = 0, wide = 0, differ = 0;
+	for (const Border& b : bordersOf(gen, 200)) {
+		int switches = 0, first = -1, last = -1;
+		bool onlyTwo = true;
+		Biome previous = gen.biomeAt(b.x - BAND, b.z);
+		for (int x = b.x - BAND; x <= b.x + BAND; ++x) {
+			const Biome biome = gen.biomeAt(x, b.z);
+			differ += biome == again.biomeAt(x, b.z) ? 0 : 1;
+			onlyTwo = onlyTwo && (biome == b.west || biome == b.east);
+			if (biome != previous) {
+				++switches;
+				first = first < 0 ? x : first;
+				last = x;
+			}
+			previous = biome;
+		}
+		if (!onlyTwo)
+			continue;
+		++twoBiome;
+		dithered += switches > 1 ? 1 : 0;
+		wide += last - first > 16 ? 1 : 0;      // more than a few blocks: not one border
+	}
+	std::printf("     %d two-biome borders, %d dithered, %d wider than 16 blocks\n", twoBiome, dithered, wide);
+	CHECK(twoBiome >= 50);
+	CHECK(dithered * 10 >= twoBiome * 8);       // nearly every border is a mixed band
+	CHECK(wide * 10 <= twoBiome);               // and the band stays narrow
+	CHECK_EQ(differ, 0);
+}
+
+SELFTEST(Terrain, biome_border_surface_mixes) {
+	// The ground itself mixes: sand and grass alternate where desert meets grassland.
+	const TerrainGenerator gen(20261116);
+	const BlockId sand = toBlockId(BlockType::Sand), grass = toBlockId(BlockType::Grass);
+	const auto grassland = [](const Biome b) { return b == Biome::Plains || b == Biome::Forest; };
+	int rows = 0, mixed = 0;
+	for (const Border& b : bordersOf(gen, 400)) {
+		if (!((b.west == Biome::Desert && grassland(b.east)) || (grassland(b.west) && b.east == Biome::Desert)))
+			continue;
+		if (rows >= 8)
+			break;
+		std::vector<BlockId> tops;
+		for (int cx = (b.x - 16) >> 4; cx <= (b.x + 16) >> 4; ++cx) {
+			const auto column = generated(gen, {cx, b.z >> 4}, TerrainGenerator::Stages::Terrain);
+			for (int x = 0; x < 16; ++x)
+				tops.push_back(topBlock(*column, x, b.z & 15));
+		}
+		int changes = 0;
+		BlockId previous = AIR_BLOCK;
+		for (const BlockId t : tops) {
+			if (t != sand && t != grass)
+				continue;
+			changes += previous != AIR_BLOCK && t != previous ? 1 : 0;
+			previous = t;
+		}
+		++rows;
+		mixed += changes > 1 ? 1 : 0;
+	}
+	std::printf("     %d desert border rows, %d with sand and grass mixed\n", rows, mixed);
+	CHECK(rows >= 3);
+	CHECK(mixed * 4 >= rows * 3);
+}
+
+SELFTEST(Terrain, taiga_has_snow) {
+	const TerrainGenerator gen(20261116);
+	const BlockId snow = toBlockId(BlockType::Snow);
+	int columns = 0, snowy = 0, tops = 0;
+	for (int z = -3000; z < 3000 && columns < 16; z += 61)
+		for (int x = -3000; x < 3000 && columns < 16; x += 61) {
+			if (gen.biomeAt(x, z) != Biome::Taiga)
+				continue;
+			const auto column = generated(gen, {x >> 4, z >> 4}, TerrainGenerator::Stages::Terrain);
+			++columns;
+			for (int lz = 0; lz < 16; ++lz)
+				for (int lx = 0; lx < 16; ++lx) {
+					++tops;
+					snowy += topBlock(*column, lx, lz) == snow ? 1 : 0;
+				}
+		}
+	std::printf("     %d taiga columns, %d of %d tops snowy\n", columns, snowy, tops);
+	CHECK(columns >= 8);
+	CHECK(snowy * 10 >= tops);       // at least a tenth
+	CHECK(snowy < tops);             // not all of it
 }

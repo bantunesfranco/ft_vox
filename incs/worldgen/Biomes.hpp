@@ -27,8 +27,10 @@ enum class Biome : std::uint8_t {
 
 // The block at `depth` blocks below the top of a solid run (0 = the top block),
 // for a surface at world height `y`, or AIR_BLOCK to keep the default (stone).
-// `variation` in [-1, 1] varies soil depth per column.
-[[nodiscard]] BlockId surfaceBlock(Biome biome, int depth, int y, bool underwater, float variation) noexcept;
+// `variation` in [-1, 1] varies soil depth per column; `temperature` (the
+// climate's, -1..1) sets the snow line in taiga.
+[[nodiscard]] BlockId surfaceBlock(Biome biome, int depth, int y, bool underwater, float variation,
+                                   float temperature) noexcept;
 
 } // namespace worldgen
 

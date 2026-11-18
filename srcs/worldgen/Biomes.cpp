@@ -45,7 +45,8 @@ Biome chooseBiome(const Climate& c, const float surfaceHeight, const float mount
 	return Biome::Plains;
 }
 
-BlockId surfaceBlock(const Biome biome, const int depth, const int y, const bool underwater, const float variation) noexcept {
+BlockId surfaceBlock(const Biome biome, const int depth, const int y, const bool underwater, const float variation,
+                     const float temperature) noexcept {
 	const int soil = 3 + static_cast<int>(variation * 1.5f);   // 2..4 blocks of dirt / sand
 
 	if (underwater) {                                            // sea, lake and river floors
@@ -88,9 +89,17 @@ BlockId surfaceBlock(const Biome biome, const int depth, const int y, const bool
 			if (depth == 0) return block(BlockType::Snow);
 			if (depth < soil) return block(BlockType::Dirt);
 			return AIR_BLOCK;
+		case Biome::Taiga: {
+			// Snow above a line that drops with the cold: on hills in the milder
+			// taiga, nearly everywhere in the coldest (next to snowy plains).
+			const float snowLine = static_cast<float>(SEA_LEVEL) + 6.0f + (temperature + 0.4f) * 140.0f
+			                     + variation * 5.0f;
+			if (depth == 0) return static_cast<float>(y) > snowLine ? block(BlockType::Snow) : block(BlockType::Grass);
+			if (depth < soil) return block(BlockType::Dirt);
+			return AIR_BLOCK;
+		}
 		case Biome::Plains:
 		case Biome::Forest:
-		case Biome::Taiga:
 			if (depth == 0) return block(BlockType::Grass);
 			if (depth < soil) return block(BlockType::Dirt);
 			return AIR_BLOCK;

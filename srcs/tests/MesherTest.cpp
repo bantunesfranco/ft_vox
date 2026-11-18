@@ -369,7 +369,7 @@ std::uint64_t columnMeshHash(const ChunkCoord c) {
 // not change a single vertex.
 SELFTEST(Mesher, output_hash) {
 	const std::array<std::pair<ChunkCoord, std::uint64_t>, 5> expected = {{
-		{{0, 0}, 0x16e9ed869bb4e2a5ull},
+		{{0, 0}, 0xfa6a9669cfe06079ull},
 		{{5, -3}, 0xec57a508ab6a257aull},
 		{{-40, 17}, 0x9db630ca5e244cefull},
 		{{200, 200}, 0x6d3d37ea6e45f01aull},

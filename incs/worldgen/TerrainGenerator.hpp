@@ -9,11 +9,15 @@
 //  solid where > 0. baseHeight and wildness come from 2D climate noise
 //  (continentalness, erosion, ridges) through Splines; detail3D gives cliffs,
 //  overhangs and arches, strongly in mountains and badlands, barely in plains.
+//  (The spec's "/ squash(x,z)" divisor on the height term is omitted: the
+//  wildness factor already sets how far detail moves the surface per biome.)
 //  Density is evaluated on a 4 x 8 x 4 block grid aligned to world
 //  coordinates (shared by neighbouring columns, so borders match) and
 //  trilinearly interpolated in between.
 //
 //  Then: surface rules per biome (Biomes.hpp), water below sea level, bedrock.
+//  The biome of a block column is read a few blocks away (a smooth warp plus
+//  a per-block jitter), so surfaces and structures blend at biome borders.
 //
 //  Thread-safe and deterministic: every result depends only on the seed and
 //  the coordinates (see Noise.hpp for why it is identical on every build).
@@ -81,6 +85,8 @@ private:
 	// Density at a grid node (world x, z multiple of 4; grid level gy).
 	[[nodiscard]] float nodeDensity(const Shape& shape, int x, int gy, int z) const noexcept;
 	[[nodiscard]] Biome biomeOf(const Shape& shape) const noexcept;
+	// Where the biome of block column (x, z) is read (biome border blending).
+	[[nodiscard]] glm::ivec2 biomeLookup(int x, int z) const noexcept;
 	void carveCaves(ChunkColumn& column) const;
 
 	std::uint64_t _seed;
@@ -92,6 +98,8 @@ private:
 	Octaves _detail;
 	Octaves _surfaceNoise;     // varies soil depth, clay patches
 	Octaves _mesa;             // badlands plateaus
+	Noise _biomeWarp;          // biome border blending: smooth part
+	std::uint64_t _biomeDitherSeed;   // and per-block part
 	CaveCarver _caves;
 };
 

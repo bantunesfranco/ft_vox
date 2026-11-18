@@ -67,6 +67,12 @@ float fraction(const int local, const int cell) noexcept {
 
 // ---- shape tables (tune here) -------------------------------------------------------
 
+// Biome borders: the lookup position moves by a smooth warp (up to ~BIOME_WARP_BLOCKS)
+// plus a per-block jitter (+-BIOME_DITHER_BLOCKS / 2), so surfaces mix over a few blocks.
+constexpr float BIOME_WARP_FREQUENCY = 1.0f / 14.0f;
+constexpr float BIOME_WARP_BLOCKS    = 5.0f;
+constexpr float BIOME_DITHER_BLOCKS  = 10.0f;
+
 // Ground height from continentalness: deep ocean .. coast .. far inland.
 constexpr Spline<9> CONTINENTAL{{{
 	{-1.00f, 14.0f}, {-0.60f, 26.0f}, {-0.35f, 40.0f}, {-0.18f, 53.0f}, {-0.08f, 60.0f},
@@ -132,6 +138,8 @@ TerrainGenerator::TerrainGenerator(const std::uint64_t seed)
 	  _detail(mixSeed(seed, 6), 3, 1.0f / 40.0f),
 	  _surfaceNoise(mixSeed(seed, 7), 2, 1.0f / 24.0f),
 	  _mesa(mixSeed(seed, 8), 2, 1.0f / 110.0f),
+	  _biomeWarp(mixSeed(seed, 9)),
+	  _biomeDitherSeed(mixSeed(seed, 10)),
 	  _caves(mixSeed(seed, 20)) {}
 
 Climate TerrainGenerator::climateAt(const int x, const int z) const noexcept {
@@ -202,8 +210,24 @@ Biome TerrainGenerator::biomeOf(const Shape& s) const noexcept {
 	return chooseBiome(s.climate, s.baseHeight, s.mountain, s.badlands);
 }
 
+glm::ivec2 TerrainGenerator::biomeLookup(const int x, const int z) const noexcept {
+	// Borders blend: the biome is read a few blocks away, along a smooth warp
+	// (irregular border lines) plus a per-block hash (a dithered edge).
+	const float fx = static_cast<float>(x) * BIOME_WARP_FREQUENCY;
+	const float fz = static_cast<float>(z) * BIOME_WARP_FREQUENCY;
+	const std::uint32_t h = hash3(_biomeDitherSeed, x, 0, z);
+	// Uniform in -0.5 .. 0.5: next to the border half the blocks take the other
+	// biome, thinning out linearly to none BIOME_DITHER_BLOCKS / 2 away.
+	const float hx = static_cast<float>(h & 0xFFFFu) * (1.0f / 65535.0f) - 0.5f;
+	const float hz = static_cast<float>(h >> 16) * (1.0f / 65535.0f) - 0.5f;
+	const float dx = _biomeWarp.at(fx, fz) * BIOME_WARP_BLOCKS + hx * BIOME_DITHER_BLOCKS;
+	const float dz = _biomeWarp.at(fx + 71.3f, fz - 37.9f) * BIOME_WARP_BLOCKS + hz * BIOME_DITHER_BLOCKS;
+	return {x + static_cast<int>(std::floor(dx + 0.5f)), z + static_cast<int>(std::floor(dz + 0.5f))};
+}
+
 Biome TerrainGenerator::biomeAt(const int x, const int z) const noexcept {
-	return biomeOf(shapeAt(x, z));
+	const glm::ivec2 at = biomeLookup(x, z);
+	return biomeOf(shapeAt(at.x, at.y));
 }
 
 void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const {
@@ -268,7 +292,8 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 	for (int z = 0; z < ChunkSection::SIZE; ++z)
 		for (int x = 0; x < ChunkSection::SIZE; ++x) {
 			const int wx = baseX + x, wz = baseZ + z;
-			const Shape shape = shapeAt(wx, wz);
+			const glm::ivec2 at = biomeLookup(wx, wz);       // the same lookup as biomeAt()
+			const Shape shape = shapeAt(at.x, at.y);
 			const Biome biome = biomeOf(shape);
 			const float variation = _surfaceNoise.at(static_cast<float>(wx), static_cast<float>(wz));
 
@@ -284,7 +309,8 @@ void TerrainGenerator::generate(ChunkColumn& column, const Stages stages) const 
 					continue;
 				}
 				if (depth < 20) {
-					const BlockId surface = surfaceBlock(biome, depth, ChunkColumn::toWorldY(sy), underwater, variation);
+					const BlockId surface = surfaceBlock(biome, depth, ChunkColumn::toWorldY(sy), underwater, variation,
+					                                     shape.climate.temperature);
 					if (surface != AIR_BLOCK)
 						blocks.set(x, sy, z, surface);
 				}
