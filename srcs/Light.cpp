@@ -45,7 +45,7 @@ public:
 	Lighter(const ColumnWindow& window, const BlockRegistry& registry) {
 		for (std::size_t id = 0; id < BLOCK_TYPE_COUNT; ++id) {
 			const BlockDefinition& def = registry.get(static_cast<BlockId>(id));
-			_props[id] = {def.opaque, def.lightFilter, def.lightEmission};
+			_props[id] = {def.opaque && !def.passesLight, def.lightFilter, def.lightEmission};
 			if (def.lightEmission > 0)
 				_firstEmitter = std::min(_firstEmitter, static_cast<BlockId>(id));
 		}

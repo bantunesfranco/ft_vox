@@ -90,6 +90,8 @@ struct BlockDefinition {
     // loses passing through it (water and leaves dim it; opaque blocks stop it).
     std::uint8_t lightEmission = 0;
     std::uint8_t lightFilter = 0;
+    // Light goes through it although it is drawn opaque (lava).
+    bool passesLight = false;
 
     BlockModel model = BlockModel::Cube;
 

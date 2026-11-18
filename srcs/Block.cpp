@@ -139,13 +139,13 @@ BlockRegistry::BlockRegistry() noexcept {
     };
 
     // Lava: not walked on, but drawn like a solid cube (not see-through);
-    // glows, and tints the view red when the eye is inside it.
+    // glows, lets light through, and tints the view red when the eye is inside it.
     _definitions[LAVA_BLOCK] = {
         .opaque = true, .transparent = false, .solid = false,
         .textureTop = index(Texture::LavaStill), .textureBottom = index(Texture::LavaStill),
         .textureSide = index(Texture::LavaStill),
         .fogColor = 0xC8400A, .fogDistance = 1.5f,
-        .lightEmission = 15,
+        .lightEmission = 15, .passesLight = true,
         .replaceable = true
     };
     _definitions[toBlockId(BlockType::Glowstone)] = {

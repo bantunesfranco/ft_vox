@@ -221,3 +221,18 @@ SELFTEST(Light, brightness_curve) {
 	CHECK(near(lightBrightness(15, 0, 0.2f), 0.05f + 0.95f * (0.2f / 3.4f)));
 	CHECK(near(lightBrightness(15, 7, 0.2f), lightBrightness(0, 7, 0.2f)));   // the brighter of the two
 }
+
+SELFTEST(Light, lava_passes_light) {
+	// Lava is drawn opaque, but light goes through it (the spec's list of
+	// blocks that pass light): sky light down a shaft topped with lava.
+	// (Its own glow, 15, hides whether block light passes.)
+	LitWorld w;
+	for (int y = FLOOR + 1; y <= FLOOR + 8; ++y)
+		for (int z = 3; z <= 5; ++z)
+			for (int x = 3; x <= 5; ++x)
+				w.set(x, y, z, (x == 4 && z == 4) ? AIR_BLOCK : STONE);
+	w.set(4, FLOOR + 8, 4, LAVA_BLOCK);
+	const auto l = w.light();
+	CHECK_EQ(sky(*l, 4, FLOOR + 7, 4), 15);              // straight down through the lava
+	CHECK_EQ(sky(*l, 4, FLOOR + 1, 4), 15);
+}
