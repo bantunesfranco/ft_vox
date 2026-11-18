@@ -63,7 +63,7 @@ bool GameServer::start(std::string& error) {
 	std::filesystem::create_directories(_config.worldFolder, ec);
 	_lock = WorldLock::acquire(_config.worldFolder, error);
 	if (!_lock) {
-		error = "world " + _config.worldFolder.string() + " is locked: " + error;
+		error = "world " + pathText(_config.worldFolder) + " is locked: " + error;
 		return false;
 	}
 	const bool existed = std::filesystem::exists(_config.worldFolder / "level.bin", ec);
@@ -83,7 +83,7 @@ bool GameServer::start(std::string& error) {
 	if (!_transport->start(error))
 		return false;
 	_pool = std::make_unique<ThreadPool>(_config.workerThreads);
-	log("world '%s' (%s) seed %lld", world->name.c_str(), world->folder.string().c_str(),
+	log("world '%s' (%s) seed %lld", world->name.c_str(), pathText(world->folder).c_str(),
 	    static_cast<long long>(_seed));
 	log("listening on port %u (view radius %d)", static_cast<unsigned>(_config.port), _config.viewRadius);
 	return true;

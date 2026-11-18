@@ -39,6 +39,11 @@ struct WorldInfo {
 [[nodiscard]] std::uint64_t parseSeed(std::string_view text, std::uint64_t randomSeed);
 [[nodiscard]] std::uint64_t randomSeed();
 
+// `path` as UTF-8, for display and messages. Never throws (path::string()
+// converts through the ANSI code page on Windows and throws on characters
+// it cannot map).
+[[nodiscard]] std::string pathText(const std::filesystem::path& path);
+
 // Every world folder under `savesDir`, most recently played first.
 [[nodiscard]] std::vector<WorldInfo> listWorlds(const std::filesystem::path& savesDir);
 

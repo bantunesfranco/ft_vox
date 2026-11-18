@@ -1,4 +1,5 @@
 #include "PlayerStore.hpp"
+#include "WorldStore.hpp"
 
 #include <algorithm>
 #include <array>
@@ -40,11 +41,11 @@ void keepAside(const fs::path& file, const char* reason) {
 	bad += ".bad";
 	std::error_code ec;
 	fs::rename(file, bad, ec);
-	std::cerr << "player file " << file.string() << " ignored (" << reason << "): ";
+	std::cerr << "player file " << pathText(file) << " ignored (" << reason << "): ";
 	if (ec)
-		std::cerr << "could not keep it as " << bad.string() << ": " << ec.message() << '\n';
+		std::cerr << "could not keep it as " << pathText(bad) << ": " << ec.message() << '\n';
 	else
-		std::cerr << "kept as " << bad.string() << '\n';
+		std::cerr << "kept as " << pathText(bad) << '\n';
 }
 
 } // namespace
@@ -83,7 +84,7 @@ bool savePlayer(const fs::path& file, PlayerRecord record, std::string& error) {
 	if (file.has_parent_path()) {
 		fs::create_directories(file.parent_path(), ec);
 		if (ec) {
-			error = "cannot create " + file.parent_path().string() + ": " + ec.message();
+			error = "cannot create " + pathText(file.parent_path()) + ": " + ec.message();
 			return false;
 		}
 	}
@@ -94,13 +95,13 @@ bool savePlayer(const fs::path& file, PlayerRecord record, std::string& error) {
 	{
 		std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
 		if (!out.write(data.data(), static_cast<std::streamsize>(data.size())) || !out.flush()) {
-			error = "cannot write " + tmp.string();
+			error = "cannot write " + pathText(tmp);
 			return false;
 		}
 	}
 	fs::rename(tmp, file, ec);
 	if (ec) {
-		error = "cannot write " + file.string() + ": " + ec.message();
+		error = "cannot write " + pathText(file) + ": " + ec.message();
 		return false;
 	}
 	return true;

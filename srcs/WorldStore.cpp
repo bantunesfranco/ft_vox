@@ -72,7 +72,7 @@ bool writeLevel(const WorldInfo& world, std::string& error) {
 		file.write(data.data(), static_cast<std::streamsize>(data.size()));
 		file.close();
 		if (!file) {
-			error = "cannot write " + tmp.string();
+			error = "cannot write " + pathText(tmp);
 			fs::remove(tmp, ec);
 			return false;
 		}
@@ -185,7 +185,7 @@ std::vector<WorldInfo> listWorlds(const fs::path& savesDir) {
 		if (!readLevel(world.folder, world)) {
 			world = {};
 			world.folder = entry.path();
-			world.name = entry.path().filename().string();
+			world.name = pathText(entry.path().filename());
 			world.readable = false;
 		}
 		worlds.push_back(std::move(world));
@@ -212,7 +212,7 @@ std::optional<WorldInfo> createWorld(const fs::path& savesDir, const std::string
 	world.lastPlayed = nowMillis();
 
 	if (!fs::create_directories(world.folder, ec) || ec) {
-		error = "cannot create " + world.folder.string() + ": " + ec.message();
+		error = "cannot create " + pathText(world.folder) + ": " + ec.message();
 		return std::nullopt;
 	}
 	if (!writeLevel(world, error)) {
@@ -228,17 +228,17 @@ std::optional<WorldInfo> openOrCreateWorld(const fs::path& folder, const std::ui
 	if (readLevel(folder, world))
 		return world;
 	if (fs::exists(folder / LEVEL_FILE)) {
-		error = (folder / LEVEL_FILE).string() + " is damaged";
+		error = pathText(folder / LEVEL_FILE) + " is damaged";
 		return std::nullopt;
 	}
 
 	std::error_code ec;
 	fs::create_directories(folder, ec);
 	if (ec) {
-		error = "cannot create " + folder.string() + ": " + ec.message();
+		error = "cannot create " + pathText(folder) + ": " + ec.message();
 		return std::nullopt;
 	}
-	world.name = folder.filename().string();
+	world.name = pathText(folder.filename());
 	world.seed = seedIfNew;
 	world.lastPlayed = nowMillis();
 	if (!writeLevel(world, error))
@@ -254,7 +254,7 @@ bool markPlayed(WorldInfo& world, std::string& error) {
 bool deleteWorld(const WorldInfo& world, std::string& error) {
 	std::error_code ec;
 	if (world.folder.empty() || !fs::is_directory(world.folder, ec)) {
-		error = "not a world folder: " + world.folder.string();
+		error = "not a world folder: " + pathText(world.folder);
 		return false;
 	}
 	// Never delete a world another game or server is playing: take its lock first,
@@ -275,7 +275,7 @@ bool deleteWorld(const WorldInfo& world, std::string& error) {
 	if (!ec)
 		fs::remove_all(world.folder, ec);
 	if (ec) {
-		error = "cannot delete " + world.folder.string() + ": " + ec.message();
+		error = "cannot delete " + pathText(world.folder) + ": " + ec.message();
 		return false;
 	}
 	return true;
@@ -297,14 +297,14 @@ std::unique_ptr<WorldLock> WorldLock::acquire(const fs::path& folder, std::strin
 		if (code == ERROR_SHARING_VIOLATION)
 			error = "the world is already open in another game or server";
 		else
-			error = "cannot open " + path.string() + ": " + std::system_category().message(static_cast<int>(code));
+			error = "cannot open " + pathText(path) + ": " + std::system_category().message(static_cast<int>(code));
 		return nullptr;
 	}
 	lock->_handle = handle;
 #else
 	const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
 	if (fd < 0) {
-		error = "cannot open " + path.string() + ": " + std::generic_category().message(errno);
+		error = "cannot open " + pathText(path) + ": " + std::generic_category().message(errno);
 		return nullptr;
 	}
 	if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
@@ -325,4 +325,13 @@ WorldLock::~WorldLock() {
 	if (_fd >= 0)
 		::close(_fd);
 #endif
+}
+
+// ============================================================================
+//  Paths
+// ============================================================================
+
+std::string pathText(const fs::path& path) {
+	const std::u8string text = path.u8string();
+	return std::string(text.begin(), text.end());
 }

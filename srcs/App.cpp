@@ -149,12 +149,12 @@ void App::startBenchmarkWorld() {
 }
 
 void App::refreshWorlds() {
-	const std::string selectedFolder = selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size())
-		? worlds[static_cast<std::size_t>(selectedWorld)].folder.string() : std::string{};
+	const std::filesystem::path selectedFolder = selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size())
+		? worlds[static_cast<std::size_t>(selectedWorld)].folder : std::filesystem::path{};
 	worlds = listWorlds(savesDir);
 	selectedWorld = worlds.empty() ? -1 : 0;
 	for (std::size_t i = 0; i < worlds.size(); ++i)
-		if (worlds[i].folder.string() == selectedFolder)
+		if (!selectedFolder.empty() && worlds[i].folder == selectedFolder)
 			selectedWorld = static_cast<int>(i);
 }
 
@@ -448,7 +448,7 @@ UiFrameModel App::buildUiModel() const {
 			UiWorldEntry entry;
 			entry.name = info.name;
 			entry.readable = info.readable;
-			entry.detail = info.folder.filename().string()
+			entry.detail = pathText(info.folder.filename())
 				+ (info.readable ? "    seed " + std::to_string(static_cast<std::int64_t>(info.seed))
 				                 : "    (cannot be read)");
 			uiModel.worlds.push_back(std::move(entry));

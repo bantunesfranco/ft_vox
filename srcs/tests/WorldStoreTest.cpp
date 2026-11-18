@@ -202,3 +202,17 @@ SELFTEST(WorldStore, lock_error_names_the_cause) {
 	CHECK(lock == nullptr);
 	CHECK(error.find("already open") == std::string::npos);
 }
+
+SELFTEST(WorldStore, non_ascii_folder_listed) {
+	// A folder made by hand with characters outside the ANSI code page.
+	const selftest::TempDir dir;
+	const std::u8string name = u8"\u4e16\u754c \u00e9";
+	fs::create_directories(dir.path() / fs::path(name));
+	const auto worlds = listWorlds(dir.path());       // must not throw
+	CHECK_EQ(worlds.size(), std::size_t{1});
+	if (!worlds.empty()) {
+		CHECK(!worlds[0].readable);
+		CHECK(worlds[0].name == std::string(name.begin(), name.end()));   // UTF-8
+		CHECK_EQ(pathText(worlds[0].folder.filename()), worlds[0].name);
+	}
+}
