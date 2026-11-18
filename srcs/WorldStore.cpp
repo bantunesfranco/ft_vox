@@ -62,14 +62,18 @@ bool writeLevel(const WorldInfo& world, std::string& error) {
 
 	// Write a temp file, then replace: a crash never leaves a half-written level.bin.
 	const fs::path tmp = world.folder / "level.bin.tmp";
+	std::error_code ec;
 	{
+		// close() is where a full disk shows: check it, never rename a short file over level.bin.
 		std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
-		if (!file.write(data.data(), static_cast<std::streamsize>(data.size()))) {
+		file.write(data.data(), static_cast<std::streamsize>(data.size()));
+		file.close();
+		if (!file) {
 			error = "cannot write " + tmp.string();
+			fs::remove(tmp, ec);
 			return false;
 		}
 	}
-	std::error_code ec;
 	fs::rename(tmp, world.folder / LEVEL_FILE, ec);
 	if (ec) {
 		error = "cannot write level.bin: " + ec.message();
