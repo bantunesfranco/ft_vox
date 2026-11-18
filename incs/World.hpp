@@ -86,7 +86,7 @@ public:
 		std::size_t columns       = 0;
 		std::size_t blockBytes    = 0;   // block storage of every column
 		std::size_t lightBytes    = 0;   // heap of every stored light
-		std::size_t meshCpuBytes  = 0;   // vertex + index capacity of every render state's meshes
+		std::size_t meshCpuBytes  = 0;   // vertex capacity of every render state's meshes (no indices since the shared buffer)
 	};
 	[[nodiscard]] MemoryStats memoryStats() const;
 
