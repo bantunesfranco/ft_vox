@@ -35,6 +35,7 @@
 #  include <poll.h>
 #  include <sys/socket.h>
 #  include <sys/uio.h>
+#  include <netdb.h>
 #  include <unistd.h>
 #endif
 

@@ -39,7 +39,7 @@ namespace {
 
 // Argument `i` as a path. On Windows `argv` is in the ANSI code page, which
 // loses characters outside it: the wide command line keeps them.
-std::filesystem::path argPath(const int argc, char** argv, const int i) {
+std::filesystem::path argPath([[maybe_unused]] const int argc, char** argv, const int i) {
 #if defined(_WIN32)
 	int wideCount = 0;
 	if (LPWSTR* wide = CommandLineToArgvW(GetCommandLineW(), &wideCount)) {

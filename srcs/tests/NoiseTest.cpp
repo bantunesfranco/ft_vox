@@ -1,6 +1,7 @@
 #include "SelfTest.hpp"
 #include "worldgen/Noise.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdio>

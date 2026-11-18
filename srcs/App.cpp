@@ -768,9 +768,12 @@ void App::runBenchmarkEdit(const double t) {
 	const int due = static_cast<int>((t - BENCH_WARMUP) / BENCH_EDIT_INTERVAL);
 	if (bench.editsDone > due)
 		return;
-	static constexpr std::array<glm::ivec2, 4> SPOTS{{{8, 8}, {15, 15}, {0, 8}, {24, 20}}};
+
+	static const std::array<glm::ivec2, 4> SPOTS{{{8, 8}, {15, 15}, {0, 8}, {24, 20}}};
+	
 	const glm::ivec2 spot = SPOTS[static_cast<std::size_t>(bench.editsDone / 2) % SPOTS.size()]
 		+ glm::ivec2(static_cast<int>(bench.startXZ.x) - 8, static_cast<int>(bench.startXZ.y) - 8);
+
 	int ground = 0;
 	if (world.getSurfaceHeight(spot.x, spot.y, ground)) {
 		const glm::ivec3 cell{spot.x, ground + 1, spot.y};
