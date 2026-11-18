@@ -1,39 +1,88 @@
 #version 450 core
 
-layout(location = 0) in vec3  aPos;
-layout(location = 1) in vec2 aUV;
-layout(location = 2) in uint  aTexIndex;
-layout(location = 3) in uint  aNormal;
-layout(location = 4) in uint  aAO;
+layout(location = 0) in uint aPackedVertex;
+// Per draw (instanced attribute, selected by baseInstance in multi-draw).
+// Draws without the array enabled read the value set by glVertexAttrib3f.
+layout(location = 1) in vec3 aChunkPosition;
+// Second word: sky light 4 bits, block light 4 bits, sub-block offset 3 x 5 bits.
+layout(location = 2) in uint aLight;
 
 layout(std140, binding = 0) uniform WorldUBO
 {
     mat4 MVP;
-    vec4 light;
-    vec4 cameraPos;
+    vec4 light;       // xyz = position, w = radius
+    vec4 ambientData; // x = ambient
+    vec4 eye;         // xyz = camera position
+    vec4 fog;         // rgb = colour, w = distance (0 = off)
+    vec4 skyFog;      // rgb = colour, w = view distance (0 = off)
+    vec4 time;        // x = daylight
 };
 
-const vec3 normals[6] = vec3[](
-    vec3( 1,  0,  0),  // +X
-    vec3(-1,  0,  0),  // -X
-    vec3( 0,  1,  0),  // +Y
-    vec3( 0, -1,  0),  // -Y
-    vec3( 0,  0,  1),  // +Z
-    vec3( 0,  0, -1)   // -Z
-);
+uniform bool uHighlightPass;
+uniform vec3 uBoxSize;        // highlight pass: size of the unit-cube outline
 
 out vec2 vUV;
 out vec3 vNormal;
 out vec3 vWorldPos;
 out float vAO;
 flat out uint vTexIndex;
+out float vSky;     // 0..15, interpolated across the face (smooth light)
+out float vBlock;
+
+vec3 decodeNormal(uint normalIdx)
+{
+    if (normalIdx == 0u) return vec3( 1.0,  0.0,  0.0); // +X
+    if (normalIdx == 1u) return vec3(-1.0,  0.0,  0.0); // -X
+    if (normalIdx == 2u) return vec3( 0.0,  1.0,  0.0); // +Y
+    if (normalIdx == 3u) return vec3( 0.0, -1.0,  0.0); // -Y
+    if (normalIdx == 4u) return vec3( 0.0,  0.0,  1.0); // +Z
+    if (normalIdx == 5u) return vec3( 0.0,  0.0, -1.0); // -Z
+
+    return vec3(0.0, 1.0, 0.0);
+}
 
 void main()
 {
-    gl_Position = MVP * vec4(aPos, 1.0);
-    vUV = vec2(aUV);
-    vNormal = normals[aNormal];
-    vWorldPos = aPos;
-    vTexIndex = aTexIndex;
-    vAO = float(aAO) / 3.0;
+    uint data = aPackedVertex;
+
+    // X/Z use 5 bits; Y spans a complete 256-block chunk column.
+    uint x =  data         & 0x1Fu;
+    uint y = (data >> 5u)  & 0x1FFu;
+    uint z = (data >> 14u) & 0x1Fu;
+
+    // 3 bits.
+    uint normal = (data >> 19u) & 0x07u;
+
+    // 6 bits.
+    uint texture = (data >> 22u) & 0x3Fu;
+
+    // 2 bits.
+    uint ao = (data >> 28u) & 0x03u;
+
+    vec3 localPos = vec3(x, y, z)
+        + vec3((aLight >> 8u) & 0x1Fu, (aLight >> 13u) & 0x1Fu, (aLight >> 18u) & 0x1Fu) / 16.0;
+    vSky = float(aLight & 0x0Fu);
+    vBlock = float((aLight >> 4u) & 0x0Fu);
+    // Outline: scale the unit cube to the box, grown by 1% around its center
+    // so it does not z-fight with the faces it surrounds.
+    if (uHighlightPass)
+        localPos = (localPos - vec3(0.5)) * uBoxSize * 1.01 + uBoxSize * 0.5;
+    vec3 worldPos = localPos + aChunkPosition;
+
+    gl_Position = MVP * vec4(worldPos, 1.0);
+
+    vWorldPos = worldPos;
+    vNormal = decodeNormal(normal);
+
+    vTexIndex = texture;
+
+    // Keep blocked corners shaded without making them completely black.
+    vAO = 0.55 + (float(ao) / 3.0) * 0.45;
+
+    if (normal <= 1u)
+        vUV = vec2(localPos.z, 1.0 - localPos.y);
+    else if (normal <= 3u)
+        vUV = vec2(localPos.x, localPos.z);
+    else
+        vUV = vec2(localPos.x, 1.0 - localPos.y);
 }

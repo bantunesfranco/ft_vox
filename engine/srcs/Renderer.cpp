@@ -1,208 +1,647 @@
-
-#define GLAD_GL_IMPLEMENTATION 
 #define GLFW_INCLUDE_NONE
 
+#include <cstddef>
 #include "Engine.hpp"
 #include "Renderer.hpp"
 
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <vector>
+#include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <sstream>
 
-Renderer::Renderer() : _shaderprog(0), _vao(0), _vbo(0), _ibo(0), _cameraUBO(0), _textureArray(0)
-{
-    const std::string* code = loadShaderCode(VSHADER_PATH);
-    const GLuint vshader = compileShader(code, GL_VERTEX_SHADER);
-    delete code;
-    if (!vshader) throw Engine::EngineException(VOX_VERTFAIL);
+#include <glm/gtc/type_ptr.hpp>
 
-    code = loadShaderCode(FSHADER_PATH);
-    const GLuint fshader = compileShader(code, GL_FRAGMENT_SHADER);
-    delete code;
-    if (!fshader)
-    {
-        glDeleteShader(vshader);
+const auto VSHADER_PATH = "./engine/shaders/vertex.glsl";
+const auto FSHADER_PATH = "./engine/shaders/fragment.glsl";
+const auto SKY_VSHADER_PATH = "./engine/shaders/sky_vertex.glsl";
+const auto SKY_FSHADER_PATH = "./engine/shaders/sky_fragment.glsl";
+
+Renderer::Renderer() {
+    const std::string vertexCode = loadShaderCode(VSHADER_PATH).value_or("");
+    const std::string fragmentCode = loadShaderCode(FSHADER_PATH).value_or("");
+
+    const GLuint vertexShader = compileShader(vertexCode, GL_VERTEX_SHADER);
+    const GLuint fragmentShader = compileShader(fragmentCode, GL_FRAGMENT_SHADER);
+
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader)
+            glDeleteShader(vertexShader);
+
+        if (fragmentShader)
+            glDeleteShader(fragmentShader);
+
         throw Engine::EngineException(VOX_FRAGFAIL);
     }
 
     _shaderprog = glCreateProgram();
-    glAttachShader(_shaderprog, vshader);
-    glAttachShader(_shaderprog, fshader);
+
+    if (!_shaderprog) {
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+
+        throw Engine::EngineException(VOX_SHDRFAIL);
+    }
+
+    glAttachShader(_shaderprog, vertexShader);
+    glAttachShader(_shaderprog, fragmentShader);
+
     glLinkProgram(_shaderprog);
 
-    glDeleteShader(vshader);
-    glDeleteShader(fshader);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
 
-    GLint success;
+    GLint success = GL_FALSE;
+
     glGetProgramiv(_shaderprog, GL_LINK_STATUS, &success);
-    if (!success)
-    {
-        char infolog[512];
-        glGetProgramInfoLog(_shaderprog, sizeof(infolog), nullptr, infolog);
-        std::cerr << "Shader Program Linking Failed: " << infolog << std::endl;
+
+    if (!success) {
+        char infoLog[1024]{};
+
+        glGetProgramInfoLog(_shaderprog, sizeof(infoLog), nullptr, infoLog);
+
+        std::cerr << "Shader Program Linking Failed: " << infoLog << std::endl;
+
         glDeleteProgram(_shaderprog);
+        _shaderprog = 0;
+
         throw Engine::EngineException(VOX_SHDRFAIL);
     }
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-    glGenVertexArrays(1, &_vao);
-    glBindVertexArray(_vao);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
 
-    _vbo = VBOManager::get().getVBO();
-    _ibo = VBOManager::get().getVBO();
-
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
-                          sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
-
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
-
-    glEnableVertexAttribArray(2);
-    glVertexAttribIPointer(
-        2, 1, GL_UNSIGNED_INT,
-        sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, texIndex))
-    );
-
-    glBindVertexArray(0);
+    createBuffers();
+    createVertexLayout();
+    createCameraUBO();
 
     glUseProgram(_shaderprog);
-    const GLint samplerLoc = glGetUniformLocation(_shaderprog, "uTextures");
-    if (samplerLoc != -1)
+
+    const GLint samplerLoc = glGetUniformLocation(_shaderprog, "uAtlas");
+
+    if (samplerLoc >= 0)
         glUniform1i(samplerLoc, 0);
 
+    _atlasRectsLocation = glGetUniformLocation(_shaderprog, "uTextureRects");
+    _highlightPassLocation = glGetUniformLocation(_shaderprog, "uHighlightPass");
+    _boxSizeLocation = glGetUniformLocation(_shaderprog, "uBoxSize");
+
     glUseProgram(0);
+
+    _skyProgram = buildProgram(SKY_VSHADER_PATH, SKY_FSHADER_PATH);
+    _skyInverseLocation = glGetUniformLocation(_skyProgram, "uInverseViewProj");
+    _skyZenithLocation = glGetUniformLocation(_skyProgram, "uZenith");
+    _skyHorizonLocation = glGetUniformLocation(_skyProgram, "uHorizon");
+    _skySunLocation = glGetUniformLocation(_skyProgram, "uSunDir");
+    glGenVertexArrays(1, &_skyVao);
 
     if (glGetError() != GL_NO_ERROR)
         throw Engine::EngineException(VOX_GLADFAIL);
 }
 
-Renderer::~Renderer() {
-    glDeleteProgram(_shaderprog);
-    glDeleteBuffers(1, &_ibo);
-    glDeleteBuffers(1, &_vbo);
-    glDeleteVertexArrays(1, &_vao);
-}
+GLuint Renderer::buildProgram(const char* vertexPath, const char* fragmentPath) {
+    const GLuint vertexShader = compileShader(loadShaderCode(vertexPath).value_or(""), GL_VERTEX_SHADER);
+    const GLuint fragmentShader = compileShader(loadShaderCode(fragmentPath).value_or(""), GL_FRAGMENT_SHADER);
+    if (!vertexShader || !fragmentShader) {
+        if (vertexShader)
+            glDeleteShader(vertexShader);
+        if (fragmentShader)
+            glDeleteShader(fragmentShader);
+        throw Engine::EngineException(VOX_FRAGFAIL);
+    }
+    const GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
 
-GLuint Renderer::compileShader(const std::string* code, int32_t type) {
-    if (!code) return 0;
-
-    const GLuint shader = glCreateShader(type);
-    if (!shader) return 0;
-
-    const char* cstr = code->c_str();
-    glShaderSource(shader, 1, &cstr, nullptr);
-    glCompileShader(shader);
-    
-    GLint success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    GLint success = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
     if (!success) {
-        char infolog[512];
-        glGetShaderInfoLog(shader, sizeof(infolog), nullptr, infolog);
-        std::cerr << infolog << std::endl;
-        glDeleteShader(shader);
-        return 0;
+        char infoLog[1024]{};
+        glGetProgramInfoLog(program, sizeof(infoLog), nullptr, infoLog);
+        std::cerr << "Shader Program Linking Failed (" << vertexPath << "): " << infoLog << std::endl;
+        glDeleteProgram(program);
+        throw Engine::EngineException(VOX_SHDRFAIL);
     }
-    return shader;
+    return program;
 }
 
-std::string* Renderer::loadShaderCode(const char* path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open shader file: " << path << std::endl;
-        return nullptr;
-    }
-
-    std::stringstream shaderStream;
-    shaderStream << file.rdbuf();
-    file.close();
-
-    return new std::string(shaderStream.str());
+void Renderer::drawSky(const glm::mat4& inverseViewProj, const glm::vec3& zenith, const glm::vec3& horizon,
+                       const glm::vec3& sunDirection) const {
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glUseProgram(_skyProgram);
+    glUniformMatrix4fv(_skyInverseLocation, 1, GL_FALSE, &inverseViewProj[0][0]);
+    glUniform3fv(_skyZenithLocation, 1, &zenith[0]);
+    glUniform3fv(_skyHorizonLocation, 1, &horizon[0]);
+    glUniform3fv(_skySunLocation, 1, &sunDirection[0]);
+    glBindVertexArray(_skyVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
 }
 
-void Renderer::render(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const glm::mat4& mvp) const
-{
-    if (vertices.empty() || indices.empty())
-        return;
 
-    glUseProgram(_shaderprog);
+Renderer::~Renderer() {
+    if (_skyVao)
+        glDeleteVertexArrays(1, &_skyVao);
+    if (_skyProgram)
+        glDeleteProgram(_skyProgram);
+    if (_boundsIbo)
+        glDeleteBuffers(1, &_boundsIbo);
+    if (_boundsVbo)
+        glDeleteBuffers(1, &_boundsVbo);
+    if (_boundsVao)
+        glDeleteVertexArrays(1, &_boundsVao);
+    if (_cameraUBO)
+        glDeleteBuffers(1, &_cameraUBO);
+    if (_indirectBuffer)
+        glDeleteBuffers(1, &_indirectBuffer);
+    if (_instanceBuffer)
+        glDeleteBuffers(1, &_instanceBuffer);
+
+    if (_quadIndices)
+        glDeleteBuffers(1, &_quadIndices);
+
+    if (_vbo)
+        glDeleteBuffers(1, &_vbo);
+
+    if (_vao)
+        glDeleteVertexArrays(1, &_vao);
+
+    if (_shaderprog)
+        glDeleteProgram(_shaderprog);
+}
+
+
+void Renderer::createBuffers() {
+    glGenVertexArrays(1, &_vao);
+    glGenBuffers(1, &_vbo);
+    // Created (not just named) up front: filled only through the glNamedBuffer* calls.
+    glCreateBuffers(1, &_quadIndices);
+    glCreateBuffers(1, &_indirectBuffer);
+    glGenBuffers(1, &_instanceBuffer);
+
+    if (!_vao || !_vbo || !_quadIndices || !_indirectBuffer || !_instanceBuffer)
+        throw Engine::EngineException(VOX_GLADFAIL);
+
+    _vertexBufferCapacity = INITIAL_VERTEX_BUFFER_SIZE;
+
+    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(_vertexBufferCapacity),
+        nullptr,
+        GL_DYNAMIC_DRAW
+    );
+
+    // Every mesh is quads of 4 vertices, so one index pattern serves them all:
+    // quad q is 4q+0 4q+1 4q+2, 4q+2 4q+3 4q+0 (each draw's baseVertex picks its mesh).
+    std::vector<QuadIndex> pattern;
+    pattern.reserve(MAX_QUADS_PER_SECTION * 6);
+    for (std::size_t quad = 0; quad < MAX_QUADS_PER_SECTION; ++quad)
+        for (const std::size_t corner : {0u, 1u, 2u, 2u, 3u, 0u})
+            pattern.push_back(static_cast<QuadIndex>(quad * 4 + corner));
+    glNamedBufferStorage(_quadIndices, static_cast<GLsizeiptr>(QUAD_INDEX_BYTES), pattern.data(), 0);
+
+    _vertexBufferUsed = 0;
+}
+
+
+void Renderer::createVertexLayout() {
     glBindVertexArray(_vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _quadIndices);
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint32_t), indices.data(), GL_DYNAMIC_DRAW);
+    /*
+     * PackedVertex: two 32-bit words, unpacked by the shader (see Mesh.hpp).
+     */
+    glEnableVertexAttribArray(0);
+    glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+        reinterpret_cast<const void*>(offsetof(PackedVertex, a)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+        reinterpret_cast<const void*>(offsetof(PackedVertex, b)));
 
-    glBindBuffer(GL_UNIFORM_BUFFER, _cameraUBO);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4),glm::value_ptr(mvp));
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-    glBindTextureUnit(0, _textureArray);
-    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, nullptr);
+    // Chunk position, one per draw: divisor 1 + baseInstance = draw index.
+    glBindBuffer(GL_ARRAY_BUFFER, _instanceBuffer);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
+    glVertexAttribDivisor(1, 1);
 
     glBindVertexArray(0);
 }
 
-void Renderer::initProjectionMatrix(const GLFWwindow* window, const std::unique_ptr<Camera>& camera, glm::mat4& mvp) {
-    int width, height;
-    glfwGetFramebufferSize(const_cast<GLFWwindow*>(window), &width, &height);
-    const float ratio = static_cast<float>(width) / static_cast<float>(height);
 
-    glViewport(0, 0, width, height);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+void Renderer::createCameraUBO() {
+    glGenBuffers(1, &_cameraUBO);
 
-    camera->view = glm::lookAt(camera->pos, camera->pos + camera->dir, camera->up);
-    camera->proj = glm::perspective(glm::radians(camera->fov), ratio, 0.1f, 1024.0f);
-    mvp = camera->proj * camera->view * glm::mat4(1.0f);
+    glBindBuffer(
+        GL_UNIFORM_BUFFER,
+        _cameraUBO
+    );
+
+    glBufferData(
+        GL_UNIFORM_BUFFER,
+        sizeof(WorldUBO),
+        nullptr,
+        GL_DYNAMIC_DRAW
+    );
+
+    glBindBufferBase(
+        GL_UNIFORM_BUFFER,
+        0,
+        _cameraUBO
+    );
+
+    glBindBuffer(
+        GL_UNIFORM_BUFFER,
+        0
+    );
 }
 
-void Renderer::releaseVBO() {
-    if (_vbo != 0) {
-        VBOManager::get().returnVBO(_vbo);
-        _vbo = 0;
+void Renderer::ensureVertexCapacity(const std::size_t required, const std::size_t bytesToPreserve) {
+    if (required <= _vertexBufferCapacity)
+        return;
+
+    std::size_t newCapacity = _vertexBufferCapacity;
+
+    while (newCapacity < required)
+        newCapacity *= 2;
+
+    GLuint newBuffer = 0;
+    glGenBuffers(1, &newBuffer);
+
+    glBindBuffer(GL_COPY_WRITE_BUFFER, newBuffer);
+
+    glBufferData(
+        GL_COPY_WRITE_BUFFER,
+        static_cast<GLsizeiptr>(newCapacity),
+        nullptr,
+        GL_DYNAMIC_DRAW
+    );
+
+    glBindBuffer(GL_COPY_READ_BUFFER, _vbo);
+
+    if (bytesToPreserve > 0) {
+        glCopyBufferSubData(
+            GL_COPY_READ_BUFFER,
+            GL_COPY_WRITE_BUFFER,
+            0,
+            0,
+            static_cast<GLsizeiptr>(bytesToPreserve)
+        );
+    }
+
+    glDeleteBuffers(1, &_vbo);
+
+    _vbo = newBuffer;
+    _vertexBufferCapacity = newCapacity;
+
+    /*
+     * The VAO stores the vertex-buffer binding.
+     * Rebind the new VBO to the vertex attribute layout.
+     */
+    createVertexLayout();
+}
+
+GLuint Renderer::compileShader(const std::string& code, const GLenum type) {
+    if (code.empty())
+        return 0;
+
+    const GLuint shader = glCreateShader(type);
+
+    if (!shader)
+        return 0;
+
+    const char* source = code.c_str();
+
+    glShaderSource(shader, 1, &source, nullptr);
+
+    glCompileShader(shader);
+
+    GLint success = GL_FALSE;
+
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+
+    if (!success) {
+        char infoLog[1024]{};
+
+        glGetShaderInfoLog(shader, sizeof(infoLog), nullptr, infoLog);
+
+        std::cerr << "Shader compilation failed: " << infoLog << std::endl;
+
+        glDeleteShader(shader);
+
+        return 0;
+    }
+
+    return shader;
+}
+
+std::optional<std::string> Renderer::loadShaderCode(const char* path) {
+    std::ifstream file(path);
+
+    if (!file.is_open()) {
+        std::cerr << "Failed to open shader file: " << path
+                  << " (run the game from the project root)" << std::endl;
+
+        return std::nullopt;
+    }
+
+    std::stringstream stream;
+    stream << file.rdbuf();
+
+    return stream.str();
+}
+
+void Renderer::beginFrame(const WorldUBO& worldUbo) const
+{
+    glBindBuffer(
+        GL_UNIFORM_BUFFER,
+        _cameraUBO
+    );
+
+    glBufferSubData(
+        GL_UNIFORM_BUFFER,
+        0,
+        sizeof(WorldUBO),
+        &worldUbo
+    );
+
+    glBindBuffer(
+        GL_UNIFORM_BUFFER,
+        0
+    );
+}
+
+void Renderer::setTextureAtlas(const GLuint textureAtlas) noexcept {
+    _textureAtlas = textureAtlas;
+}
+
+void Renderer::setAtlasRects(const std::array<glm::vec4, 64>& rects) {
+    if (_atlasRectsLocation < 0)
+        return;
+
+    glUseProgram(_shaderprog);
+    glUniform4fv(_atlasRectsLocation, static_cast<GLsizei>(rects.size()), glm::value_ptr(rects[0]));
+    glUseProgram(0);
+}
+
+std::size_t Renderer::allocateRange(
+    std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
+    std::size_t& used,
+    const std::size_t size
+) {
+    for (auto it = freeRanges.begin(); it != freeRanges.end(); ++it) {
+        if (it->second < size)
+            continue;
+
+        const std::size_t offset = it->first;
+        it->first += size;
+        it->second -= size;
+        if (it->second == 0)
+            freeRanges.erase(it);
+        return offset;
+    }
+
+    const std::size_t offset = used;
+    used += size;
+    return offset;
+}
+
+void Renderer::freeRange(
+    std::vector<std::pair<std::size_t, std::size_t>>& freeRanges,
+    std::size_t& used,
+    const std::size_t offset,
+    const std::size_t size
+) {
+    if (size == 0)
+        return;
+
+    auto it = std::lower_bound(
+        freeRanges.begin(),
+        freeRanges.end(),
+        offset,
+        [](const auto& range, const std::size_t value) { return range.first < value; }
+    );
+    it = freeRanges.insert(it, {offset, size});
+
+    if (it != freeRanges.begin()) {
+        auto previous = std::prev(it);
+        if (previous->first + previous->second == it->first) {
+            previous->second += it->second;
+            it = freeRanges.erase(it);
+            it = previous;
+        }
+    }
+
+    if (std::next(it) != freeRanges.end() && it->first + it->second == std::next(it)->first) {
+        it->second += std::next(it)->second;
+        freeRanges.erase(std::next(it));
+    }
+
+    while (!freeRanges.empty() && freeRanges.back().first + freeRanges.back().second == used) {
+        used = freeRanges.back().first;
+        freeRanges.pop_back();
     }
 }
 
-void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos) {
-    // Use lines or wireframe to represent the bounding box
-    const GLfloat vertices[] = {
-        minPos.x, minPos.y, minPos.z,
-        maxPos.x, minPos.y, minPos.z,
-        maxPos.x, maxPos.y, minPos.z,
-        minPos.x, maxPos.y, minPos.z,
-        minPos.x, minPos.y, maxPos.z,
-        maxPos.x, minPos.y, maxPos.z,
-        maxPos.x, maxPos.y, maxPos.z,
-        minPos.x, maxPos.y, maxPos.z
-    };
+void Renderer::uploadMesh(const MeshData& mesh, GpuMesh& gpuMesh) {
+    if (mesh.quadCount() == 0) {
+        gpuMesh = {};
+        return;
+    }
 
-    const GLuint indices[] = {
+    const std::size_t vertexBytes = mesh.quadCount() * 4 * sizeof(PackedVertex);
+    const std::size_t vertexBytesToPreserve = _vertexBufferUsed;
+    const std::size_t vertexOffsetBytes = allocateRange(_freeVertexRanges, _vertexBufferUsed, vertexBytes);
+    ensureVertexCapacity(vertexOffsetBytes + vertexBytes, vertexBytesToPreserve);
+
+    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLintptr>(vertexOffsetBytes),
+        static_cast<GLsizeiptr>(vertexBytes),
+        mesh.vertices.data()
+    );
+
+    gpuMesh.vertexOffset = static_cast<std::uint32_t>(vertexOffsetBytes / sizeof(PackedVertex));
+    gpuMesh.quadCount = static_cast<std::uint32_t>(mesh.quadCount());
+    gpuMesh.uploaded = true;
+}
+
+void Renderer::releaseMesh(GpuMesh& gpuMesh) {
+    if (!gpuMesh.uploaded)
+        return;
+
+    freeRange(
+        _freeVertexRanges,
+        _vertexBufferUsed,
+        static_cast<std::size_t>(gpuMesh.vertexOffset) * sizeof(PackedVertex),
+        static_cast<std::size_t>(gpuMesh.quadCount) * 4 * sizeof(PackedVertex)
+    );
+
+    gpuMesh = {};
+}
+
+void Renderer::drawBatch(const std::vector<DrawItem>& items) {
+    _commands.clear();
+    _positions.clear();
+    for (const DrawItem& item : items) {
+        const GpuMesh& mesh = *item.mesh;
+        if (!mesh.uploaded || mesh.quadCount == 0)
+            continue;
+        // {count, instanceCount, firstIndex, baseVertex, baseInstance}; the
+        // pieces of a mesh too big for the index pattern share its position.
+        const auto instance = static_cast<std::uint32_t>(_positions.size());
+        for (std::uint32_t quad = 0; quad < mesh.quadCount; quad += MAX_QUADS_PER_SECTION) {
+            const auto quads = std::min<std::uint32_t>(mesh.quadCount - quad, MAX_QUADS_PER_SECTION);
+            _commands.push_back({quads * 6, 1u, 0u, mesh.vertexOffset + quad * 4, instance});
+        }
+        _positions.push_back(item.position);
+    }
+    if (_commands.empty())
+        return;
+
+    // Orphan + refill: the driver hands out fresh storage, no stall on the GPU
+    // still reading last frame's (or the previous batch's) data.
+    glNamedBufferData(_instanceBuffer, static_cast<GLsizeiptr>(_positions.size() * sizeof(glm::vec3)),
+                      _positions.data(), GL_STREAM_DRAW);
+    glNamedBufferData(_indirectBuffer, static_cast<GLsizeiptr>(_commands.size() * sizeof(_commands[0])),
+                      _commands.data(), GL_STREAM_DRAW);
+
+    glUseProgram(_shaderprog);
+    glBindVertexArray(_vao);
+    if (_highlightPassLocation >= 0)
+        glUniform1i(_highlightPassLocation, GL_FALSE);
+    glBindTextureUnit(0, _textureAtlas);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, _indirectBuffer);
+    glMultiDrawElementsIndirect(GL_TRIANGLES, QUAD_INDEX_TYPE, nullptr,
+                                static_cast<GLsizei>(_commands.size()), 0);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
+// Outline of an axis-aligned box of any (fractional) size: a unit cube,
+// uploaded once, scaled by uBoxSize in the vertex shader.
+void Renderer::renderBoundingBox(const glm::vec3& minPos, const glm::vec3& maxPos) {
+    static constexpr std::array<std::uint32_t, 24> indices = {{
         0, 1, 1, 2, 2, 3, 3, 0,
         4, 5, 5, 6, 6, 7, 7, 4,
         0, 4, 1, 5, 2, 6, 3, 7
-    };
+    }};
 
-    if (_vbo == 0)
-        _vbo = VBOManager::get().getVBO();
+    if (!_boundsVao) {
+        static constexpr std::array<PackedVertex, 8> vertices = {{
+            packVertex(0, 0, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 0, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 1, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(0, 1, 0, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(0, 0, 1, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 0, 1, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(1, 1, 1, NormalDir::PositiveY, 0, 3, 0),
+            packVertex(0, 1, 1, NormalDir::PositiveY, 0, 3, 0)
+        }};
 
-    if (_ibo == 0)
-        _ibo = VBOManager::get().getVBO();
+        glGenVertexArrays(1, &_boundsVao);
+        glGenBuffers(1, &_boundsVbo);
+        glGenBuffers(1, &_boundsIbo);
 
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+        glBindVertexArray(_boundsVao);
+        glBindBuffer(GL_ARRAY_BUFFER, _boundsVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _boundsIbo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices.data(), GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+            reinterpret_cast<const void*>(offsetof(PackedVertex, a)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribIPointer(2, 1, GL_UNSIGNED_INT, sizeof(PackedVertex),
+            reinterpret_cast<const void*>(offsetof(PackedVertex, b)));
+    }
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+    const glm::vec3 size = glm::max(maxPos - minPos, glm::vec3(0.01f));
 
-    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(_boundsVao);
+    glUseProgram(_shaderprog);
+    glVertexAttrib3fv(1, glm::value_ptr(minPos));   // attribute 1 has no array in this VAO
+    if (_boxSizeLocation >= 0)
+        glUniform3fv(_boxSizeLocation, 1, glm::value_ptr(size));
+    if (_highlightPassLocation >= 0)
+        glUniform1i(_highlightPassLocation, GL_TRUE);
+    glBindTextureUnit(0, _textureAtlas);
+    glDepthMask(GL_FALSE);
+    glLineWidth(2.0f);
+    glDrawElements(GL_LINES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, nullptr);
+    glLineWidth(1.0f);
+    glDepthMask(GL_TRUE);
+    if (_highlightPassLocation >= 0)
+        glUniform1i(_highlightPassLocation, GL_FALSE);
+    glBindVertexArray(0);
+}
+
+void Renderer::beginTransparentPass() const {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+}
+
+void Renderer::endTransparentPass() const {
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+}
+
+void Renderer::initProjectionMatrix(
+    const GLFWwindow* window,
+    const std::unique_ptr<Camera>& camera,
+    glm::mat4& mvp
+) {
+    int width = 0;
+    int height = 0;
+
+    glfwGetFramebufferSize(
+        const_cast<GLFWwindow*>(window),
+        &width,
+        &height
+    );
+
+    if (width <= 0 || height <= 0)
+        return;
+
+    const float ratio = static_cast<float>(width) / static_cast<float>(height);
+
+    // The caller clears at the start of the frame; clearing here too would
+    // just repeat it.
+    glViewport(
+        0,
+        0,
+        width,
+        height
+    );
+
+    camera->view =
+        glm::lookAt(
+            camera->pos,
+            camera->pos + camera->dir,
+            camera->up
+        );
+
+    camera->proj =
+        glm::perspective(
+            glm::radians(camera->fov),
+            ratio,
+            0.1f,
+            512.0f
+        );
+
+    mvp = camera->proj * camera->view;
 }

@@ -1,609 +1,1061 @@
 #include "App.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <thread>
 
-#include <imgui.h>
 #include <ranges>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_opengl3.h>
 
-#define GLM_ENABLE_EXPERIMENTAL
+#include "Gamestate.hpp"
 #include "glm/gtx/norm.hpp"
 
-static void handleMovement(const GLFWwindow* window, std::unique_ptr<Camera>& camera)
-{
-	glm::vec3 moveDir(0.0f);
+#include "ThreadPool.hpp"
+#include "PlayerCollision.hpp"
+#include "ImGuiUI.hpp"
+#include "BlockTextures.hpp"
+#include "Protocol.hpp"
+#include "PlayerPhysics.hpp"
+#include "PlayerStore.hpp"
+#include "RemoteSession.hpp"
+#include "ProcessMemory.hpp"
 
-	auto app = static_cast<App*>(glfwGetWindowUserPointer(const_cast<GLFWwindow*>(window)));
-	float dt = FPSCounter::getDeltaTime();
+#include <charconv>
 
-	// clamp very large dt (pause/hitch) to avoid huge jumps
-	if (dt <= 0.0f) dt = 0.0001f;
-	dt = glm::min(dt, 0.1f);
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
-	// Movement directions
-	auto forward = glm::normalize(camera->dir);
-	auto right = glm::normalize(glm::cross(forward, camera->up));
+namespace {
+bool collidesWithWorld(const glm::vec3& eyePosition, const World& world) {
+	// Below the world is solid, above it empty; unloaded blocks count as solid.
+	const BlockRegistry& registry = world.getBlockRegistry();
+	return PlayerPhysics::boxHitsShapes(eyePosition, [&world, &registry](const glm::ivec3& p) {
+		if (p.y < ChunkColumn::MIN_WORLD_Y)
+			return 0;
+		if (p.y >= ChunkColumn::MAX_WORLD_Y)
+			return -1;
+		BlockId block = AIR_BLOCK;
+		if (!world.getBlockAt(p, block))
+			return 0;
+		const BlockDefinition& def = registry.get(block);
+		return def.solid ? static_cast<int>(def.collisionInset) : -1;
+	});
+}
 
-	bool moved = false;
-	if (app->isKeyDown(VOX_KEY_W)) { moveDir += forward; moved = true; }
-	if (app->isKeyDown(VOX_KEY_S)) { moveDir -= forward; moved = true; }
-	if (app->isKeyDown(VOX_KEY_A)) { moveDir -= right;   moved = true; }
-	if (app->isKeyDown(VOX_KEY_D)) { moveDir += right;   moved = true; }
+// "host" or "host:port" (port defaults to proto::DEFAULT_PORT).
+bool parseAddress(const std::string& text, std::string& host, std::uint16_t& port) {
+	const auto first = text.find_first_not_of(" \t");
+	const auto last  = text.find_last_not_of(" \t");
+	if (first == std::string::npos)
+		return false;
+	const std::string trimmed = text.substr(first, last - first + 1);
 
-	if (moved && glm::length(moveDir) > 0.0f)
-	{
-		moveDir = glm::normalize(moveDir) * camera->moveSpeed * dt;
-		camera->pos += moveDir;
+	port = proto::DEFAULT_PORT;
+	const auto colon = trimmed.rfind(':');
+	if (colon == std::string::npos) {
+		host = trimmed;
+		return true;
 	}
-
-	// Camera rotation
-	bool rotated = false;
-	if (app->isKeyDown(VOX_KEY_UP)) {
-		camera->pitch += camera->rotSpeed * dt;
-		camera->pitch = glm::min(camera->pitch, 89.0f);
-		rotated = true;
-	}
-	if (app->isKeyDown(VOX_KEY_DOWN)) {
-		camera->pitch -= camera->rotSpeed * dt;
-		camera->pitch = glm::max(camera->pitch, -89.0f);
-		rotated = true;
-	}
-	if (app->isKeyDown(VOX_KEY_LEFT)) {
-		camera->yaw -= camera->rotSpeed * dt;
-		rotated = true;
-	}
-	if (app->isKeyDown(VOX_KEY_RIGHT)) {
-		camera->yaw += camera->rotSpeed * dt;
-		rotated = true;
-	}
-
-	if (rotated)
-	{
-		const float pitchRad = glm::radians(camera->pitch);
-		const float yawRad = glm::radians(camera->yaw);
-
-		glm::vec3 dir{cosf(yawRad) * cosf(pitchRad) ,sinf(pitchRad) ,sinf(yawRad) * cosf(pitchRad)};
-		camera->dir = glm::normalize(dir);
-	}
+	host = trimmed.substr(0, colon);
+	unsigned value = 0;
+	const char* begin = trimmed.data() + colon + 1;
+	const char* end   = trimmed.data() + trimmed.size();
+	const auto [ptr, ec] = std::from_chars(begin, end, value);
+	if (host.empty() || ec != std::errc{} || ptr != end || value == 0 || value > 65535)
+		return false;
+	port = static_cast<std::uint16_t>(value);
+	return true;
+}
 }
 
 App::App(const int32_t width, const int32_t height, const char *title, std::map<settings_t, bool>& settings)
-	: Engine(width, height, title, settings), textureIndices(), world(textureIndices)
-{
-	showWireframe = false;
-	focused = true;
+	: Engine(width, height, title, settings) {
+
+	const auto concurrency = std::thread::hardware_concurrency();
+	auto thread_nr = std::max(1u, concurrency > 2 ? concurrency - 2 : 1u);
+	
 	setCallbackFunctions();
-	loadTextures();
-	threadPool = std::make_unique<ThreadPool>(8);
-	setupHighlightCube();
-	setupImGui(window);
+    loadTextures();
+	ui = createImGuiUI(window, guiAtlas, textureAtlas);
+	threadPool = std::make_unique<ThreadPool>(thread_nr);
 }
 
-App::~App()
-{
-	cleanupHighlightCube();
-	App::terminate();
-}
-
-void App::setCallbackFunctions() const
-{
+void App::setCallbackFunctions() const {
 	setErrorCallback(error_callback);
 	setKeyCallback(key_callback);
-	setMouseButtonCallback(mouse_bttn_callback);
-	setCursorPosCallback(cursor_callback);
-	if (getSetting(VOX_RESIZE))
-		setResizeCallback(resize_callback);
+	setCursorPosCallback(mouse_callback);
+	setMouseButtonCallback(mouse_button_callback);
+	setScrollCallback(scroll_callback);
 }
 
-void App::run()
-{
-    float rgba[4] = {0.075f, 0.33f, 0.61f, 1.f};
-	int currentFPS = 0;
-    // float rgba[4] = {};
+// ============================================================================
+//  Game session (singleplayer today, multiplayer later)
+// ============================================================================
 
-    while (windowIsOpen(window))
-    {
-        glClearColor(rgba[0], rgba[1], rgba[2], rgba[3]);
-        glfwPollEvents();
-        FPSCounter::update();
-    	currentFPS = FPSCounter::getFPS();
-    	world.updateRenderDistance(currentFPS);
+// Plays `info`: takes the world's lock, then streams its saved / generated
+// columns through a RegionStore in the world folder.
+bool App::startSingleplayer(const WorldInfo& info) {
+	if (!camera || !threadPool)
+		return false;
 
-        handleMovement(window, camera);
+	endSession();                                   // never two sessions at once
+	if (!info.readable) {
+		lastSessionError = "'" + info.name + "' cannot be read: its level.bin is damaged";
+		return false;
+	}
+	std::string error;
+	auto lock = WorldLock::acquire(info.folder, error);
+	if (!lock) {
+		lastSessionError = "Cannot open '" + info.name + "': " + error;
+		return false;
+	}
+	WorldInfo played = info;
+	if (!markPlayed(played, error))
+		std::cerr << "Could not update " << info.name << ": " << error << '\n';
 
-        Renderer::initProjectionMatrix(window, camera, world.worldUBO.MVP);
+	resetPlayerState();
+	playingWorld = played;
+	timeTicks = played.timeOfDay;
+	sinceTimeSaved = 0.0f;
+	lastSessionError.clear();
+	worldLock = std::move(lock);
+	regionStore = std::make_shared<RegionStore>(info.folder / "region");
+	world.open(info.seed, regionStore);
+	playingSeed = info.seed;
 
-    	world.worldUBO.cameraPos = glm::vec4(camera->pos, world.worldUBO.cameraPos.w);
-        world.updateFrustum(camera->proj, camera->view);
-        world.updateChunks(camera->pos, *threadPool);
+	// `world`, `*threadPool` and `blockSystem` all outlive the session (it is
+	// destroyed in endSession(), before run() ends and in terminate()).
+	const glm::ivec2 spawn = world.spawnPoint();
+	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem,
+		glm::vec3(static_cast<float>(spawn.x) + 0.5f, 0.0f, static_cast<float>(spawn.y) + 0.5f),
+		singleplayerFile(info.folder));
+	return true;
+}
 
-    	updateBlockHighlight();
+// The benchmark plays a fixed seed and never saves.
+void App::startBenchmarkWorld() {
+	endSession();
+	resetPlayerState();
+	world.open(BENCH_SEED, nullptr);
+	playingSeed = BENCH_SEED;
+	const int ground = world.generatedSurfaceHeight(static_cast<int>(bench.startXZ.x), static_cast<int>(bench.startXZ.y));
+	bench.height = static_cast<float>(std::max(ground, 62) + 35);
+	timeTicks = bench.ticks;
+	session = std::make_unique<LocalSession>(world, *threadPool, blockSystem,
+		glm::vec3(bench.startXZ.x, bench.height, bench.startXZ.y), std::nullopt);
+	gameState.startGameplay();
+	applyGameState();
+}
 
-        {
-	        std::vector<Chunk*> visibleChunks;
-	        std::lock_guard lock(world.chunk_mutex);
-        	auto& chunks = world.getChunks();
-        	visibleChunks.reserve(chunks.size());
+void App::refreshWorlds() {
+	const std::filesystem::path selectedFolder = selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size())
+		? worlds[static_cast<std::size_t>(selectedWorld)].folder : std::filesystem::path{};
+	worlds = listWorlds(savesDir);
+	selectedWorld = worlds.empty() ? -1 : 0;
+	for (std::size_t i = 0; i < worlds.size(); ++i)
+		if (!selectedFolder.empty() && worlds[i].folder == selectedFolder)
+			selectedWorld = static_cast<int>(i);
+}
 
-        	for (auto& [coord, chunk] : chunks) {
-        		if (!world.isBoxInFrustum(chunk.worldMin, chunk.worldMax))
-        			continue;
+bool App::startMultiplayer(const UiAction& action, const bool hostLocally) {
+	if (!camera)
+		return false;
 
-        		if (!chunk.aoCalculated)
-        			calcChunkAO(coord, chunk, world);
+	endSession();
+	lastSessionError.clear();
 
-        		if (!chunk.cachedOpaqueVertices.empty() || !chunk.cachedTransparentVertices.empty())
-        			uploadChunk(chunk, chunk.renderData);
+	RemoteConfig config;
+	config.playerName = action.text2.empty() ? std::string("Player") : action.text2;
 
-        		if (chunk.renderData.opaque.vao || chunk.renderData.transparent.vao)
-        			visibleChunks.push_back(&chunk);
-        	}
-
-        	glm::vec3 camPos = camera->pos;
-        	std::sort(visibleChunks.begin(), visibleChunks.end(),
-				[&camPos](const Chunk* a, const Chunk* b) {
-					const auto worldCenterA = (a->worldMin + a->worldMax) * 0.5f;
-					const auto worldCenterB = (b->worldMin + b->worldMax) * 0.5f;
-					return glm::distance2(worldCenterA, camPos) < glm::distance2(worldCenterB, camPos);
-				});
-
-        	for (const auto& chunk : visibleChunks) {
-        		renderChunk(*chunk, world.worldUBO, world.ubo, RenderType::Opaque);
-        	}
-
-        	for (const auto& chunk : visibleChunks) {
-        		renderChunk(*chunk, world.worldUBO, world.ubo, RenderType::Transparent);
-        	}
-	    }
-
-    	auto chunkCount = world.getChunks().size();
-    	auto chunkRadius = world.getChunkRadius();
-
-    	renderBlockHighlight();
-        renderImGui(camera, showWireframe, rgba, chunkCount, chunkRadius);
-        glfwSwapBuffers(window);
+	if (hostLocally) {
+		// Hosts the world selected in the world list (endSession() above has
+		// already saved it and released its lock, so the server can take it).
+		if (selectedWorld < 0 || selectedWorld >= static_cast<int>(worlds.size())
+		    || !worlds[static_cast<std::size_t>(selectedWorld)].readable) {
+			lastSessionError = "Choose a world to host in Singleplayer first";
+			return false;
+		}
+		ServerConfig serverConfig;
+		const unsigned cores = std::thread::hardware_concurrency();
+		serverConfig.workerThreads = std::max(1u, cores / 4);   // the client keeps its own pool
+		serverConfig.worldFolder = worlds[static_cast<std::size_t>(selectedWorld)].folder;
+		hostedServer = std::make_unique<HostedServer>();
+		std::string error;
+		if (!hostedServer->start(serverConfig, error)) {
+			lastSessionError = "Cannot host on port " + std::to_string(serverConfig.port) + ": " + error;
+			hostedServer.reset();
+			return false;
+		}
+		config.host = "127.0.0.1";
+		config.port = serverConfig.port;
+	} else if (!parseAddress(action.text1, config.host, config.port)) {
+		lastSessionError = "Invalid address: use host or host:port";
+		return false;
 	}
 
-	threadPool->wait();
+	resetPlayerState();
+	// `world` and `blockSystem` outlive the session (destroyed in endSession()).
+	session = std::make_unique<RemoteSession>(world, blockSystem, std::move(config));
+	return true;
 }
 
-void App::terminate()
-{
-	threadPool.reset();
-	if (ImGui::GetCurrentContext())
-	{
-		ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImGui::DestroyContext();
+void App::resetPlayerState() {
+	spawnInitialized = false;                       // movement waits until the spawn is known
+	jumpRequested = false;
+	velocity = glm::vec3(0.0f);
+	fluidFog = glm::vec4(0.0f);
+}
+
+void App::saveTimeOfDay() {
+	if (!playingWorld)
+		return;
+	sinceTimeSaved = 0.0f;
+	playingWorld->timeOfDay = static_cast<std::uint32_t>(timeTicks) % TimeOfDay::TICKS_PER_DAY;
+	std::string error;
+	if (!markPlayed(*playingWorld, error))
+		std::cerr << "Could not save the time of " << playingWorld->name << ": " << error << '\n';
+}
+
+void App::endSession() {
+	session.reset();              // disconnects first...
+	if (playingWorld) {
+		saveTimeOfDay();
+		playingWorld.reset();
+	}
+	if (regionStore) {
+		if (threadPool)
+			world.flush(*threadPool);   // every edit and generated column on disk
+		world.open(0, nullptr);         // forget it: the next world starts empty
+		regionStore.reset();
+	}
+	worldLock.reset();
+	playingSeed.reset();
+	if (hostedServer) {
+		hostedServer->stop();     // ...then stops (and joins) a server we were hosting
+		hostedServer.reset();
+	}
+	hasHighlightedBlock = false;
+}
+
+// Applies what the session reports. In singleplayer a request is answered before
+// it returns (so this is called right after it); in multiplayer the answer
+// arrives on a later frame.
+void App::applySessionEvents() {
+	if (!session)
+		return;
+
+	for (const SessionEvent& event : session->drainEvents()) {   // by value: safe even if the session is reset below
+		switch (event.type) {
+			case SessionEvent::Type::BlockBroken:
+			case SessionEvent::Type::BlockPlaced:
+				break;                               // the session has already updated the inventory
+			case SessionEvent::Type::Disconnected: {
+				std::cerr << "Session ended: " << event.reason << '\n';
+				const bool wasRemote = session->isRemote();
+				lastSessionError = event.reason;
+				endSession();
+				gameState.returnToTitle();
+				if (wasRemote)
+					gameState.openMultiplayerMenu();   // back where the player can retry, with the reason
+				applyGameState();
+				return;                              // the remaining events belonged to the dead session
+			}
+		}
+	}
+}
+
+// ============================================================================
+
+// `acceptInput` false: physics only (gravity, falling, landing), no keys. Used
+// while a menu is open in multiplayer, where the world does not pause.
+void App::updatePlayerMovement(const bool acceptInput) {
+	if (!camera)
+		return;
+
+	float dt = FPSCounter::getDeltaTime();
+	if (dt <= 0.0f)
+		dt = 0.0001f;
+	dt = glm::min(dt, 0.1f);
+
+	const auto held = [this, acceptInput](const auto key) { return acceptInput && isKeyDown(key); };
+	if (!acceptInput)
+		jumpRequested = false;
+
+	bool rotated = false;
+	if (held(VOX_KEY_UP)) {
+		camera->pitch = glm::min(camera->pitch + camera->rotSpeed * dt, 89.0f);
+		rotated = true;
+	}
+	if (held(VOX_KEY_DOWN)) {
+		camera->pitch = glm::max(camera->pitch - camera->rotSpeed * dt, -89.0f);
+		rotated = true;
+	}
+	if (held(VOX_KEY_LEFT)) {
+		camera->yaw -= camera->rotSpeed * dt;
+		rotated = true;
+	}
+	if (held(VOX_KEY_RIGHT)) {
+		camera->yaw += camera->rotSpeed * dt;
+		rotated = true;
+	}
+	if (rotated)
+		camera->dir = lookDirection(camera->yaw, camera->pitch);
+
+	if (!spawnInitialized)
+		return;
+
+	glm::vec3 forward = camera->dir;
+	glm::vec3 right;
+	if (!flyMode) {
+		forward.y = 0.0f;
+		if (glm::dot(forward, forward) < 1e-6f) {
+			const float yaw = glm::radians(camera->yaw);
+			forward = {std::cos(yaw), 0.0f, std::sin(yaw)};
+		}
+		forward = glm::normalize(forward);
+		right = glm::normalize(glm::cross(forward, camera->up));
+	} else {
+		forward = glm::normalize(forward);
+		right = glm::normalize(glm::cross(forward, camera->up));
+	}
+
+	glm::vec3 moveDirection(0.0f);
+	if (held(VOX_KEY_W)) moveDirection += forward;
+	if (held(VOX_KEY_S)) moveDirection -= forward;
+	if (held(VOX_KEY_A)) moveDirection -= right;
+	if (held(VOX_KEY_D)) moveDirection += right;
+	if (flyMode) {
+		// Minecraft's flight keys: Space up, Shift down, Ctrl fast.
+		if (held(VOX_KEY_SPACE)) moveDirection.y += 1.0f;
+		if (held(VOX_KEY_LEFT_SHIFT)) moveDirection.y -= 1.0f;
+		const float speed = camera->moveSpeed * (held(VOX_KEY_LEFT_CONTROL) ? 10.0f : 1.0f);
+		if (glm::dot(moveDirection, moveDirection) > 0.0f)
+			camera->pos += glm::normalize(moveDirection) * speed * dt;
+		velocity = glm::vec3(0.0f);
+		jumpRequested = false;
+		return;
+	}
+
+	PlayerPhysics::Input input;
+	if (glm::dot(moveDirection, moveDirection) > 0.0f) {
+		const glm::vec3 wish = glm::normalize(moveDirection);
+		input.wish = {wish.x, wish.z};
+	}
+	input.jump = jumpRequested || held(VOX_KEY_SPACE);       // held: jumps again on landing
+	// Minecraft's keys: Shift sneaks; Ctrl or a double-tapped W sprints.
+	input.sneak = held(VOX_KEY_LEFT_SHIFT);
+	input.sprint = sprint.update(held(VOX_KEY_W), held(VOX_KEY_LEFT_CONTROL), input.sneak);
+	jumpRequested = false;
+
+	PlayerPhysics::Body body{camera->pos, velocity, grounded};
+	PlayerPhysics::step(body, input, dt, [this](const glm::vec3& eye) { return collidesWithWorld(eye, world); });
+	camera->pos = body.eye;
+	velocity = body.velocity;
+	grounded = body.grounded;
+}
+
+void App::simulate() {
+	// `world` is App's own member, borrowed by the session. It is NOT
+	// re-declared here: shadowing it would hide the member that
+	// updatePlayerMovement(), renderWorld() and the raycasts use.
+	if (session) {
+		session->update(camera->pos, FPSCounter::getDeltaTime());
+		applySessionEvents();
+	}
+
+	// Singleplayer pauses in menus. Multiplayer cannot: the player keeps
+	// falling / landing and the server keeps getting positions, only
+	// input is ignored while a menu is open.
+	const bool inGame = gameState.currentState == GameState::IN_GAME;
+	const bool simulating = session && (inGame || session->isRemote());
+	if (simulating) {
+		if (const auto serverTime = session->pollTimeOfDay())
+			timeTicks = *serverTime;                                 // the server's clock wins
+		if (const auto spawn = session->pollSpawn()) {
+			camera->pos = spawn->eye;
+			camera->yaw = spawn->yaw;
+			camera->pitch = spawn->pitch;
+			camera->dir = lookDirection(camera->yaw, camera->pitch);
+			spawnInitialized = true;
+			grounded = true;
+			jumpRequested = false;
+		}
+		if (!bench.active) {                // the benchmark flies the camera itself, at a fixed time
+			updatePlayerMovement(inGame && !ui->wantsKeyboardCapture());
+			timeTicks = std::fmod(timeTicks + FPSCounter::getDeltaTime() * TimeOfDay::TICKS_PER_SECOND,
+			                      static_cast<double>(TimeOfDay::TICKS_PER_DAY));
+			// A crash loses at most this much of the clock (as of the player).
+			sinceTimeSaved += static_cast<float>(FPSCounter::getDeltaTime());
+			if (playingWorld && sinceTimeSaved >= LocalSession::SAVE_INTERVAL)
+				saveTimeOfDay();
+		}
+		session->onLocalPlayerMoved(camera->pos, camera->yaw, camera->pitch);
+	}
+	profiler.mark(FrameProfiler::Session);
+}
+
+void App::renderFrame() {
+	WorldUBO worldUBO{};
+	Renderer::initProjectionMatrix(window, camera, worldUBO.MVP);
+	updateFluidFog();
+	worldUBO.eye = glm::vec4(camera->pos, 1.0f);
+	worldUBO.fog = fluidFog;
+	// Time of day: sky light, sky colours; the haze is the horizon colour.
+	const auto ticks = static_cast<std::uint32_t>(timeTicks);
+	worldUBO.time.x = TimeOfDay::daylight(ticks);
+	const TimeOfDay::SkyColours sky = TimeOfDay::skyColours(ticks, {clearColor[0], clearColor[1], clearColor[2]});
+	const glm::vec3 zenith = sky.zenith;
+	const glm::vec3 horizon = sky.horizon;
+	// Full haze where the meshed terrain ends (from a chunk's edge, the worst case).
+	worldUBO.skyFog = glm::vec4(horizon, static_cast<float>(World::CHUNK_MESH_RADIUS * ChunkSection::SIZE));
+	world.frustum.updateFrustum(camera->proj, camera->view);
+
+	for (auto& gpuMesh : world.pruneRenderStates())
+		renderer->releaseMesh(gpuMesh);
+	profiler.mark(FrameProfiler::Prune);
+	world.buildRenderStates(camera->pos, camera->dir, *threadPool);
+	if (gameState.currentState == GameState::IN_GAME)
+		updateBlockHighlight();
+	profiler.mark(FrameProfiler::Mesh);
+
+	renderer->beginFrame(worldUBO);
+	processMeshUploads(world);
+	profiler.mark(FrameProfiler::Upload);
+	if (fluidFog.w <= 0.0f)                    // under water the fog colour is the sky
+		renderer->drawSky(glm::inverse(camera->proj * glm::mat4(glm::mat3(camera->view))), zenith, horizon,
+		                  TimeOfDay::sunDirection(ticks));
+	toggleWireframe(showWireframe);
+	renderWorld(world);
+
+	if (gameState.currentState == GameState::IN_GAME) {
+		renderBlockHighlight();
+	}
+	renderRemotePlayers();
+	toggleWireframe(false);
+	profiler.mark(FrameProfiler::Draw);
+}
+
+UiFrameModel App::buildUiModel() const {
+	// Field-by-field: designated initializers would require the exact
+	// declaration order of UiFrameModel.
+	UiFrameModel uiModel;
+	uiModel.state = gameState.currentState;
+	uiModel.selectedHotbarSlot = selectedHotbarSlot();
+	uiModel.fps = FPSCounter::getFPS();
+	if (camera)
+		uiModel.cameraPosition = {camera->pos.x, camera->pos.y, camera->pos.z};
+	uiModel.showDebug = gameState.currentState == GameState::IN_GAME;
+	uiModel.wireframe = showWireframe;
+	uiModel.clearColor = clearColor;
+	uiModel.timeOfDay = static_cast<int>(timeTicks);
+	uiModel.lastError = lastSessionError;
+	if (playingSeed)
+		uiModel.seedText = std::to_string(static_cast<std::int64_t>(*playingSeed));
+	if (gameState.currentState == GameState::MULTIPLAYER
+	    && selectedWorld >= 0 && selectedWorld < static_cast<int>(worlds.size()))
+		uiModel.hostWorldName = worlds[static_cast<std::size_t>(selectedWorld)].name;
+	if (gameState.currentState == GameState::WORLD_SELECT) {
+		for (const WorldInfo& info : worlds) {
+			UiWorldEntry entry;
+			entry.name = info.name;
+			entry.readable = info.readable;
+			entry.detail = pathText(info.folder.filename())
+				+ (info.readable ? "    seed " + std::to_string(static_cast<std::int64_t>(info.seed))
+				                 : "    (cannot be read)");
+			uiModel.worlds.push_back(std::move(entry));
+		}
+		uiModel.selectedWorld = selectedWorld;
+	}
+	if (session) {
+		uiModel.statusText = session->statusText();
+		for (const RemotePlayerView& player : session->remotePlayers())
+			uiModel.players.push_back(player.name.empty() ? "player " + std::to_string(player.id) : player.name);
+		if (!isMenuState(gameState.currentState))
+			collectNameTags(uiModel);
+	}
+
+	if (!session)
+		return uiModel;                          // no player: the slots stay empty
+	const Inventory& inventory = session->inventory();
+	const auto& inventorySlots = inventory.slots();
+	for (std::size_t i = 0; i < inventorySlots.size(); ++i) {
+		const ItemStack& stack = inventorySlots[i];
+		if (!stack.empty())
+			uiModel.inventorySlots[i] = {stack.item, stack.count, ItemRegistry::get(stack.item).name};
+	}
+	const ItemStack& cursorStack = inventory.cursorStack();
+	if (!cursorStack.empty())
+		uiModel.cursorStack = {
+			cursorStack.item,
+			cursorStack.count,
+			ItemRegistry::get(cursorStack.item).name
+		};
+	return uiModel;
+}
+
+void App::run() {
+    while (windowIsOpen(window))
+    {
+        // Inside water (or lava) the sky is the fog colour too.
+        if (fluidFog.w > 0.0f)
+            glClearColor(fluidFog.r, fluidFog.g, fluidFog.b, 1.0f);
+        else
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+		profiler.beginFrame();
+		drawCalls = 0;
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glfwPollEvents();
+
+        FPSCounter::update();
+
+		ui->beginFrame();
+		if (bench.active)
+			runBenchmarkScript();
+		profiler.mark(FrameProfiler::Begin);
+
+		if (!isMenuState(gameState.currentState)) {
+			simulate();
+			renderFrame();
+		}
+
+		for (const UiAction& action : ui->render(buildUiModel()))
+			applyUiAction(action);
+
+		ui->endFrame();
+		profiler.mark(FrameProfiler::Ui);
+
+        glfwSwapBuffers(window);
+		profiler.mark(FrameProfiler::Swap);
+		profiler.endFrame(bench.recording, drawCalls);
     }
+	if (bench.active) {
+		profiler.report();
+		if (bench.edits)
+			std::printf("edits: %d\n", bench.editsDone);
+		printBenchmarkMemory();
+		if (Trace::instance().write("bench_trace.json"))
+			std::printf("trace written to bench_trace.json (open it in ui.perfetto.dev)\n");
+	}
+
+	endSession();             // the session borrows the pool: destroy it first
+	threadPool.reset();       // joins the workers
+}
+
+void App::destroyBlock() {
+	if (!camera || !session)
+		return;
+
+	const BlockRaycastHit hit = blockSystem.raycast(camera->pos, camera->dir, world);
+	if (!hit.valid)
+		return;
+
+	// The session refuses a block whose item would not fit, removes it and adds the item.
+	session->requestBreakBlock(hit.blockPos);
+	applySessionEvents();     // singleplayer: answered already, so applied now
+}
+
+void App::placeBlock() {
+	if (!camera || !session)
+		return;
+	// The session places its selected slot's block and consumes it (only if it really was placed).
+	session->requestPlaceBlock(camera->pos, camera->dir);
+	applySessionEvents();
+}
+
+void App::forwardPressed() {
+	sprint.forwardPressed(glfwGetTime());
+}
+
+void App::toggleFlyMode() {
+	flyMode = !flyMode;
+	velocity = glm::vec3(0.0f);
+	jumpRequested = false;
+}
+
+void App::jump() {
+	if (!flyMode)
+		jumpRequested = true;
+}
+
+// Fog of the block the camera's eye is in (water: blue), for the shader and the sky.
+// It is as bright as the light at the eye (dark at night and in caves), except
+// for a glowing fluid (lava), which lights itself.
+void App::updateFluidFog() {
+	fluidFog = glm::vec4(0.0f);
+	BlockId eyeBlock = AIR_BLOCK;
+	const glm::ivec3 eye = camera ? glm::ivec3(glm::floor(camera->pos)) : glm::ivec3(0);
+	if (!camera || !world.getBlockAt(eye, eyeBlock))
+		return;
+	const BlockDefinition& block = world.getBlockRegistry().get(eyeBlock);
+	if (block.fogDistance <= 0.0f)
+		return;
+	float brightness = 1.0f;
+	if (block.lightEmission == 0) {
+		int sky = 15, blockLight = 0;               // no light yet: as under open sky
+		const ChunkCoord column{eye.x >> 4, eye.z >> 4};
+		if (const auto light = world.lightOf(column)) {
+			const std::uint8_t packed = light->at(eye.x & 15, ChunkColumn::toStorageY(eye.y), eye.z & 15);
+			sky = ColumnLight::sky(packed);
+			blockLight = ColumnLight::block(packed);
+		}
+		brightness = lightBrightness(sky, blockLight, TimeOfDay::daylight(static_cast<std::uint32_t>(timeTicks)));
+	}
+	const auto channel = [&block, brightness](const int shift) {
+		return brightness * static_cast<float>((block.fogColor >> shift) & 0xFFu) / 255.0f;
+	};
+	fluidFog = glm::vec4(channel(16), channel(8), channel(0), block.fogDistance);
+}
+
+void App::updateBlockHighlight() {
+	if (!camera) {
+		hasHighlightedBlock = false;
+		return;
+	}
+
+	const BlockRaycastHit hit = blockSystem.raycast(camera->pos, camera->dir, world);
+	hasHighlightedBlock = hit.valid;
+	if (hasHighlightedBlock)
+		highlightedBlockPos = hit.blockPos;
+}
+
+void App::renderBlockHighlight() {
+	if (!hasHighlightedBlock)
+		return;
+
+	// Outline the block's own shape (a torch is a thin stick), not its whole cell.
+	BlockId id = AIR_BLOCK;
+	if (!world.getBlockAt(highlightedBlockPos, id))
+		return;
+	const BlockBox box = outlineBox(world.getBlockRegistry().get(id));
+	const glm::vec3 origin(highlightedBlockPos);
+	renderer->renderBoundingBox(origin + glm::vec3(box.min) / 16.0f, origin + glm::vec3(box.max) / 16.0f);
+}
+
+
+// Other players as boxes the size of the collision box (the eye is EYE_HEIGHT above the feet).
+void App::renderRemotePlayers() {
+	if (!session)
+		return;
+	for (const RemotePlayerView& player : session->remotePlayers()) {
+		const glm::vec3 feet = player.eyePos - glm::vec3(0.0f, PlayerCollision::EYE_HEIGHT, 0.0f);
+		const glm::vec3 half(PlayerCollision::HALF_WIDTH, 0.0f, PlayerCollision::HALF_WIDTH);
+		renderer->renderBoundingBox(feet - half, feet + half + glm::vec3(0.0f, PlayerCollision::HEIGHT, 0.0f));
+	}
+}
+
+// Projects a point just above each other player's head with this frame's
+// camera matrices. Players behind the camera, off screen or too far are left out.
+void App::collectNameTags(UiFrameModel& model) const {
+	if (!session || !camera)
+		return;
+	constexpr float MAX_DISTANCE = 64.0f;
+	constexpr float ABOVE_HEAD   = 0.5f;
+	const glm::mat4 viewProj = camera->proj * camera->view;
+
+	for (const RemotePlayerView& player : session->remotePlayers()) {
+		const glm::vec3 anchor = player.eyePos
+			+ glm::vec3(0.0f, PlayerCollision::HEIGHT - PlayerCollision::EYE_HEIGHT + ABOVE_HEAD, 0.0f);
+		const float distance = glm::length(anchor - camera->pos);
+		if (distance > MAX_DISTANCE)
+			continue;
+
+		const glm::vec4 clip = viewProj * glm::vec4(anchor, 1.0f);
+		if (clip.w <= 0.05f)
+			continue;                                   // behind the camera
+		const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+		if (std::abs(ndc.x) > 1.1f || std::abs(ndc.y) > 1.1f || ndc.z > 1.0f)
+			continue;
+
+		UiNameTag tag;
+		tag.name     = player.name.empty() ? "player " + std::to_string(player.id) : player.name;
+		tag.ndcX     = ndc.x;
+		tag.ndcY     = ndc.y;
+		tag.distance = distance;
+		model.nameTags.push_back(std::move(tag));
+	}
+	// Far first, so near tags are drawn on top.
+	std::ranges::sort(model.nameTags, [](const UiNameTag& a, const UiNameTag& b) { return a.distance > b.distance; });
+}
+
+// ============================================================================
+//  Benchmark (ft_vox --bench [seconds])
+//
+//  Starts singleplayer, turns vsync off and flies a fixed, time-based path so
+//  runs are comparable: BENCH_WARMUP seconds hovering and turning at spawn
+//  (terrain streams in, not recorded), then flying +X at BENCH_SPEED while
+//  turning (recorded: streaming, meshing and drawing all at once).
+//  --bench-edits records hovering at the warm-up pose instead, a torch placed
+//  or removed near spawn every BENCH_EDIT_INTERVAL: relighting and remeshing.
+// ============================================================================
+
+void App::enableBenchmark(const double seconds, const glm::vec2 startXZ, const std::uint32_t ticks,
+                          const bool edits) {
+	bench.edits = edits;
+	bench.startXZ = startXZ;
+	bench.ticks = ticks % TimeOfDay::TICKS_PER_DAY;
+	bench.active   = true;
+	bench.duration = std::max(seconds, BENCH_WARMUP + 1.0);
+	glfwSwapInterval(0);
+	Trace::instance().enable();
+	Trace::instance().setMainThread();
+}
+
+// The memory and job lines that follow the frame report.
+void App::printBenchmarkMemory() const {
+	constexpr double MB = 1024.0 * 1024.0;
+	const auto mb = [](const std::size_t bytes) { return static_cast<double>(bytes) / MB; };
+	const World::MemoryStats w = world.memoryStats();
+	std::printf("memory: %zu columns, blocks %.1f MB, light %.1f MB, meshes (cpu) %.1f MB, "
+	            "gpu vertices %.1f MB, gpu indices %.1f MB, process %.1f MB (peak %.1f MB)\n",
+	            w.columns, mb(w.blockBytes), mb(w.lightBytes), mb(w.meshCpuBytes),
+	            mb(renderer->gpuVertexBytes()), mb(renderer->gpuIndexBytes()),
+	            mb(ProcessMemory::currentBytes()), mb(ProcessMemory::peakBytes()));
+
+	Trace& trace = Trace::instance();
+	const Trace::Average generate = trace.average("generate column");
+	const Trace::Average light    = trace.average("light column");
+	const Trace::Average mesh     = trace.average("mesh column");
+	std::printf("jobs ms: generate %.2f (n=%zu), light %.2f (n=%zu), mesh %.2f (n=%zu)\n",
+	            generate.ms, generate.count, light.ms, light.count, mesh.ms, mesh.count);
+	std::fflush(stdout);
+}
+
+void App::runBenchmarkScript() {
+	if (gameState.currentState == GameState::START) {
+		startBenchmarkWorld();
+		flyMode = true;
+		bench.start = glfwGetTime();
+		return;
+	}
+	const double t = glfwGetTime() - bench.start;
+	if (t >= bench.duration) {
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
+		return;
+	}
+	// One screenshot when loading is done, before moving: a correctness check
+	// to compare between builds (taken from the previous frame's back buffer).
+	if (t >= BENCH_WARMUP && !bench.screenshotTaken) {
+		saveScreenshot("bench_shot.png");
+		bench.screenshotTaken = true;
+		return;                                // this frame is not recorded (PNG encoding)
+	}
+	bench.recording = t >= BENCH_WARMUP;
+	Trace::instance().setRecording(bench.recording);
+
+	if (bench.edits && bench.recording) {
+		runBenchmarkEdit(t);
+		return;                                // the camera stays at the warm-up pose
+	}
+	const double flying = std::max(0.0, t - BENCH_WARMUP);
+	camera->pos   = glm::vec3(bench.startXZ.x + static_cast<float>(flying * BENCH_SPEED), bench.height, bench.startXZ.y);
+	// Turning (a full turn every ~14 s), except during the last second of the
+	// warm-up so the screenshot is always taken from exactly the same pose.
+	const double turning = t < BENCH_WARMUP ? std::min(t, BENCH_WARMUP - 1.0) : t - 1.0;
+	camera->yaw   = static_cast<float>(turning * 25.0);
+	camera->pitch = -20.0f;
+	camera->dir   = lookDirection(camera->yaw, camera->pitch);
+}
+
+// Edit n (n = 0, 1, ...) at spot n / 2: even n places a torch on the ground,
+// odd n puts back the block it replaced. The spots cover a column centre, a
+// column corner and both sides of a column border.
+void App::runBenchmarkEdit(const double t) {
+	const int due = static_cast<int>((t - BENCH_WARMUP) / BENCH_EDIT_INTERVAL);
+	if (bench.editsDone > due)
+		return;
+	static constexpr std::array<glm::ivec2, 4> SPOTS{{{8, 8}, {15, 15}, {0, 8}, {24, 20}}};
+	const glm::ivec2 spot = SPOTS[static_cast<std::size_t>(bench.editsDone / 2) % SPOTS.size()]
+		+ glm::ivec2(static_cast<int>(bench.startXZ.x) - 8, static_cast<int>(bench.startXZ.y) - 8);
+	int ground = 0;
+	if (world.getSurfaceHeight(spot.x, spot.y, ground)) {
+		const glm::ivec3 cell{spot.x, ground + 1, spot.y};
+		if (bench.editsDone % 2 == 0) {
+			if (!world.getBlockAt(cell, bench.replaced))
+				bench.replaced = AIR_BLOCK;
+			(void)world.setBlockAt(cell, toBlockId(BlockType::Torch));
+		} else {
+			(void)world.setBlockAt(cell, bench.replaced);
+		}
+	}
+	++bench.editsDone;
+}
+
+void App::saveScreenshot(const char* path) const {
+	int width = 0, height = 0;
+	glfwGetFramebufferSize(window, &width, &height);
+	if (width <= 0 || height <= 0)
+		return;
+	std::vector<unsigned char> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadBuffer(GL_FRONT);                    // the frame shown last
+	glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+	glReadBuffer(GL_BACK);
+	stbi_flip_vertically_on_write(1);         // GL rows start at the bottom
+	if (stbi_write_png(path, width, height, 3, pixels.data(), width * 3))
+		std::printf("screenshot written to %s\n", path);
+}
+
+void App::terminate() {
+	endSession();             // before anything it borrows is torn down
+	if (ui)
+		ui->shutdown();
+    Engine::terminate();
+}
+
+void App::applyGameState() {
+	glfwSetInputMode(window, GLFW_CURSOR,
+		gameState.currentState == GameState::IN_GAME ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+}
+
+void App::togglePauseMenu() {
+	const bool wasInventory = gameState.currentState == GameState::INVENTORY;
+	gameState.togglePause();
+	if (wasInventory && session)
+		session->inventoryAction({InventoryAction::Kind::Close, 0, false});   // the cursor stack goes back
+	applyGameState();
+}
+
+void App::toggleInventoryMenu() {
+	const bool wasInventory = gameState.currentState == GameState::INVENTORY;
+	gameState.toggleInventory();
+	if (wasInventory && session)
+		session->inventoryAction({InventoryAction::Kind::Close, 0, false});   // the cursor stack goes back
+	applyGameState();
+}
+
+void App::selectHotbarSlot(const uint16_t slot) {
+	if (session && slot < Inventory::HOTBAR_SIZE)
+		session->inventoryAction({InventoryAction::Kind::Select, static_cast<std::uint8_t>(slot), false});
+}
+
+// Same arithmetic as Inventory::cycleHotbar, sent as a selection.
+void App::cycleHotbar(const int delta) {
+	if (!session)
+		return;
+	const int size = static_cast<int>(Inventory::HOTBAR_SIZE);
+	const int next = (static_cast<int>(session->inventory().selectedSlot()) + delta % size + size) % size;
+	selectHotbarSlot(static_cast<uint16_t>(next));
+}
+
+void App::clickInventorySlot(const int slot, const bool secondaryClick) {
+	if (session && slot >= 0 && slot < static_cast<int>(Inventory::SLOT_COUNT))
+		session->inventoryAction({InventoryAction::Kind::Click, static_cast<std::uint8_t>(slot), secondaryClick});
+}
+
+uint16_t App::selectedHotbarSlot() const {
+	return session ? session->inventory().selectedSlot() : 0;
+}
+
+void App::toggleWireframeDebug() {
+	showWireframe = !showWireframe;
+}
+
+bool App::isInGame() const {
+	return gameState.currentState == GameState::IN_GAME;
+}
+
+bool App::wantsMouseCapture() const {
+	return ui && ui->wantsMouseCapture();
+}
+
+bool App::wantsKeyboardCapture() const {
+	return ui && ui->wantsKeyboardCapture();
+}
+
+void App::applyUiAction(const UiAction& action) {
+	switch (action.type) {
+		case UiActionType::OPEN_WORLDS:
+			if (gameState.currentState == GameState::START)
+				lastSessionError.clear();
+			refreshWorlds();
+			gameState.openMenu(GameState::WORLD_SELECT);
+			break;
+		case UiActionType::SELECT_WORLD:
+			if (action.slot >= 0 && action.slot < static_cast<int>(worlds.size()))
+				selectedWorld = action.slot;
+			break;
+		case UiActionType::PLAY_WORLD:
+			if (action.slot < 0 || action.slot >= static_cast<int>(worlds.size()))
+				break;
+			if (!startSingleplayer(worlds[static_cast<std::size_t>(action.slot)]))
+				break;                         // lastSessionError says why; stay on the list
+			gameState.startGameplay();
+			applyGameState();
+			break;
+		case UiActionType::OPEN_CREATE_WORLD:
+			lastSessionError.clear();
+			gameState.openMenu(GameState::WORLD_CREATE);
+			break;
+		case UiActionType::CREATE_WORLD: {
+			std::string error;
+			const auto created = createWorld(savesDir, action.text1, action.text2, error);
+			if (!created) {
+				lastSessionError = "Cannot create the world: " + error;
+				break;
+			}
+			refreshWorlds();
+			if (!startSingleplayer(*created)) {
+				gameState.openMenu(GameState::WORLD_SELECT);
+				break;
+			}
+			gameState.startGameplay();
+			applyGameState();
+			break;
+		}
+		case UiActionType::DELETE_WORLD: {
+			if (action.slot < 0 || action.slot >= static_cast<int>(worlds.size()))
+				break;
+			std::string error;
+			if (!deleteWorld(worlds[static_cast<std::size_t>(action.slot)], error))
+				lastSessionError = "Cannot delete the world: " + error;
+			refreshWorlds();
+			break;
+		}
+		case UiActionType::START_GAME_MP:
+			lastSessionError.clear();
+			refreshWorlds();                   // for "Host": which world would be hosted
+			gameState.openMultiplayerMenu();
+			applyGameState();
+			break;
+		case UiActionType::HOST_MP:
+		case UiActionType::JOIN_MP:
+			if (!startMultiplayer(action, action.type == UiActionType::HOST_MP))
+				break;                         // lastSessionError says why; stay on the menu
+			gameState.startGameplay();
+			applyGameState();
+			break;
+		case UiActionType::RESUME_GAME:
+			gameState.togglePause();
+			applyGameState();
+			break;
+		case UiActionType::RETURN_TO_TITLE:
+			endSession();                      // disconnects (and stops a hosted server)
+			gameState.returnToTitle();
+			applyGameState();
+			break;
+		case UiActionType::QUIT_GAME:
+			glfwSetWindowShouldClose(window, GLFW_TRUE);
+			break;
+		case UiActionType::SET_WIREFRAME:
+			showWireframe = action.enabled;
+			break;
+		case UiActionType::SET_CLEAR_COLOR:
+			clearColor = action.color;
+			break;
+		case UiActionType::SET_TIME:
+			timeTicks = static_cast<double>(static_cast<std::uint32_t>(action.slot) % TimeOfDay::TICKS_PER_DAY);
+			break;
+		case UiActionType::INVENTORY_SLOT_CLICK:
+			clickInventorySlot(action.slot, action.secondaryClick);
+			break;
+		default: throw std::runtime_error("Unknown action type");
+	}
 }
 
 void App::loadTextures() {
-    try
-    {
-    	const std::vector<std::string> paths = {
-    		"./textures/grass.png",      // texIndex 0
-    		"./textures/dirt.png",		// texIndex 1
-    		"./textures/stone.png",
-    		"./textures/sand.png",
-			"./textures/water.png",
-    		"./textures/iron_ore.png",
-    		"./textures/snow.png",
-			"./textures/amethyst.png",
+	try {
+		textureAtlas = loadTexture("./textures/minecraft_atlas.png");
+		glTextureParameteri(textureAtlas, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTextureParameteri(textureAtlas, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTextureParameteri(textureAtlas, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTextureParameteri(textureAtlas, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		constexpr float atlasSize = 2048.0f;
+		const auto spriteRect = [atlasSize](const BlockTextures::PixelRect px) {
+			return glm::vec4(static_cast<float>(px.x) / atlasSize, static_cast<float>(px.y) / atlasSize,
+			                 static_cast<float>(px.w) / atlasSize, static_cast<float>(px.h) / atlasSize);
 		};
 
-    	int texWidth, texHeight;
-    	textureArray = loadTextureArray(paths, texWidth, texHeight);
+		std::array<glm::vec4, 64> atlasRects{};
+		atlasRects.fill(spriteRect(BlockTextures::pixels(0)));
+		std::vector<std::uint8_t> cell(BlockTextures::CELL * BlockTextures::CELL * 4);
+		for (std::uint16_t i = 0; i < BlockTextures::TEXTURE_COUNT; ++i) {
+			const BlockTextures::Sprite& sprite = BlockTextures::sprite(i);
+			atlasRects[i] = spriteRect(BlockTextures::pixels(i));
+			if (sprite.tint == BlockTextures::NO_TINT)
+				continue;
+			// Grey sprites (leaves): multiply the whole cell by the tint, once.
+			glGetTextureSubImage(textureAtlas, 0, sprite.x, sprite.y, 0, BlockTextures::CELL, BlockTextures::CELL, 1,
+			                     GL_RGBA, GL_UNSIGNED_BYTE, static_cast<GLsizei>(cell.size()), cell.data());
+			const std::uint32_t channel[3] = {sprite.tint >> 16, (sprite.tint >> 8) & 0xFFu, sprite.tint & 0xFFu};
+			for (std::size_t p = 0; p < cell.size(); p += 4)
+				for (std::size_t c = 0; c < 3; ++c)
+					cell[p + c] = static_cast<std::uint8_t>(cell[p + c] * channel[c] / 255u);
+			glTextureSubImage2D(textureAtlas, 0, sprite.x, sprite.y, BlockTextures::CELL, BlockTextures::CELL,
+			                    GL_RGBA, GL_UNSIGNED_BYTE, cell.data());
+		}
+		glGenerateTextureMipmap(textureAtlas);
 
-    	// textureIndices[BlockType::Air] = -1;
-        textureIndices[static_cast<int>(BlockType::Grass)] = 0;
-        textureIndices[static_cast<int>(BlockType::Dirt)] = 1;
-        textureIndices[static_cast<int>(BlockType::Stone)] = 2;
-    	textureIndices[static_cast<int>(BlockType::Sand)] = 3;
-    	textureIndices[static_cast<int>(BlockType::Water)] = 4;
-    	textureIndices[static_cast<int>(BlockType::IronOre)] = 5;
-    	textureIndices[static_cast<int>(BlockType::Snow)] = 6;
-    	textureIndices[static_cast<int>(BlockType::Amethyst)] = 7;
+		renderer->setTextureAtlas(textureAtlas);
+		renderer->setAtlasRects(atlasRects);
 
-    	renderer->setTexArray(textureArray);
-    }
-    catch(const std::exception& e)
-    {
-        std::cerr << e.what() << std::endl;
-        terminate();
-        std::exit(vox_errno);
-    }
-}
-
-static void uploadBatch(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, Chunk::RenderBatch& batch)
-{
-	if (indices.empty()) return;
-
-	if (batch.vao == 0) glGenVertexArrays(1, &batch.vao);
-	if (batch.vbo == 0) batch.vbo = VBOManager::get().getVBO();
-	if (batch.ibo == 0) batch.ibo = VBOManager::get().getVBO();
-
-	batch.indexCount = indices.size();
-
-	glBindVertexArray(batch.vao);
-
-	glBindBuffer(GL_ARRAY_BUFFER, batch.vbo);
-	glBufferData(
-		GL_ARRAY_BUFFER,
-		vertices.size() * sizeof(Vertex),
-		vertices.data(),
-		GL_DYNAMIC_DRAW
-	);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, batch.ibo);
-	glBufferData(
-		GL_ELEMENT_ARRAY_BUFFER,
-		indices.size() * sizeof(uint32_t),
-		indices.data(),
-		GL_DYNAMIC_DRAW
-	);
-
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-		(void*)offsetof(Vertex, position));
-
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-		(void*)offsetof(Vertex, uv));
-
-	glEnableVertexAttribArray(2);
-	glVertexAttribIPointer(2, 1, GL_UNSIGNED_SHORT, sizeof(Vertex),
-		(void*)offsetof(Vertex, texIndex));
-
-	glEnableVertexAttribArray(3);
-	glVertexAttribIPointer(3, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
-		(void*)offsetof(Vertex, normal));
-
-	glEnableVertexAttribArray(4);
-	glVertexAttribIPointer(4, 1, GL_UNSIGNED_BYTE, sizeof(Vertex),
-		(void*)offsetof(Vertex, ao));
-
-	glBindVertexArray(0);
-}
-
-void App::uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data)
-{
-	uploadBatch(chunk.cachedOpaqueVertices, chunk.cachedOpaqueIndices, data.opaque);
-	uploadBatch(chunk.cachedTransparentVertices, chunk.cachedTransparentIndices, data.transparent);
-}
-
-void App::renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, const GLuint ubo, const RenderType type) const
-{
-	glUseProgram(renderer->getShaderProgram());
-
-	glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
-	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &worldUbo);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-	glBindTextureUnit(0, renderer->getTextureArray());
-
-	// ==========================
-	// OPAQUE PASS
-	// ==========================
-	if (type == RenderType::Opaque && chunk.renderData.opaque.indexCount)
-	{
-		glDisable(GL_BLEND);
-		glEnable(GL_DEPTH_TEST);
-		glDepthMask(GL_TRUE);
-
-		glBindVertexArray(chunk.renderData.opaque.vao);
-		glDrawElements(
-			GL_TRIANGLES,
-			chunk.renderData.opaque.indexCount,
-			GL_UNSIGNED_INT,
-			nullptr
-		);
+		guiAtlas = loadTexture("./textures/minecraft_gui_atlas.png");
+		glTextureParameteri(guiAtlas, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTextureParameteri(guiAtlas, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTextureParameteri(guiAtlas, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTextureParameteri(guiAtlas, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	}
+	catch (const std::exception& e) {
+		std::cerr << e.what() << '\n';
 
-	// ==========================
-	// TRANSPARENT PASS (WATER)
-	// ==========================
-	if (type == RenderType::Transparent && chunk.renderData.transparent.indexCount)
-	{
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		terminate();
 
-		glEnable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
-
-		glBindVertexArray(chunk.renderData.transparent.vao);
-		glDrawElements(
-			GL_TRIANGLES,
-			chunk.renderData.transparent.indexCount,
-			GL_UNSIGNED_INT,
-			nullptr
-		);
-
-		glDepthMask(GL_TRUE);
-		glDisable(GL_BLEND);
-	}
-
-	glBindVertexArray(0);
-}
-
-void App::destroyBlock()
-{
-	if (!camera) return;
-
-	// Get camera position and direction
-	const glm::vec3 rayOrigin = camera->pos;
-	const glm::vec3 rayDirection = camera->dir;
-
-	// Attempt to destroy block
-	blockSystem.destroyBlock(rayOrigin, rayDirection, world);
-}
-
-void App::placeBlock()
-{
-	if (!camera) return;
-
-	// Get camera position and direction
-	const glm::vec3 rayOrigin = camera->pos;
-	const glm::vec3 rayDirection = camera->dir;
-
-	// Attempt to place stone block (change voxel value as needed)
-	static constexpr Voxel amethyst = packVoxelData(true, 255, 255, 255, static_cast<uint8_t>(BlockType::Amethyst));
-	blockSystem.placeBlock(rayOrigin, rayDirection, world, amethyst);
-}
-
-void App::toggleFullscreen()
-{
-	Engine::toggleFullscreen(window);
-}
-
-void App::toggleSpeedBoost()
-{
-	if (!camera) return;
-
-	camera->moveSpeed = (camera->moveSpeed == camera->baseMoveSpeed) ? camera->baseMoveSpeed * 20.0f : camera->baseMoveSpeed;
-	camera->rotSpeed = (camera->rotSpeed == camera->baseRotSpeed) ? camera->baseRotSpeed * 2.0f : camera->baseRotSpeed;
-}
-
-void App::calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world)
-{
-    constexpr int W = Chunk::WIDTH;
-    constexpr int H = Chunk::HEIGHT;
-    constexpr int D = Chunk::DEPTH;
-
-    const auto& chunks = world.getChunks();
-
-    // Pre-fetch neighbor chunks
-    const Chunk* neighbors[9] = {nullptr};
-    for (int dz = -1; dz <= 1; ++dz) {
-        for (int dx = -1; dx <= 1; ++dx) {
-            auto it = chunks.find(coord + glm::ivec2(dx, dz));
-            neighbors[(dz + 1) * 3 + (dx + 1)] = (it != chunks.end()) ? &it->second : nullptr;
-        }
-    }
-
-	auto getBlock = [&](int x, int y, int z) -> bool {
-		if (y < 0 || y >= H) return false;
-
-		int cx = x, cz = z;
-		int nidx_x = 1, nidx_z = 1;
-
-		if (x < 0) { nidx_x = 0; cx += W; }
-		else if (x >= W) { nidx_x = 2; cx -= W; }
-
-		if (z < 0) { nidx_z = 0; cz += D; }
-		else if (z >= D) { nidx_z = 2; cz -= D; }
-
-		const Chunk* neighbor = neighbors[nidx_z * 3 + nidx_x];
-		if (!neighbor) return false;
-
-		const Voxel v = neighbor->getVoxel(cx, y, cz);
-		uint8_t bt = getBlockType(v);
-
-		// Only count solid blocks for AO, not water or air
-		return bt != 0 && static_cast<BlockType>(bt) != BlockType::Water;
-    };
-
-    constexpr auto calcAO = [](bool s1, bool s2, bool c) -> uint8_t {
-       int darkness = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0);
-       return std::max(1, 3 - darkness);  // Never go below 1 (never fully dark)
-    };
-
-    const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
-    constexpr uint8_t cornerLUT[4] = {0, 1, 3, 2};
-
-    // =====================================================================
-    // Helper lambda to calculate AO for a single vertex
-    // =====================================================================
-    auto calcVertexAO = [&](const Vertex& v, size_t vertexIndex) -> uint8_t {
-        glm::vec3 localPos = v.position - offset;
-        int vx = static_cast<int>(localPos.x);
-        int vy = static_cast<int>(localPos.y);
-        int vz = static_cast<int>(localPos.z);
-
-        uint8_t normalIdx = v.normal;
-        uint8_t corner = cornerLUT[vertexIndex % 4];
-
-        bool cornerX = corner & 1;
-        bool cornerY = corner & 2;
-
-        uint8_t ao = 3;
-
-        if (normalIdx < 2) { // X faces (perpendicular to X axis)
-            int axq = vx + (normalIdx == 0 ? 1 : 0);
-            int py = cornerY ? vy + 1 : vy - 1;
-            int pz = cornerX ? vz + 1 : vz - 1;
-
-            ao = calcAO(
-                getBlock(axq, py, vz),
-                getBlock(axq, vy, pz),
-                getBlock(axq, py, pz)
-            );
-        }
-        else if (normalIdx < 4) { // Y faces (perpendicular to Y axis)
-            int ayq = vy + (normalIdx == 2 ? 1 : 0);
-            int px = cornerX ? vx + 1 : vx - 1;
-            int pz = cornerY ? vz + 1 : vz - 1;  // FIXED: was cornerX, should be cornerY
-
-            ao = calcAO(
-                getBlock(px, ayq, vz),
-                getBlock(vx, ayq, pz),
-                getBlock(px, ayq, pz)
-            );
-        }
-        else { // Z faces (perpendicular to Z axis)
-            int azq = vz + (normalIdx == 4 ? 1 : 0);
-            int px = cornerX ? vx + 1 : vx - 1;
-            int py = cornerY ? vy + 1 : vy - 1;
-
-            ao = calcAO(
-                getBlock(px, vy, azq),
-                getBlock(vx, py, azq),
-                getBlock(px, py, azq)
-            );
-        }
-
-        return ao;
-    };
-
-    // =====================================================================
-    // Calculate AO for opaque blocks
-    // =====================================================================
-    for (size_t i = 0; i < chunk.cachedOpaqueVertices.size(); ++i) {
-        auto& v = chunk.cachedOpaqueVertices[i];
-        v.ao = calcVertexAO(v, i);
-    }
-
-	chunk.aoCalculated = true;
-}
-
-void App::queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::ivec2, Chunk*>>& chunksToCalcAO, ThreadPool& threadPool)
-{
-	for (const auto& coord : chunksToCalcAO | std::views::keys) {
-		threadPool.enqueue([coord, &world]() {
-			std::lock_guard lock(world.chunk_mutex);
-			if (const auto it = world.getChunks().find(coord); it != world.getChunks().end())
-				calcChunkAO(coord, it->second, world);
-		});
+		std::exit(vox_errno);
 	}
 }
 
-void App::setupHighlightCube()
-{
-	// 1x1x1 cube
-	static constexpr float vertices[] = {
-		// bottom
-		0,0,0,  1,0,0,  1,0,1,  0,0,1,
-		// top
-		0,1,0,  1,1,0,  1,1,1,  0,1,1
-	};
+// Two multi-draw calls per frame: every visible opaque mesh, then every
+// visible transparent one back to front. The vectors are members so their
+// storage is reused frame to frame.
+void App::renderWorld(const World& _world) {
+	opaqueBatch.clear();
+	transparentSort.clear();
 
-	static constexpr uint32_t indices[] = {
-		// bottom
-		0,1, 1,2, 2,3, 3,0,
-		// top
-		4,5, 5,6, 6,7, 7,4,
-		// verticals
-		0,4, 1,5, 2,6, 3,7
-	};
+	const glm::vec3 centerOffset(ChunkSection::SIZE * 0.5f);
+	for (const auto& renderState : _world.getRenderStates()) {
+		if (!_world.frustum.isBoxInFrustum(renderState.worldMin, renderState.worldMax))
+			continue;
 
-	highlightedBlock = { glm::vec3(0.f), 0, 0, 0, false };
+		if (renderState.gpuMesh.uploaded && renderState.gpuMesh.quadCount > 0)
+			opaqueBatch.push_back({&renderState.gpuMesh, renderState.worldPosition});
 
-	glGenVertexArrays(1, &highlightedBlock.highlightVAO);
-	glGenBuffers(1, &highlightedBlock.highlightVBO);
-	glGenBuffers(1, &highlightedBlock.highlightIBO);
+		if (renderState.transparentGpuMesh.uploaded && renderState.transparentGpuMesh.quadCount > 0) {
+			const float distance = glm::length2(renderState.worldPosition + centerOffset - camera->pos);
+			transparentSort.emplace_back(distance, DrawItem{&renderState.transparentGpuMesh, renderState.worldPosition});
+		}
+	}
 
-	glBindVertexArray(highlightedBlock.highlightVAO);
+	renderer->drawBatch(opaqueBatch);
+	drawCalls += opaqueBatch.size();
 
-	// Position VBO
-	glBindBuffer(GL_ARRAY_BUFFER, highlightedBlock.highlightVBO);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-	glEnableVertexAttribArray(0);
-
-	// Index buffer
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, highlightedBlock.highlightIBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-	// ===== CONSTANT ATTRIBUTES (IMPORTANT PART) =====
-
-	// UV (location = 1)
-	glDisableVertexAttribArray(1);
-	glVertexAttrib2f(1, 0.0f, 0.0f);
-
-	// Texture index (location = 2)
-	glDisableVertexAttribArray(2);
-	glVertexAttribI1ui(2, 0); // MUST be a valid opaque texture layer
-
-	// Normal (location = 3) → +Y
-	glDisableVertexAttribArray(3);
-	glVertexAttribI1ui(3, 2); // normals[2] = (0,1,0)
-
-	// AO (location = 4) → max
-	glDisableVertexAttribArray(4);
-	glVertexAttribI1ui(4, 0);
-
-	glBindVertexArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-
-void App::cleanupHighlightCube()
-{
-    if (highlightedBlock.highlightVAO) {
-        glDeleteVertexArrays(1, &highlightedBlock.highlightVAO);
-        glDeleteBuffers(1, &highlightedBlock.highlightVBO);
-        glDeleteBuffers(1, &highlightedBlock.highlightIBO);
-        highlightedBlock.highlightVAO = 0;
-    }
-}
-
-void App::updateBlockHighlight()
-{
-    if (!camera) return;
-
-	const RaycastHit hit = blockSystem.raycastBlocks(camera->pos, camera->dir, world);
-    if (hit.isValid) {
-        highlightedBlock.highlightedBlockPos = hit.blockPos;
-        highlightedBlock.isHighlighted = true;
-    } else {
-        highlightedBlock.isHighlighted = false;
-    }
-}
-
-void App::renderBlockHighlight()
-{
-	if (!highlightedBlock.isHighlighted || highlightedBlock.highlightVAO == 0)
+	if (transparentSort.empty())
 		return;
+	std::ranges::sort(transparentSort, [](const auto& a, const auto& b) { return a.first > b.first; });
+	transparentBatch.clear();
+	for (const auto& [distance, item] : transparentSort)
+		transparentBatch.push_back(item);
 
-	// Model matrix (inflate slightly to avoid z-fighting)
-	glm::mat4 model = glm::translate(
-		glm::mat4(1.0f),
-		highlightedBlock.highlightedBlockPos
-	);
-	model = glm::scale(model, glm::vec3(1.005f));
+	renderer->beginTransparentPass();
+	renderer->drawBatch(transparentBatch);
+	renderer->endTransparentPass();
+	drawCalls += transparentBatch.size();
+}
 
-	world.worldUBO.MVP = camera->proj * camera->view * model;
+void App::processMeshUploads(World& _world) {
+	for (auto& renderState : _world.getRenderStates()) {
+		if (!renderState.mesh.empty() && !renderState.gpuMesh.uploaded) {
+			renderer->uploadMesh(renderState.mesh, renderState.gpuMesh);
+			renderState.mesh.release();
+		}
 
-	glUseProgram(renderer->getShaderProgram());
-
-	// Update UBO
-	glBindBuffer(GL_UNIFORM_BUFFER, world.ubo);
-	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(WorldUBO), &world.worldUBO);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-	glBindTextureUnit(0, renderer->getTextureArray());
-
-	glBindVertexArray(highlightedBlock.highlightVAO);
-
-	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_FALSE);
-
-	glLineWidth(5.0f);
-	glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, nullptr);
-	glLineWidth(1.0f);
-
-	glDepthMask(GL_TRUE);
-	glBindVertexArray(0);
+		if (!renderState.transparentMesh.empty() && !renderState.transparentGpuMesh.uploaded) {
+			renderer->uploadMesh(renderState.transparentMesh, renderState.transparentGpuMesh);
+			renderState.transparentMesh.release();
+		}
+	}
 }

@@ -1,499 +1,913 @@
 #include "World.hpp"
-#include "App.hpp"
-#include "BlockSystem.hpp"
 
-#define STB_PERLIN_IMPLEMENTATION
-#include "stb_perlin.h"
-
-#define GLM_ENABLE_EXPERIMENTAL
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
 #include <iostream>
-
-#include "glm/gtx/norm.hpp"
-
+#include <vector>
+#include <filesystem>
 #include <ranges>
+#include <fstream>
+#include <chrono>
 
-inline RenderType blockRenderType(const BlockType t)
+#include <glm/gtx/hash.hpp>
+
+#include "FrameProfiler.hpp"
+#include "RegionStore.hpp"
+
+#include "worldgen/TerrainGenerator.hpp"
+
+
+/* ============================================================
+ * Helpers
+ * ============================================================ */
+
+namespace
 {
-    switch (t) {
-        case BlockType::Water: return RenderType::Transparent;
-        case BlockType::Air:   return RenderType::Air;
-        default:               return RenderType::Opaque;
+    constexpr int MAX_CHUNKS_PER_UPDATE = 32;
+
+    [[nodiscard]]
+    int floorDiv(const int value, const int divisor) noexcept
+    {
+        const int q = value / divisor;
+        const int r = value % divisor;
+
+        if (r != 0 && ((r < 0) != (divisor < 0)))
+            return q - 1;
+
+        return q;
+    }
+
+    void appendSectionMesh(MeshData& columnMesh, const MeshData& sectionMesh, const int sectionY)
+    {
+        // Section-local y becomes column y; everything else (word b too) is kept.
+        constexpr std::uint32_t Y_MASK = 0x1FFu << 5u;
+        for (PackedVertex vertex : sectionMesh.vertices) {
+            const std::uint32_t localY = (vertex.a & Y_MASK) >> 5u;
+            vertex.a = (vertex.a & ~Y_MASK)
+                     | (((localY + static_cast<std::uint32_t>(sectionY * ChunkSection::SIZE)) & 0x1FFu) << 5u);
+            columnMesh.vertices.push_back(vertex);
+        }
     }
 }
 
-inline bool shouldRenderFace(const RenderType self, const RenderType neighbor)
-{
-    if (self == RenderType::Air) return false;      // Never render air
-    if (neighbor == RenderType::Air) return true;   // Always render into air
-    return self != neighbor;                        // Render if types differ
+
+/* ============================================================
+ * Accessors
+ * ============================================================ */
+
+std::shared_ptr<const ColumnLight> World::lightOf(const ChunkCoord& coord) const {
+    std::lock_guard lock(chunk_mutex);
+    const auto it = lights.find(coord);
+    return it == lights.end() ? nullptr : it->second;
 }
 
-
-World::World(std::array<uint32_t, 256>& indices)
-    : ubo(0), renderDistanceManager(CHUNK_RADIUS_MIN, CHUNK_RADIUS_MAX, 60, 100), textureIndices(indices)
-{
-    glCreateBuffers(1, &ubo);
-    glNamedBufferData(ubo, sizeof(WorldUBO), nullptr, GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
-
-    worldUBO = {
-        .MVP = glm::mat4(1.f),
-        .light = {0.0f, 200.0f, 0.0f, 500.f},
-        .cameraPos = {0.0f, 0.0f, 0.0f, 0.4f},
-    };
-}
-
-bool World::isBlockActiveWorld(const int wx, const int wy, const int wz) const {
-    if (static_cast<unsigned>(wy) >= Chunk::HEIGHT)
+bool World::lightIdle() const {
+    std::lock_guard lock(chunk_mutex);
+    if (lightJobs.inFlight() > 0)
         return false;
-
-    int cx = floorDiv(wx, Chunk::WIDTH);
-    int cz = floorDiv(wz, Chunk::DEPTH);
-
-    const auto it = chunks.find({cx, cz});
-    if (it == chunks.end())
-        return false;
-
-    const int lx = wx - cx * Chunk::WIDTH;
-    const int lz = wz - cz * Chunk::DEPTH;
-
-    return it->second.isBlockActive(lx, wy, lz);
-}
-
-bool World::isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const
-{
-    return frustum.isBoxInFrustum(min, max);
-}
-
-void World::updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat)
-{
-    return frustum.updateFrustum(proj_mat, view_mat);
-}
-
-void World::updateRenderDistance(const float currentFPS)
-{
-    renderDistanceManager.update(currentFPS);
-}
-
-/* ===================== Chunk Streaming ===================== */
-void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool)
-{
-    playerChunk = {
-        floorDiv(static_cast<int>(playerPos.x), Chunk::WIDTH),
-        floorDiv(static_cast<int>(playerPos.z), Chunk::DEPTH)
-    };
-
-    // ===== USE DYNAMIC RADIUS INSTEAD OF STATIC CHUNK_RADIUS =====
-    const int CHUNK_RADIUS = getChunkRadius();
-
-    // =========================================================
-    // LOAD CHUNKS
-    // =========================================================
-    constexpr int MAX_CHUNKS_PER_UPDATE = 12;
-    int spawned = 0;
-    forEachChunkSpiral(playerChunk, CHUNK_RADIUS, [&](ChunkCoord c)
     {
-        if (spawned >= MAX_CHUNKS_PER_UPDATE)
-            return;
+        std::lock_guard results(resultMutex);
+        if (!lightResults.empty())
+            return false;
+    }
+    for (const auto& coord : chunks | std::views::keys) {
+        if (!windowLoadedLocked(coord))
+            continue;
+        const ColumnJobTracker::Status* status = lightJobs.find(coord);
+        if (!status || !status->current())
+            return false;
+    }
+    return true;
+}
 
-        {
-            std::lock_guard lock(state_mutex);
-            auto& state = chunkStates[c];
-            if (state != ChunkState::Unloaded)
-                return;
+bool World::windowLoadedLocked(const ChunkCoord& coord) const {
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+            if (!chunks.contains({coord.x + dx, coord.z + dz}))
+                return false;
+    return true;
+}
 
-            state = ChunkState::Loading;
-        }
+World::JobCounts World::jobCounts() const {
+    std::lock_guard lock(chunk_mutex);
+    return {lightJobs.inFlight(), meshJobs.inFlight()};
+}
 
-        threadPool.enqueue([this, c]
-        {
-            Chunk chunk;
-            chunk.worldMin = {c.x * Chunk::WIDTH, 0.0f, c.y * Chunk::DEPTH};
-            chunk.worldMax = chunk.worldMin +
-                glm::vec3(Chunk::WIDTH, Chunk::HEIGHT, Chunk::DEPTH);
+void World::invalidateLightLocked(const ChunkCoord& coord) {
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+            lightJobs.invalidate({coord.x + dx, coord.z + dz});   // a job in flight is now stale
+}
 
-            generateTerrain(chunk, c);
-            generateChunkGreedyMesh(chunk, c);
+void World::applyLightResults() {
+    std::vector<LightResult> finished;
+    {
+        std::lock_guard results(resultMutex);
+        finished.swap(lightResults);
+    }
+    if (finished.empty())
+        return;
+    const std::uint64_t currentEpoch = epoch.load(std::memory_order_acquire);
+    std::lock_guard lock(chunk_mutex);
+    for (LightResult& result : finished) {
+        if (result.epoch != currentEpoch)
+            continue;                                   // from before clear()
+        // Dropped when the column was unloaded or its blocks changed meanwhile (a new job follows).
+        if (!lightJobs.finish(result.coord, result.version, result.light && chunks.contains(result.coord)))
+            continue;
+        // Its faces and its neighbours' border faces show this light: remesh
+        // those that show a cell whose light changed (an edit changes the
+        // light within 15 blocks, so the outer columns often stay as they are).
+        auto& stored = lights[result.coord];
+        const std::uint16_t changed = lightChangeMask(stored.get(), *result.light);
+        stored = std::move(result.light);
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+                if (changed & (1u << ((dz + 1) * 3 + (dx + 1))))
+                    invalidateMeshLocked({result.coord.x + dx, result.coord.z + dz});
+    }
+}
 
-            {
-                std::lock_guard lock(chunk_mutex);
-                chunks.emplace(c, std::move(chunk));
+void World::scheduleLightJobs(const glm::vec3& playerPosition, ThreadPool& threadPool) {
+    const std::size_t maxInFlight = std::max<std::size_t>(2, threadPool.getWorkerCount() * 2);
+    if (!lightJobs.hasRoom(maxInFlight))
+        return;
+
+    struct Candidate {
+        ChunkCoord coord;
+        float distance;
+    };
+    std::vector<Candidate> candidates;
+    std::lock_guard lock(chunk_mutex);
+    for (const auto& coord : chunks | std::views::keys) {
+        const ColumnJobTracker::Status& status = lightJobs.track(coord);
+        if (status.inFlight || status.current())
+            continue;
+        if (!windowLoadedLocked(coord))
+            continue;
+        const float cx = (static_cast<float>(coord.x) + 0.5f) * static_cast<float>(ChunkSection::SIZE) - playerPosition.x;
+        const float cz = (static_cast<float>(coord.z) + 0.5f) * static_cast<float>(ChunkSection::SIZE) - playerPosition.z;
+        candidates.push_back({coord, cx * cx + cz * cz});
+    }
+
+    const std::size_t slots = std::min(candidates.size(), lightJobs.room(maxInFlight));
+    std::ranges::partial_sort(candidates, candidates.begin() + static_cast<std::ptrdiff_t>(slots),
+        [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+
+    const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < slots; ++i) {
+        const ChunkCoord coord = candidates[i].coord;
+        // The job's own references: these columns stay alive and unchanged
+        // while it runs (writers copy a shared column first, see setBlockAt).
+        std::array<ColumnPtr, 9> window{};
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+                window[static_cast<std::size_t>((dz + 1) * 3 + (dx + 1))] = chunks.at({coord.x + dx, coord.z + dz});
+        const std::uint64_t version = lightJobs.start(coord);
+        threadPool.enqueueFireAndForget([this, coord, version, jobEpoch, window] {
+            Trace::Scope span("light column");
+            LightResult result{coord, version, jobEpoch, nullptr};
+            try {
+                ColumnWindow columns{};
+                for (std::size_t c = 0; c < columns.size(); ++c)
+                    columns[c] = window[c].get();
+                result.light = computeLight(columns, blockRegistry);
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to light chunk " << coord.x << ", " << coord.z << ": " << e.what() << std::endl;
             }
-            {
-                std::lock_guard lock(state_mutex);
-                chunkStates[c] = ChunkState::Loaded;
-            }
-
+            std::lock_guard results(resultMutex);
+            lightResults.push_back(std::move(result));
         });
+    }
+}
 
-        ++spawned;
+const BlockRegistry& World::getBlockRegistry() const noexcept {
+    return blockRegistry;
+}
+
+World::MemoryStats World::memoryStats() const {
+    const auto capacityBytes = [](const MeshData& mesh) {
+        return mesh.vertices.capacity() * sizeof(PackedVertex);
+    };
+    std::lock_guard lock(chunk_mutex);
+    MemoryStats stats;
+    stats.columns = chunks.size();
+    for (const ColumnPtr& column : chunks | std::views::values)
+        stats.blockBytes += column->heapBytes();
+    for (const auto& light : lights | std::views::values)
+        stats.lightBytes += light->heapBytes();
+    for (const ChunkRenderState& state : renderStates)
+        stats.meshCpuBytes += capacityBytes(state.mesh) + capacityBytes(state.transparentMesh);
+    return stats;
+}
+
+const std::vector<ChunkRenderState>& World::getRenderStates() const noexcept {
+    return renderStates;
+}
+
+std::vector<ChunkRenderState>& World::getRenderStates() noexcept {
+    return renderStates;
+}
+
+// Retires the meshes of columns that are gone, plus meshes replaced since the
+// last call. Linear: one pass, no erase from the middle of a vector.
+std::vector<GpuMesh> World::pruneRenderStates() {
+    std::vector<GpuMesh> retiredMeshes;
+    std::lock_guard lock(chunk_mutex);
+    retiredMeshes.swap(pendingRetiredMeshes);
+
+    std::erase_if(renderStates, [&](ChunkRenderState& state) {
+        if (chunks.contains(state.coord))
+            return false;
+        retiredMeshes.push_back(state.gpuMesh);
+        retiredMeshes.push_back(state.transparentGpuMesh);
+        return true;
+    });
+    meshJobs.eraseIf([this](const ChunkCoord& coord, const ColumnJobTracker::Status&) {
+        return !chunks.contains(coord);
+    });
+    std::erase_if(lights, [this](const auto& entry) { return !chunks.contains(entry.first); });
+    // A status whose job is running stays until the result comes back; an
+    // unloaded idle one goes.
+    lightJobs.eraseIf([this](const ChunkCoord& coord, const ColumnJobTracker::Status& status) {
+        return !chunks.contains(coord) && !status.inFlight;
     });
 
-    // =========================================================
-    // REGENERATE DIRTY CHUNKS
-    // =========================================================
-    spawned = 0;
-    {
-        std::lock_guard stateLock(state_mutex);
-
-        for (auto& [c, state] : chunkStates) {
-            if (spawned >= MAX_CHUNKS_PER_UPDATE)
-                break;
-
-            if (state != ChunkState::Loaded)
-                continue;
-
-            bool dirty = false;
-            {
-                std::lock_guard chunkLock(chunk_mutex);
-                dirty = chunks.at(c).isMeshDirty;
-            }
-
-            if (!dirty)
-                continue;
-
-            state = ChunkState::Meshing;
-
-            threadPool.enqueue([this, c]
-            {
-                Chunk copy;
-                {
-                    std::lock_guard lock(chunk_mutex);
-                    copy = chunks.at(c);
-                }
-
-                generateChunkGreedyMesh(copy, c);
-
-                {
-                    std::lock_guard lock(chunk_mutex);
-                    auto& dst = chunks.at(c);
-                    dst.cachedOpaqueVertices = std::move(copy.cachedOpaqueVertices);
-                    dst.cachedOpaqueIndices = std::move(copy.cachedOpaqueIndices);
-                    dst.cachedTransparentIndices = std::move(copy.cachedTransparentIndices);
-                    dst.cachedTransparentVertices = std::move(copy.cachedTransparentVertices);
-                    dst.isMeshDirty = copy.isMeshDirty;
-                    dst.aoCalculated.store(copy.aoCalculated);
-                }
-                {
-                    std::lock_guard lock(state_mutex);
-                    chunkStates[c] = ChunkState::Loaded;
-                }
-            });
-
-            ++spawned;
-        }
-    }
-
-    // =========================================================
-    // UNLOAD FAR CHUNKS
-    // =========================================================
-    spawned = 0;
-    {
-        std::lock_guard stateLock(state_mutex);
-
-        for (auto& [c, state] : chunkStates) {
-            if (spawned >= MAX_CHUNKS_PER_UPDATE)
-                break;
-
-            if (state != ChunkState::Loaded)
-                continue;
-
-            if (glm::distance(glm::vec2(c), glm::vec2(playerChunk)) <= CHUNK_RADIUS + 1)
-                continue;
-
-            state = ChunkState::Unloading;
-
-            threadPool.enqueue([this, c]
-            {
-                {
-                    std::lock_guard lock(chunk_mutex);
-                    chunks.erase(c);
-                }
-                {
-                    std::lock_guard lock(state_mutex);
-                    chunkStates[c] = ChunkState::Unloaded;
-                }
-            });
-        }
-    }
+    return retiredMeshes;
 }
 
-/* ===================== Terrain ===================== */
-void World::generateTerrain(Chunk& chunk, const ChunkCoord& coord)
-{
-    static TerrainGenerator generator;
-    generator.generateChunk(chunk, coord);
+bool World::getBlockAt(const glm::ivec3& worldPos, BlockId& block) const {
+    if (worldPos.y < ChunkColumn::MIN_WORLD_Y || worldPos.y >= ChunkColumn::MAX_WORLD_Y)
+        return false;
+
+    const int chunkX = floorDiv(worldPos.x, ChunkSection::SIZE);
+    const int chunkZ = floorDiv(worldPos.z, ChunkSection::SIZE);
+    const int localX = worldPos.x - chunkX * ChunkSection::SIZE;
+    const int localZ = worldPos.z - chunkZ * ChunkSection::SIZE;
+
+    std::lock_guard lock(chunk_mutex);
+    const auto it = chunks.find({chunkX, chunkZ});
+    if (it == chunks.end() || !it->second)
+        return false;
+
+    block = it->second->getUnchecked(localX, ChunkColumn::toStorageY(worldPos.y), localZ);
+    return true;
 }
 
-/* ===================== Greedy Meshing ===================== */
-void World::buildMask(
-    const RenderType targetType,
-    const int axis,
-    RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-    uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-    const int dims[3],
-    int x[3], const int q[3],
-    std::vector<MaskEntry>& mask
-)
-{
-    const int u = (axis + 1) % 3;
-    const int v = (axis + 2) % 3;
+bool World::getSurfaceHeight(const int worldX, const int worldZ, int& height) const {
+    const int chunkX = floorDiv(worldX, ChunkSection::SIZE);
+    const int chunkZ = floorDiv(worldZ, ChunkSection::SIZE);
+    const int localX = worldX - chunkX * ChunkSection::SIZE;
+    const int localZ = worldZ - chunkZ * ChunkSection::SIZE;
 
-    int n = 0;
+    std::lock_guard lock(chunk_mutex);
+    const auto it = chunks.find({chunkX, chunkZ});
+    if (it == chunks.end() || !it->second)
+        return false;
 
-    for (x[v] = 0; x[v] < dims[v]; ++x[v])
-        for (x[u] = 0; x[u] < dims[u]; ++x[u])
+    for (int storageY = ChunkColumn::HEIGHT - 1; storageY >= 0; --storageY) {
+        if (!blockRegistry.isOpaque(it->second->getUnchecked(localX, storageY, localZ)))
+            continue;
+
+        height = ChunkColumn::toWorldY(storageY);
+        return true;
+    }
+
+    return false;
+}
+
+bool World::setBlockAt(const glm::ivec3& worldPos, const BlockId block) {
+    if (worldPos.y < ChunkColumn::MIN_WORLD_Y || worldPos.y >= ChunkColumn::MAX_WORLD_Y
+        || block >= BLOCK_TYPE_COUNT)
+        return false;
+
+    const int chunkX = floorDiv(worldPos.x, ChunkSection::SIZE);
+    const int chunkZ = floorDiv(worldPos.z, ChunkSection::SIZE);
+    const int localX = worldPos.x - chunkX * ChunkSection::SIZE;
+    const int localZ = worldPos.z - chunkZ * ChunkSection::SIZE;
+
+    std::lock_guard lock(chunk_mutex);
+    const auto columnIt = chunks.find({chunkX, chunkZ});
+    if (columnIt == chunks.end() || !columnIt->second)
+        return false;
+
+    // Copy-on-write: a mesh job may still be reading this column.
+    if (columnIt->second.use_count() > 1)
+        columnIt->second = std::make_shared<ChunkColumn>(*columnIt->second);
+    ChunkColumn& column = *columnIt->second;
+    const int storageY = ChunkColumn::toStorageY(worldPos.y);
+    const BlockId currentBlock = column.getUnchecked(localX, storageY, localZ);
+    if (currentBlock == toBlockId(BlockType::Bedrock) && block != currentBlock)
+        return false;
+    if (currentBlock == block)
+        return false;
+
+    column.setUnchecked(localX, storageY, localZ, block);
+
+    // Every column whose mesh reads this cell: the mesher reads a one-cell
+    // border around its column, corners included (faces and AO), so an edit
+    // on a column corner also touches the diagonal neighbour.
+    const int firstChunkX = floorDiv(worldPos.x - 1, ChunkSection::SIZE);
+    const int lastChunkX = floorDiv(worldPos.x + 1, ChunkSection::SIZE);
+    const int firstChunkZ = floorDiv(worldPos.z - 1, ChunkSection::SIZE);
+    const int lastChunkZ = floorDiv(worldPos.z + 1, ChunkSection::SIZE);
+    for (int cz = firstChunkZ; cz <= lastChunkZ; ++cz)
+        for (int cx = firstChunkX; cx <= lastChunkX; ++cx)
+            invalidateMeshLocked({cx, cz});
+
+    dirty.insert({chunkX, chunkZ});
+    invalidateLightLocked({chunkX, chunkZ});
+
+    return true;
+}
+
+void World::invalidateMeshLocked(const ChunkCoord& coord) {
+    meshJobs.invalidate(coord);        // a result in flight is now stale; never meshed: nothing to redo
+}
+
+/* ============================================================
+ * Multiplayer hooks
+ * ============================================================ */
+
+void World::clear() {
+    std::lock_guard lock(chunk_mutex);
+    epoch.fetch_add(1, std::memory_order_acq_rel);   // running jobs now drop their result
+
+    for (ChunkRenderState& state : renderStates) {
+        pendingRetiredMeshes.push_back(std::move(state.gpuMesh));
+        pendingRetiredMeshes.push_back(std::move(state.transparentGpuMesh));
+    }
+    renderStates.clear();
+    meshJobs.reset();                  // their results carry the old epoch: never counted back
+    readyResults.clear();
+    {
+        std::lock_guard results(resultMutex);
+        meshResults.clear();
+    }
+    generatingChunks.clear();
+    chunks.clear();
+    lights.clear();
+    lightJobs.reset();                 // their results carry the old epoch
+    {
+        std::lock_guard results(resultMutex);
+        lightResults.clear();
+    }
+    dirty.clear();
+    playerChunk = {std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+}
+
+void World::adoptColumn(std::unique_ptr<ChunkColumn> column) {
+    if (!column)
+        return;
+    const ChunkCoord coord = column->coord();
+
+    std::lock_guard lock(chunk_mutex);
+    chunks[coord] = std::move(column);
+
+    // A replaced column changes its own mesh and the border faces of its
+    // neighbours; a new one can only complete neighbourhoods (cheap either way).
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+            invalidateMeshLocked({coord.x + dx, coord.z + dz});
+    invalidateLightLocked(coord);
+}
+
+void World::dropColumn(const ChunkCoord& coord) {
+    std::lock_guard lock(chunk_mutex);
+    chunks.erase(coord);                             // pruneRenderStates() retires its meshes
+    lights.erase(coord);
+    lightJobs.erase(coord);
+    dirty.erase(coord);
+}
+
+World::World() : generator(std::make_shared<worldgen::TerrainGenerator>(0)) {}
+
+void World::open(const std::uint64_t seed, std::shared_ptr<RegionStore> newStore) {
+    clear();
+    std::lock_guard lock(chunk_mutex);
+    worldSeed = seed;
+    store = std::move(newStore);
+    // Running jobs keep the generator they started with (shared_ptr).
+    generator = std::make_shared<worldgen::TerrainGenerator>(seed);
+}
+
+int World::generatedSurfaceHeight(const int x, const int z) const {
+    std::lock_guard lock(chunk_mutex);
+    return generator->surfaceHeight(x, z);
+}
+
+glm::ivec2 World::spawnPoint() const {
+    std::lock_guard lock(chunk_mutex);
+    return generator->findSpawn();
+}
+
+void World::enqueueSave(ThreadPool& threadPool, ColumnPtr column) {
+    // Staged first, so a load of this column (even one that runs before the
+    // save job) gets this snapshot. A save of it already queued writes it too.
+    const ChunkCoord coord = column->coord();
+    if (!store->stage(std::move(column)))
+        return;
+    {
+        std::lock_guard lock(saveMutex);
+        ++savesInFlight;
+    }
+    threadPool.enqueueFireAndForget([this, columnStore = store, coord] {
         {
-            const int cx = x[0];
-            const int cy = x[1];
-            const int cz = x[2];
-
-            const int nx = cx + q[0];
-            const int ny = cy + q[1];
-            const int nz = cz + q[2];
-
-            const RenderType self     = renderType[cx+1][cy+1][cz+1];
-            const RenderType neighbor = renderType[nx+1][ny+1][nz+1];
-
-            const uint8_t bt = blockTypes[cx + 1][cy + 1][cz + 1];
-            const uint8_t btNeighbor = blockTypes[nx + 1][ny + 1][nz + 1];
-            bool visible = bt != 0 && self == targetType && shouldRenderFace(self, neighbor);
-
-            if (visible && targetType == RenderType::Transparent && btNeighbor != 0) {
-                visible = false;
-            }
-
-            mask[n].visible = visible;
-            mask[n].blockType = bt;
-            ++n;
+            Trace::Scope span("save column");
+            if (!columnStore->writeStaged(coord))
+                std::cerr << "Failed to save chunk " << coord.x << ", " << coord.z << std::endl;
         }
+        std::lock_guard lock(saveMutex);
+        --savesInFlight;
+        saveDone.notify_all();
+    });
 }
 
-void World::runGreedyPass(
-    const RenderType targetType,
-    RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-    uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-    const MeshTarget target
-) const
-{
-    constexpr int W = Chunk::WIDTH;
-    constexpr int H = Chunk::HEIGHT;
-    constexpr int D = Chunk::DEPTH;
+void World::flush(ThreadPool& threadPool) {
+    {
+        std::lock_guard lock(chunk_mutex);
+        if (store) {
+            for (const ChunkCoord& coord : dirty) {
+                const auto it = chunks.find(coord);
+                if (it != chunks.end())
+                    enqueueSave(threadPool, it->second);
+            }
+        }
+        dirty.clear();
+    }
+    std::unique_lock lock(saveMutex);
+    saveDone.wait(lock, [this] { return savesInFlight == 0; });
+}
 
-    constexpr int dims[3] = { W, H, D };
+World::~World() {
+    // Save jobs point at this World: never let one outlive it.
+    std::unique_lock lock(saveMutex);
+    saveDone.wait(lock, [this] { return savesInFlight == 0; });
+}
 
-    auto normalToIndex = [](const int axis, const int dir) -> uint8_t {
-        return axis * 2 + (dir < 0 ? 1 : 0);
+/* ============================================================
+ * Chunk streaming
+ * ============================================================ */
+
+void World::updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool) {
+    const glm::ivec2 newPlayerChunk{
+        floorDiv(static_cast<int>(std::floor(playerPos.x)), ChunkSection::SIZE),
+        floorDiv(static_cast<int>(std::floor(playerPos.z)), ChunkSection::SIZE)
     };
 
-    std::vector<MaskEntry> mask(std::max({W, H, D}) * std::max({W, H, D}));
+    playerChunk = newPlayerChunk;
 
-    for (int axis = 0; axis < 3; ++axis)
+    std::vector<ChunkCoord> loadQueue;
+    std::vector<ChunkCoord> unloadQueue;
+
+    /*
+     * ----------------------------------------------------------
+     * Determine chunks that need loading.
+     * ----------------------------------------------------------
+     *
+     * We walk the rings around the player so chunks close to the
+     * player enter the queue first.
+     */
+    loadQueue.reserve(static_cast<std::size_t>(CHUNK_LOAD_DIAMETER * CHUNK_LOAD_DIAMETER));
+
+    for (int radius = 0; radius <= CHUNK_LOAD_RADIUS; ++radius)
     {
-        const int u = (axis + 1) % 3;
-        const int v = (axis + 2) % 3;
-
-        int x[3] = {0, 0, 0};
-        int q[3] = {0, 0, 0};
-
-        for (int dir = -1; dir <= 1; dir += 2)
+        for (int dx = -radius; dx <= radius; ++dx)
         {
-            q[axis] = dir;
-
-            for (x[axis] = 0; x[axis] < dims[axis]; ++x[axis])
+            for (int dz = -radius; dz <= radius; ++dz)
             {
-                const int maskSize = dims[u] * dims[v];
-                std::fill_n(mask.begin(), maskSize, MaskEntry{false, 0});
+                if (std::abs(dx) != radius && std::abs(dz) != radius)
+                    continue;
 
-                buildMask(targetType, axis, renderType, blockTypes , const_cast<int*>(dims), x, q, mask);
+                const ChunkCoord coord{playerChunk.x + dx, playerChunk.y + dz};
 
-                int n = 0;
-                uint32_t base = target.vertices.size();
+                std::lock_guard lock(chunk_mutex);
 
-                for (int j = 0; j < dims[v]; ++j)
-                {
-                    for (int i = 0; i < dims[u];)
-                    {
-                        if (!mask[n].visible) { ++i; ++n; continue; }
+                if (chunks.contains(coord))
+                    continue;
 
-                        const uint8_t bt = mask[n].blockType;
+                if (generatingChunks.contains(coord))
+                    continue;
 
-                        int w = 1;
-                        int h = 1;
-
-                        while (i + w < dims[u] &&
-                               mask[n + w].visible &&
-                               mask[n + w].blockType == bt)
-                            ++w;
-
-                        for (; j + h < dims[v]; ++h)
-                        {
-                            for (int k = 0; k < w; ++k)
-                                if (!mask[n + k + h * dims[u]].visible ||
-                                    mask[n + k + h * dims[u]].blockType != bt)
-                                    goto merge_done;
-                        }
-                        merge_done:
-
-                        x[u] = i;
-                        x[v] = j;
-
-                        float verts[4][3];
-                        for (auto& vtx : verts)
-                        {
-                            vtx[0] = x[0];
-                            vtx[1] = x[1];
-                            vtx[2] = x[2];
-                        }
-
-                        verts[1][u] += w;
-                        verts[2][u] += w; verts[2][v] += h;
-                        verts[3][v] += h;
-
-                        if (dir > 0)
-                            for (auto& vtx : verts) vtx[axis] += 1.0f;
-
-                        float uv[4][2] = {{0, 0},{(float)w, 0},{(float)w, (float)h},{0, (float)h}};
-
-                        const uint16_t tex = textureIndices[bt];
-                        const uint8_t normal = normalToIndex(axis, dir);
-                        constexpr uint8_t AO_MAX = 3;
-
-                        for (int k = 0; k < 4; ++k)
-                            target.vertices.push_back({
-                                {verts[k][0], verts[k][1], verts[k][2]},
-                                {uv[k][0], uv[k][1]},
-                                tex, normal, AO_MAX
-                            });
-
-                        if (dir > 0)
-                            target.indices.insert(target.indices.end(),
-                                {base, base+1, base+2, base, base+2, base+3});
-                        else
-                            target.indices.insert(target.indices.end(),
-                                {base, base+3, base+2, base, base+2, base+1});
-
-                        for (int dy = 0; dy < h; ++dy)
-                            for (int dx = 0; dx < w; ++dx)
-                                mask[n + dx + dy * dims[u]].visible = false;
-
-                        base += 4;
-                        i += w;
-                        n += w;
-                    }
-                }
+                loadQueue.push_back(coord);
             }
         }
     }
-}
 
-void World::generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord)
-{
-    constexpr int W = Chunk::WIDTH;
-    constexpr int H = Chunk::HEIGHT;
-    constexpr int D = Chunk::DEPTH;
+    /*
+     * Sort by squared distance.
+     *
+     * This makes the queue strictly nearest-first rather than
+     * merely ring-first.
+     */
+    std::ranges::sort(
+        loadQueue,
+        [this](const ChunkCoord& a, const ChunkCoord& b)
+        {
+            const std::int64_t ax = static_cast<std::int64_t>(a.x) - playerChunk.x;
+            const std::int64_t az = static_cast<std::int64_t>(a.z) - playerChunk.y;
+            const std::int64_t bx = static_cast<std::int64_t>(b.x) - playerChunk.x;
+            const std::int64_t bz = static_cast<std::int64_t>(b.z) - playerChunk.y;
 
-    thread_local RenderType renderType[W + 2][H + 2][D + 2] = {};
-    thread_local uint8_t    blockTypes[W + 2][H + 2][D + 2] = {};
+            const std::int64_t distanceA = ax * ax + az * az;
+            const std::int64_t distanceB = bx * bx + bz * bz;
 
-    const int baseWX = coord.x * W;
-    const int baseWZ = coord.y * D;
+            return distanceA < distanceB;
+        }
+    );
 
-    // Fill chunk
-    for (int x = 0; x < W; ++x)
-        for (int y = 0; y < H; ++y)
-            for (int z = 0; z < D; ++z)
-            {
-                const Voxel v = chunk.getVoxel(x, y, z);
-                uint8_t bt = getBlockType(v);
-
-                renderType[x+1][y+1][z+1] = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
-                blockTypes[x+1][y+1][z+1] = bt;
-            }
-
-    auto sampleBT = [&](const std::vector<Voxel>& voxels, const glm::ivec3& WorldPos) -> uint8_t {
-        const auto localPos = BlockSystem::getLocalCoords(WorldPos);
-
-        Voxel v;
-        if (!voxels.empty())
-            v = voxels[localPos.x + localPos.y * Chunk::WIDTH + localPos.z * Chunk::WIDTH * Chunk::HEIGHT];
-        else
-            v = TerrainGenerator::sampleVoxel(WorldPos.x, WorldPos.y, WorldPos.z);
-
-        return getBlockType(v);
-    };
-
-
-    std::vector<Voxel> leftVoxels;
-    std::vector<Voxel> rightVoxels;
-    std::vector<Voxel> backVoxels;
-    std::vector<Voxel> frontVoxels;
-
+    /*
+     * ----------------------------------------------------------
+     * Determine chunks that should be unloaded.
+     * ----------------------------------------------------------
+     *
+     * Keep a one-chunk safety border around the render radius.
+     */
     {
         std::lock_guard lock(chunk_mutex);
 
-        if (const auto leftChunk = chunks.find({coord.x - 1, coord.y}); leftChunk != chunks.end()) {
-            leftVoxels.resize(Chunk::SIZE);
-            std::ranges::copy(leftChunk->second.getVoxels(),leftVoxels.begin());
-        }
+        unloadQueue.reserve(chunks.size());
 
-        if (const auto rightChunk = chunks.find({coord.x + 1, coord.y}); rightChunk != chunks.end()) {
-            rightVoxels.resize(Chunk::SIZE);
-            std::ranges::copy(rightChunk->second.getVoxels(),rightVoxels.begin());
-        }
+        for (const auto &coord: chunks | std::views::keys)
+        {
+            const std::int64_t dx = static_cast<std::int64_t>(coord.x) - playerChunk.x;
+            const std::int64_t dz = static_cast<std::int64_t>(coord.z) - playerChunk.y;
 
-        if (const auto backChunk = chunks.find({coord.x, coord.y - 1}); backChunk != chunks.end()) {
-            backVoxels.resize(Chunk::SIZE);
-            std::ranges::copy(backChunk->second.getVoxels(),backVoxels.begin());
-        }
-        if (const auto frontChunk = chunks.find({coord.x, coord.y + 1}); frontChunk != chunks.end()) {
-            frontVoxels.resize(Chunk::SIZE);
-            std::ranges::copy(frontChunk->second.getVoxels(),frontVoxels.begin());
+            if (std::abs(dx) > CHUNK_LOAD_RADIUS || std::abs(dz) > CHUNK_LOAD_RADIUS)
+                unloadQueue.push_back(coord);
         }
     }
 
-    for (int y = 0; y < H; ++y)
-        for (int z = 0; z < D; ++z)
-        {
-            auto bt = sampleBT(leftVoxels, {baseWX-1, y, baseWZ+z});
-            blockTypes[0][y+1][z+1]     = bt;
-            renderType[0][y+1][z+1]     = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
+    /*
+     * ----------------------------------------------------------
+     * Schedule generation.
+     * ----------------------------------------------------------
+     *
+     * Workers NEVER modify the chunks map directly until their
+     * generated ChunkColumn is complete.
+     *
+     * The worker only owns its local unique_ptr while generating.
+     */
+    int spawned = 0;
 
-            bt = sampleBT(rightVoxels, {baseWX+W, y, baseWZ+z});
-            blockTypes[W+1][y+1][z+1]   = bt;
-            renderType[W+1][y+1][z+1]   = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
+    for (const ChunkCoord coord : loadQueue)
+    {
+        if (spawned >= MAX_CHUNKS_PER_UPDATE)
+            break;
+
+        {
+            std::lock_guard lock(chunk_mutex);
+
+            if (chunks.contains(coord) || generatingChunks.contains(coord))
+                continue;
+
+            generatingChunks.insert(coord);
         }
 
-    for (int x = 0; x < W; ++x)
-        for (int y = 0; y < H; ++y)
+        ++spawned;
+
+        const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
+        threadPool.enqueueFireAndForget(
+            [this, coord, jobEpoch, columnStore = store, columnGenerator = generator]
+            {
+                try {
+                    // A saved column is used as is; otherwise generate it.
+                    std::unique_ptr<ChunkColumn> column;
+                    if (columnStore) {
+                        Trace::Scope span("load column");
+                        column = columnStore->load(coord);
+                    }
+                    const bool generated = column == nullptr;
+                    if (generated) {
+                        Trace::Scope span("generate column");
+                        column = std::make_unique<ChunkColumn>(coord);
+                        columnGenerator->generate(*column);
+                    }
+
+                    /*
+                     * Publish the fully generated column.
+                     *
+                     * Nothing else can observe this ChunkColumn
+                     * before it has been completely generated.
+                     */
+                    {
+                        std::lock_guard lock(chunk_mutex);
+
+                        // clear() ran meanwhile (session changed): this column
+                        // belongs to a world that no longer exists.
+                        if (epoch.load(std::memory_order_acquire) != jobEpoch)
+                            return;
+
+                        /*
+                         * The player may have moved while this job
+                         * was running. The chunk can still be useful
+                         * if it remains inside the current unload
+                         * radius, so don't make the worker depend on
+                         * the player's current position.
+                         */
+                        chunks[coord] = std::move(column);
+                        generatingChunks.erase(coord);
+                        invalidateLightLocked(coord);   // neighbours' windows changed
+                        if (generated)
+                            dirty.insert(coord);
+                    }
+                }
+                catch (std::exception const& e) {
+                    std::lock_guard lock(chunk_mutex);
+                    if (epoch.load(std::memory_order_acquire) != jobEpoch)
+                        return;
+
+                    if (chunks.contains(coord))
+                        chunks.erase(coord);
+                    if (generatingChunks.contains(coord))
+                        generatingChunks.erase(coord);
+
+                    std::cerr
+                        << "Failed to generate chunk at " << coord.x << ", " << coord.z
+                        << " : " << e.what()
+                        << std::endl;
+                }
+            }
+        );
+    }
+
+    /*
+     * ----------------------------------------------------------
+     * Unload.
+     * ----------------------------------------------------------
+     *
+     * Never erase a chunk that is still being generated.
+     */
+    {
+        std::lock_guard lock(chunk_mutex);
+
+        int unloaded = 0;
+
+        for (const ChunkCoord& coord : unloadQueue)
         {
-            auto bt = sampleBT(backVoxels, {baseWX+x, y, baseWZ-1});
-            blockTypes[x+1][y+1][0]     = bt;
-            renderType[x+1][y+1][0]     = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
+            if (unloaded >= MAX_CHUNKS_PER_UPDATE)
+                break;
 
-            bt = sampleBT(frontVoxels, {baseWX+x, y, baseWZ+D});
-            blockTypes[x+1][y+1][D+1]   = bt;
-            renderType[x+1][y+1][D+1]   = bt ? blockRenderType(static_cast<BlockType>(bt)) : RenderType::Air;
+            if (generatingChunks.contains(coord))
+                continue;
+
+            const auto it = chunks.find(coord);
+            if (it == chunks.end())
+                continue;
+            if (dirty.erase(coord) != 0 && store)
+                enqueueSave(threadPool, it->second);   // a snapshot: the column is gone from the map
+            chunks.erase(it);
+            ++unloaded;
         }
-
-    chunk.cachedOpaqueVertices.clear();
-    chunk.cachedOpaqueIndices.clear();
-    chunk.cachedTransparentVertices.clear();
-    chunk.cachedTransparentIndices.clear();
-
-    runGreedyPass(RenderType::Opaque,
-        renderType, blockTypes,
-        {chunk.cachedOpaqueVertices, chunk.cachedOpaqueIndices});
-
-    runGreedyPass(RenderType::Transparent,
-        renderType, blockTypes,
-        {chunk.cachedTransparentVertices, chunk.cachedTransparentIndices});
-
-    const glm::vec3 offset(coord.x * W, 0.0f, coord.y * D);
-
-    for (auto& v : chunk.cachedOpaqueVertices) v.position += offset;
-    for (auto& v : chunk.cachedTransparentVertices) v.position += offset;
-
-    chunk.isMeshDirty = false;
-    chunk.aoCalculated = false;
+    }
 }
+
+/* ============================================================
+ * Meshing
+ * ============================================================ */
+
+namespace
+{
+    // Every render state of one column: one opaque mesh for the whole column
+    // (sections merged), one transparent mesh per section that has any.
+    // Pure (reads its inputs only), so it runs on worker threads.
+    std::vector<ChunkRenderState> meshColumn(
+        const ChunkColumn& column,
+        const ChunkNeighborhood& neighborhood,
+        const BlockRegistry& registry
+    ) {
+        const ChunkCoord coord = column.coord();
+        std::vector<ChunkRenderState> states;
+
+        ChunkRenderState opaqueState{};
+        opaqueState.coord = coord;
+        opaqueState.sectionY = 0;
+        opaqueState.worldPosition = {
+            static_cast<float>(coord.x * ChunkSection::SIZE),
+            static_cast<float>(ChunkColumn::MIN_WORLD_Y),
+            static_cast<float>(coord.z * ChunkSection::SIZE)
+        };
+
+        MeshData sectionOpaqueMesh;
+        MeshData sectionTransparentMesh;
+        int lowestOpaqueSection = ChunkColumn::SECTION_COUNT;
+        int highestOpaqueSection = -1;
+
+        for (std::uint8_t sectionY = 0; sectionY < ChunkColumn::SECTION_COUNT; ++sectionY)
+        {
+            ChunkMesher::build(
+                column.section(sectionY),
+                sectionY,
+                neighborhood,
+                registry,
+                sectionOpaqueMesh,
+                sectionTransparentMesh
+            );
+
+            if (!sectionOpaqueMesh.empty()) {
+                appendSectionMesh(opaqueState.mesh, sectionOpaqueMesh, sectionY);
+                lowestOpaqueSection = std::min(lowestOpaqueSection, static_cast<int>(sectionY));
+                highestOpaqueSection = std::max(highestOpaqueSection, static_cast<int>(sectionY));
+            }
+
+            if (!sectionTransparentMesh.empty()) {
+                ChunkRenderState transparentState{};
+                transparentState.coord = coord;
+                transparentState.sectionY = sectionY;
+                transparentState.worldPosition = {
+                    opaqueState.worldPosition.x,
+                    static_cast<float>(ChunkColumn::toWorldY(sectionY * ChunkSection::SIZE)),
+                    opaqueState.worldPosition.z
+                };
+                transparentState.worldMin = transparentState.worldPosition;
+                transparentState.worldMax = transparentState.worldPosition + glm::vec3(static_cast<float>(ChunkSection::SIZE));
+                transparentState.transparentMesh = std::move(sectionTransparentMesh);
+                sectionTransparentMesh = {};
+                states.push_back(std::move(transparentState));
+            }
+        }
+
+        if (!opaqueState.mesh.empty()) {
+            opaqueState.worldMin = {
+                opaqueState.worldPosition.x,
+                static_cast<float>(ChunkColumn::toWorldY(lowestOpaqueSection * ChunkSection::SIZE)),
+                opaqueState.worldPosition.z
+            };
+            opaqueState.worldMax = {
+                opaqueState.worldPosition.x + static_cast<float>(ChunkSection::SIZE),
+                static_cast<float>(ChunkColumn::toWorldY((highestOpaqueSection + 1) * ChunkSection::SIZE)),
+                opaqueState.worldPosition.z + static_cast<float>(ChunkSection::SIZE)
+            };
+            states.push_back(std::move(opaqueState));
+        }
+        return states;
+    }
+}
+
+void World::buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward,
+                              ThreadPool& threadPool) {
+    applyLightResults();
+    scheduleLightJobs(playerPosition, threadPool);
+    applyMeshResults();
+    scheduleMeshJobs(playerPosition, playerForward, threadPool);
+}
+
+// Swaps a column's render states for freshly meshed ones. The old GPU meshes
+// are released by the next pruneRenderStates(). chunk_mutex held.
+void World::replaceRenderStates(const ChunkCoord& coord, std::vector<ChunkRenderState> states) {
+    std::erase_if(renderStates, [&](const ChunkRenderState& state) {
+        if (state.coord != coord)
+            return false;
+        pendingRetiredMeshes.push_back(state.gpuMesh);
+        pendingRetiredMeshes.push_back(state.transparentGpuMesh);
+        return true;
+    });
+    for (ChunkRenderState& state : states)
+        renderStates.push_back(std::move(state));
+}
+
+void World::applyMeshResults() {
+    {
+        std::lock_guard lock(resultMutex);
+        for (MeshResult& result : meshResults)
+            readyResults.push_back(std::move(result));
+        meshResults.clear();
+    }
+    if (readyResults.empty())
+        return;
+
+    // Each applied column is uploaded to the GPU this frame: bound the work.
+    constexpr std::size_t MAX_APPLIED_PER_FRAME = 8;
+    const std::uint64_t currentEpoch = epoch.load(std::memory_order_acquire);
+
+    std::lock_guard lock(chunk_mutex);
+    std::size_t applied = 0;
+    auto it = readyResults.begin();
+    for (; it != readyResults.end() && applied < MAX_APPLIED_PER_FRAME; ++it) {
+        if (it->epoch != currentEpoch)
+            continue;                                   // from before clear()
+        // Version 0 (a failed job) never matches. Dropped when the column was
+        // unloaded or changed meanwhile: it gets a new job.
+        if (!meshJobs.finish(it->coord, it->version, chunks.contains(it->coord)))
+            continue;
+        replaceRenderStates(it->coord, std::move(it->states));
+        meshJobs.track(it->coord).waited = 0;
+        ++applied;
+    }
+    readyResults.erase(readyResults.begin(), it);
+}
+
+void World::scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& playerForward,
+                             ThreadPool& threadPool) {
+    const std::size_t maxInFlight = std::max<std::size_t>(2, threadPool.getWorkerCount() * 2);
+    if (!meshJobs.hasRoom(maxInFlight))
+        return;
+
+    constexpr auto CHUNK_SIZE = static_cast<float>(ChunkSection::SIZE);
+    glm::vec2 forward{playerForward.x, playerForward.z};
+    if (glm::dot(forward, forward) > 1e-6f)
+        forward = glm::normalize(forward);
+    else
+        forward = {1.0f, 0.0f};
+
+    struct Candidate {
+        ChunkCoord coord;
+        float priority;
+    };
+    std::vector<Candidate> candidates;
+
+    std::lock_guard lock(chunk_mutex);
+    for (const auto& coord : chunks | std::views::keys) {
+        ColumnJobTracker::Status& status = meshJobs.track(coord);
+        if (status.current() || status.inFlight)
+            continue;
+
+        // The whole 3x3 neighbourhood must exist, with light, or border faces are wrong.
+        bool neighborsReady = true;
+        for (int dz = -1; dz <= 1 && neighborsReady; ++dz)
+            for (int dx = -1; dx <= 1 && neighborsReady; ++dx)
+                neighborsReady = chunks.contains({coord.x + dx, coord.z + dz})
+                              && lights.contains({coord.x + dx, coord.z + dz});
+        if (!neighborsReady)
+            continue;
+        // A column that has a mesh keeps it while a light it shows is being
+        // redone (after an edit): remeshing with the old light would show the
+        // newly exposed faces dark until the new light lands. Only lights
+        // that can be redone (their own 3x3 loaded) are waited for.
+        if (status.done != 0) {
+            bool lightPending = false;
+            for (int dz = -1; dz <= 1 && !lightPending; ++dz)
+                for (int dx = -1; dx <= 1 && !lightPending; ++dx) {
+                    const ChunkCoord n{coord.x + dx, coord.z + dz};
+                    const ColumnJobTracker::Status* light = lightJobs.find(n);
+                    lightPending = light && !light->current() && windowLoadedLocked(n);
+                }
+            if (lightPending)
+                continue;
+        }
+
+        const float minX = static_cast<float>(coord.x) * CHUNK_SIZE;
+        const float minZ = static_cast<float>(coord.z) * CHUNK_SIZE;
+        const float maxX = minX + CHUNK_SIZE;
+        const float maxZ = minZ + CHUNK_SIZE;
+        const float dx = std::max({minX - playerPosition.x, 0.0f, playerPosition.x - maxX});
+        const float dz = std::max({minZ - playerPosition.z, 0.0f, playerPosition.z - maxZ});
+        const float distanceInChunks = std::sqrt(dx * dx + dz * dz) / CHUNK_SIZE;
+        const float centerX = (minX + maxX) * 0.5f - playerPosition.x;
+        const float centerZ = (minZ + maxZ) * 0.5f - playerPosition.z;
+        const float forwardExtent = CHUNK_SIZE * 0.5f * (std::abs(forward.x) + std::abs(forward.y));
+        const bool inFront = centerX * forward.x + centerZ * forward.y + forwardExtent >= 0.0f;
+
+        // Nearby first, then what is in front; age prevents starvation.
+        const float safetyBonus = distanceInChunks <= 2.0f ? 100.0f : 0.0f;
+        const float viewBonus = inFront ? 8.0f : 0.0f;
+        const float ageBonus = std::min(static_cast<float>(++status.waited) * 0.25f, 256.0f);
+        candidates.push_back({coord, distanceInChunks - safetyBonus - viewBonus - ageBonus});
+    }
+
+    const std::size_t slots = std::min(candidates.size(), meshJobs.room(maxInFlight));
+    std::ranges::partial_sort(candidates, candidates.begin() + static_cast<std::ptrdiff_t>(slots),
+        [](const Candidate& a, const Candidate& b) { return a.priority < b.priority; });
+
+    const std::uint64_t jobEpoch = epoch.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < slots; ++i) {
+        const ChunkCoord coord = candidates[i].coord;
+
+        // The job's own references: these columns stay alive (and unchanged,
+        // see setBlockAt) while it runs, whatever the main thread does.
+        std::array<ColumnPtr, 9> neighbors{};
+        std::array<std::shared_ptr<const ColumnLight>, 9> neighborLights{};
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const auto n = static_cast<std::size_t>((dz + 1) * 3 + (dx + 1));
+                neighbors[n] = chunks.at({coord.x + dx, coord.z + dz});
+                neighborLights[n] = lights.at({coord.x + dx, coord.z + dz});
+            }
+
+        const std::uint64_t version = meshJobs.start(coord);
+        threadPool.enqueueFireAndForget([this, coord, version, jobEpoch, neighbors, neighborLights] {
+            Trace::Scope span("mesh column");
+            MeshResult result{coord, 0, jobEpoch, {}};
+            try {
+                ChunkNeighborhood neighborhood(neighbors[4].get());
+                for (int dz = -1; dz <= 1; ++dz)
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const auto n = static_cast<std::size_t>((dz + 1) * 3 + (dx + 1));
+                        neighborhood.setNeighbor(dx, dz, neighbors[n].get());
+                        neighborhood.setLight(dx, dz, neighborLights[n].get());
+                    }
+                result.states = meshColumn(*neighbors[4], neighborhood, blockRegistry);
+                result.version = version;
+            } catch (const std::exception& e) {
+                // Version 0 never matches: the column is simply scheduled again.
+                std::cerr << "Failed to mesh chunk " << coord.x << ", " << coord.z
+                          << ": " << e.what() << std::endl;
+            }
+            std::lock_guard results(resultMutex);
+            meshResults.push_back(std::move(result));
+        });
+    }
+}
+

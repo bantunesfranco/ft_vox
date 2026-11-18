@@ -1,68 +1,164 @@
 #ifndef APP_HPP
 #define APP_HPP
 
-#include "Engine.hpp"
-#include "BlockSystem.hpp"
-#include "World.hpp"
+#include <array>
+#include <cstdint>
 
-struct HighlightedBlock {
-	glm::vec3 highlightedBlockPos;
-	GLuint highlightVAO;
-	GLuint highlightVBO;
-	GLuint highlightIBO;
-	bool isHighlighted;
-};
+#include "Block.hpp"
+#include "BlockSystem.hpp"
+#include "Engine.hpp"
+#include "Gamestate.hpp"
+#include "PlayerPhysics.hpp"
+#include "UI.hpp"
+#include "World.hpp"
+#include "GameSession.hpp"
+#include "GameServer.hpp"
+#include "FrameProfiler.hpp"
+#include "RegionStore.hpp"
+#include "TimeOfDay.hpp"
+#include "WorldStore.hpp"
+#include <filesystem>
+#include <optional>
+#include <string>
 
 class App : public Engine
 {
 	public:
 		App(int32_t width, int32_t height, const char *title, std::map<settings_t, bool>& settings);
-		~App();
+		// Ends any session first: it borrows `world`, which is declared after it
+		// and would otherwise be destroyed before it.
+		~App() override { endSession(); }
 		App(const App&) = delete;
 		App& operator=(const App&) = delete;
 
 		void	run() override;
+		// ft_vox --bench: scripted singleplayer flight with a timing report.
+		// `edits` (--bench-edits): hovers at spawn instead, placing and breaking
+		// torches nearby, so the report shows what edits cost.
+		void	enableBenchmark(double seconds, glm::vec2 startXZ = {8.0f, 8.0f}, std::uint32_t ticks = 6000,
+		                        bool edits = false);
+
 		void	terminate() override;
 		void	destroyBlock();
 		void	placeBlock();
+		void	forwardPressed();       // W pressed: double tap starts sprinting
+		void	toggleFlyMode();
+		void	jump();
+		void	updateFluidFog();
 
-		void	toggleFullscreen();
-		void	toggleSpeedBoost();
-
-		bool	showWireframe;
-		bool	focused;
-		GLuint textureArray;
-		std::array<GLuint, 256> textureIndices;
-		World world;
-		BlockSystem blockSystem;
-		std::unique_ptr<ThreadPool> threadPool;
-
-		HighlightedBlock highlightedBlock;
-
+		void togglePauseMenu();
+		void toggleInventoryMenu();
+		void selectHotbarSlot(uint16_t slot);
+		void cycleHotbar(int delta);
+		void clickInventorySlot(int slot, bool secondaryClick);
+		uint16_t selectedHotbarSlot() const;
+		void toggleWireframeDebug();
+		bool isInGame() const;
+		bool wantsMouseCapture() const;
+		bool wantsKeyboardCapture() const;
 
 	private:
 		void	setCallbackFunctions() const;
-		void	loadTextures();
-		void	renderChunk(const Chunk& chunk, const WorldUBO& worldUbo, GLuint ubo, RenderType type) const;
 
-		static void	queueVisibleChunksAO(World& world, const std::vector<std::pair<glm::ivec2, Chunk*>>& chunksToCalcAO, ThreadPool& threadPool);
-		void setupHighlightCube();
-		void cleanupHighlightCube();
-		void updateBlockHighlight();
-		void renderBlockHighlight();
-		static void calcChunkAO(const glm::ivec2& coord, Chunk& chunk, const World& world);
-		static void	uploadChunk(const Chunk& chunk, Chunk::ChunkRenderData& data);
+		bool    startSingleplayer(const WorldInfo& info);
+		void    startBenchmarkWorld();
+		void    refreshWorlds();
+		bool    startMultiplayer(const UiAction& action, bool hostLocally);
+		void    resetPlayerState();
+		void    endSession();
+		void    applySessionEvents();
+
+		void	loadTextures();
+		void	applyGameState();
+		void	applyUiAction(const UiAction& action);
+
+		// Declared before `session`: a hosted server outlives the session that
+		// connects to it (endSession() also tears them down in that order).
+		std::unique_ptr<HostedServer> hostedServer;
+		std::unique_ptr<GameSession> session;
+		std::string lastSessionError;
+
+		// Worlds on disk and the one being played (singleplayer).
+		std::filesystem::path savesDir{"saves"};
+		std::vector<WorldInfo> worlds;
+		int selectedWorld = -1;
+		std::unique_ptr<WorldLock> worldLock;
+		std::shared_ptr<RegionStore> regionStore;
+		std::optional<std::uint64_t> playingSeed;
+		std::unique_ptr<UI> ui;
+		std::unique_ptr<ThreadPool> threadPool;
+
+		GameStateController gameState;
+		World world;
+		BlockSystem blockSystem;
+
+		bool showWireframe{false};
+		GLuint textureAtlas{0};
+		GLuint guiAtlas{0};
+		PlayerPhysics::Sprint sprint;
+		bool flyMode = false;
+		bool grounded = false;
+		bool spawnInitialized = false;
+		bool jumpRequested = false;
+		glm::vec3 velocity{0.0f};          // walking physics (PlayerPhysics), unused when flying
+		std::array<float, 4> clearColor{0.075f, 0.33f, 0.61f, 1.0f};
+		glm::vec4 fluidFog{0.0f};
+		// Time of day (TimeOfDay ticks, fractional): loaded with a world,
+		// advanced while it is played, saved in its level.bin when left and
+		// every LocalSession::SAVE_INTERVAL of play (with the player).
+		double timeTicks = TimeOfDay::NEW_WORLD;
+		float  sinceTimeSaved = 0.0f;
+		void   saveTimeOfDay();                     // into playingWorld's level.bin
+		std::optional<WorldInfo> playingWorld;      // the singleplayer world being played          // fog of the block the eye is in (rgb, w = distance; 0 = none)
+		bool hasHighlightedBlock = false;
+		glm::ivec3 highlightedBlockPos{};
+
+		void	renderWorld(const World& _world);
+		void	processMeshUploads(World& _world);
+		void	updatePlayerMovement(bool acceptInput);
+		void	updateBlockHighlight();
+		void	renderBlockHighlight();
+		void	renderRemotePlayers();
+		void	runBenchmarkScript();
+		void	printBenchmarkMemory() const;
+		void	simulate();            // session, movement, clock: one frame of play (not in menus)
+		void	renderFrame();         // the 3D scene: UBO, sky, prune/build/upload, draw
+		[[nodiscard]] UiFrameModel buildUiModel() const;
+		void	saveScreenshot(const char* path) const;
+
+		static constexpr double BENCH_WARMUP = 8.0;     // seconds, not recorded
+		static constexpr double BENCH_SPEED  = 20.0;    // blocks per second
+		static constexpr std::uint64_t BENCH_SEED = 20261116;   // fixed: runs stay comparable
+		static constexpr double BENCH_EDIT_INTERVAL = 0.25;     // seconds between two edits (--bench-edits)
+		struct BenchmarkState {
+			bool   active    = false;
+			bool   recording = false;
+			bool   screenshotTaken = false;
+			double duration  = 30.0;
+			double start     = 0.0;
+			glm::vec2 startXZ{8.0f, 8.0f};
+			float  height    = 110.0f;   // eye height of the flight
+			std::uint32_t ticks = 6000;  // fixed time of day (noon): runs stay comparable
+			bool   edits     = false;    // hover and edit instead of flying
+			int    editsDone = 0;
+			BlockId replaced = AIR_BLOCK;   // what the torch being shown replaced
+		} bench;
+		void	runBenchmarkEdit(double t);
+		FrameProfiler profiler;
+		std::size_t   drawCalls = 0;   // meshes drawn this frame (in 2 multi-draw calls)
+
+		// renderWorld() scratch, kept to reuse the allocations every frame.
+		std::vector<DrawItem> opaqueBatch;
+		std::vector<DrawItem> transparentBatch;
+		std::vector<std::pair<float, DrawItem>> transparentSort;
+		void	collectNameTags(UiFrameModel& model) const;
+
 };
 
 void error_callback(int error, const char* description);
-void cursor_callback(GLFWwindow* window, double xpos, double ypos);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
-void mouse_bttn_callback(GLFWwindow* window, int button, int action, int mods);
-void resize_callback(GLFWwindow* window, int width, int height);
-
-void setupImGui(GLFWwindow* window);
-void renderImGui(const std::unique_ptr<Camera>& camera, bool showWireframe, float rgba[4], size_t chunkCount, size_t chunkRadius);
-
-
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 
 #endif

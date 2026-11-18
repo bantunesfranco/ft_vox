@@ -15,10 +15,11 @@ static void framebuffer_callback(GLFWwindow *window, int width, int height)
 }
 
 Engine::Engine(const int32_t width, const int32_t height, const char* title, std::map<settings_t, bool>& settings)
-	: window(nullptr), renderer(nullptr), camera(nullptr), fpsCounter(nullptr), settings{0, 0, 0, 1, 0, 0}
+	: window(nullptr), renderer(nullptr), camera(nullptr), settings{0, 0, 0, 1, 0, 0}
 {
 	if (!glfwInit())
 		throw EngineException(VOX_GLFWFAIL);
+	_glfwInitialized = true;
 
 	for (auto const& [key, val] : settings)
 		setSetting(key, val);
@@ -51,12 +52,17 @@ Engine::~Engine()
 
 void	Engine::terminate()
 {
+	// GPU resources must be released while the OpenGL context still exists.
+	renderer.reset();
 	if (window)
 	{
 		glfwDestroyWindow(window);
 		window = nullptr;
 	}
-	glfwTerminate();
+	if (_glfwInitialized) {
+		glfwTerminate();
+		_glfwInitialized = false;
+	}
 }
 
 void	Engine::setSetting(const int32_t setting, const bool value)
@@ -65,11 +71,57 @@ void	Engine::setSetting(const int32_t setting, const bool value)
 	settings[setting] = value;
 }
 
-bool	Engine::getSetting(const int32_t setting) const
+void Engine::toggleFullscreen()
 {
-	VOX_ASSERT(setting >= 0 && setting < VOX_SETTINGS_MAX, "Invalid setting");
-	return settings[setting];
+	if (!window)
+		return;
+	if (!settings[VOX_FULLSCREEN]) {
+		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+		const GLFWvidmode* mode = monitor ? glfwGetVideoMode(monitor) : nullptr;
+		if (!mode)
+			return;
+
+		glfwGetWindowPos(window, &_windowedX, &_windowedY);
+		glfwGetWindowSize(window, &_windowedWidth, &_windowedHeight);
+		glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+		settings[VOX_FULLSCREEN] = true;
+		_width = mode->width;
+		_height = mode->height;
+		return;
+	}
+
+	glfwSetWindowMonitor(
+		window,
+		nullptr,
+		_windowedX,
+		_windowedY,
+		_windowedWidth,
+		_windowedHeight,
+		GLFW_DONT_CARE
+	);
+	settings[VOX_FULLSCREEN] = false;
+	_width = _windowedWidth;
+	_height = _windowedHeight;
 }
+
+#ifndef NDEBUG
+// KHR_debug / GL 4.3 message callback (debug builds only). Prints to stderr.
+static void APIENTRY glDebugCallback(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* message, const void*) {
+	if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
+		return;
+	const char* t = "other";
+	switch (type) {
+		case GL_DEBUG_TYPE_ERROR:               t = "error"; break;
+		case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: t = "deprecated"; break;
+		case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  t = "undefined"; break;
+		case GL_DEBUG_TYPE_PORTABILITY:         t = "portability"; break;
+		case GL_DEBUG_TYPE_PERFORMANCE:         t = "performance"; break;
+		default: break;
+	}
+	const char* sev = severity == GL_DEBUG_SEVERITY_HIGH ? "high" : severity == GL_DEBUG_SEVERITY_MEDIUM ? "medium" : "low";
+	std::cerr << "[gl] " << t << ' ' << sev << ": " << (severity == GL_DEBUG_SEVERITY_HIGH ? "!! " : "") << message << std::endl;
+}
+#endif
 
 void Engine::initWindow(const int32_t width, const int32_t height, const char* title)
 {
@@ -84,17 +136,29 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 		glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	#endif
 	glfwWindowHint(GLFW_RESIZABLE, settings[VOX_RESIZE]);
+	#ifndef NDEBUG
+		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
+	#endif
 
 	_width = width;
 	_height = height;
+	_windowedWidth = width;
+	_windowedHeight = height;
 	window = glfwCreateWindow(width, height, title, settings[VOX_FULLSCREEN] ? glfwGetPrimaryMonitor() : nullptr, nullptr);
 	if (!window)
 		throw EngineException(VOX_WINFAIL);
 
-	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
 	glfwMakeContextCurrent(window);
 	gladLoadGL();
+	#ifndef NDEBUG
+		if (GLAD_GL_VERSION_4_3) {
+			glEnable(GL_DEBUG_OUTPUT);
+			glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+			glDebugMessageCallback(glDebugCallback, nullptr);
+		}
+	#endif
 	glfwSwapInterval(1);
 	glfwSetWindowUserPointer(window, (void*)this);
 	glfwSetFramebufferSizeCallback(window, framebuffer_callback);
@@ -104,125 +168,30 @@ void Engine::initWindow(const int32_t width, const int32_t height, const char* t
 
 }
 
+// Loads an RGBA texture with mipmaps. Throws (and leaks nothing) on failure.
 GLuint Engine::loadTexture(const char* path) {
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-	if (glGetError() != GL_NO_ERROR)
+	int width = 0, height = 0, channels = 0;
+	unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
+	if (!data)
 		throw EngineException(VOX_TEXTFAIL);
 
-    // Load texture image here
-    int width, height, channels;
-    unsigned char* data = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
-
-    if (!data)
-	{
-		throw EngineException(VOX_TEXTFAIL);
-	}
-
+	GLuint textureID = 0;
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glGenerateMipmap(GL_TEXTURE_2D);
 	stbi_image_free(data);
+	glGenerateMipmap(GL_TEXTURE_2D);
 
-	if (glGetError() != GL_NO_ERROR)
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	if (glGetError() != GL_NO_ERROR) {
+		glDeleteTextures(1, &textureID);
 		throw EngineException(VOX_TEXTFAIL);
-
-    // Set texture parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	if (glGetError() != GL_NO_ERROR)
-		throw EngineException(VOX_TEXTFAIL);
-
-    return textureID;
-}
-
-GLuint Engine::loadTextureArray(const std::vector<std::string>& paths, int& outWidth, int& outHeight) {
-	int width, height, channels;
-
-	stbi_uc* first = stbi_load(
-		paths[0].c_str(),
-		&width, &height,
-		&channels,
-		STBI_rgb_alpha
-	);
-
-	if (!first)
-		throw EngineException(VOX_TEXTFAIL);
-
-	outWidth  = width;
-	outHeight = height;
-
-	int maxDim = std::max(width, height);
-	GLsizei mipLevels = 1;
-	while (maxDim > 1) {
-		maxDim /= 2;
-		mipLevels++;
 	}
-
-	GLuint texArray;
-	glCreateTextures(GL_TEXTURE_2D_ARRAY, 1, &texArray);
-
-	glTextureStorage3D(
-		texArray,
-		mipLevels,
-		GL_RGBA8,
-		width, height,
-		static_cast<GLsizei>(paths.size())
-	);
-
-	glTextureSubImage3D(
-		texArray,
-		0,
-		0, 0, 0,
-		width, height,
-		1,
-		GL_RGBA,
-		GL_UNSIGNED_BYTE,
-		first
-	);
-
-	stbi_image_free(first);
-
-	for (size_t i = 1; i < paths.size(); ++i)
-	{
-		stbi_uc* data = stbi_load(
-			paths[i].c_str(),
-			&width, &height,
-			&channels,
-			STBI_rgb_alpha
-		);
-
-		if (!data)
-			throw EngineException(VOX_TEXTFAIL);
-
-		assert(width == outWidth && height == outHeight);
-
-		glTextureSubImage3D(
-			texArray,
-			0,
-			0, 0, static_cast<GLint>(i),
-			width, height,
-			1,
-			GL_RGBA,
-			GL_UNSIGNED_BYTE,
-			data
-		);
-
-		stbi_image_free(data);
-	}
-
-	glTextureParameteri(texArray, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTextureParameteri(texArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTextureParameteri(texArray, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTextureParameteri(texArray, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTextureParameteri(texArray, GL_TEXTURE_WRAP_R, GL_REPEAT);
-
-	glGenerateTextureMipmap(texArray);
-
-	return texArray;
+	return textureID;
 }
 
 void	Engine::toggleWireframe(const bool showWireframe)
@@ -234,40 +203,20 @@ void	Engine::toggleWireframe(const bool showWireframe)
     }
 }
 
-void Engine::toggleFullscreen(GLFWwindow* _window)
-{
-	if (!getSetting(VOX_FULLSCREEN)) {
-		// Enter fullscreen
-		GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-		const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-		glfwSetWindowMonitor(_window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
-		setSetting(VOX_FULLSCREEN, true);
-		_oldHeight = _height;
-		_oldWidth = _width;
-		_height = mode->height;
-		_width = mode->width;
-	} else {
-		// Exit fullscreen (return to windowed mode)
-		glfwSetWindowMonitor(_window, nullptr, 100, 100, _oldWidth, _oldHeight, GLFW_DONT_CARE);
-		setSetting(VOX_FULLSCREEN, false);
-		_height = _oldHeight;
-		_width = _oldWidth;
-	}
-}
-
 bool Engine::isKeyDown(const keys_t key) const
 {
-	return glfwGetKey(this->window, key);
+	return window && glfwGetKey(this->window, key) == GLFW_PRESS;
 }
 
 bool	Engine::windowIsOpen(GLFWwindow* window)
 {
-	return !glfwWindowShouldClose(window);
+	return window && !glfwWindowShouldClose(window);
 }
 
 void	Engine::closeWindow() const
 {
-	glfwSetWindowShouldClose(window, GLFW_TRUE);
+	if (window)
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
 void	Engine::setKeyCallback(const GLFWkeyfun callback) const

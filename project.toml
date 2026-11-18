@@ -1,0 +1,127 @@
+# forge manifest (spec 0.3). Mirrors CMakeLists.txt, engine/ and server/.
+
+[workspace]
+name    = "ft_vox"
+version = "1.0.0"
+c       = "11"
+cxx     = "20"
+
+# SIMD level for GLM and the engine (x86-64 only), like ENGINE_SIMD in CMake.
+# `--opt simd=sse2` builds a binary that runs on any x86-64 CPU.
+[option.simd]
+type          = "enum"
+values        = ["none", "sse2", "sse42", "avx", "avx2"]
+default       = "avx2"
+default.arm64 = "none"
+doc           = "SIMD level for GLM and engine code. avx2 needs Haswell/Zen or newer."
+
+[feature.simd.none]
+
+[feature.simd.sse2]
+when = { arch = "x86_64" }
+
+[feature.simd.sse42]
+when                  = { arch = "x86_64" }
+defines.public        = ["GLM_FORCE_SSE42"]
+flags.public.gcc_like = ["-msse4.2"]
+
+[feature.simd.avx]
+when                   = { arch = "x86_64" }
+defines.public         = ["GLM_FORCE_AVX"]
+flags.public.msvc_like = ["/arch:AVX"]
+flags.public.gcc_like  = ["-mavx"]
+
+[feature.simd.avx2]
+when                   = { arch = "x86_64" }
+defines.public         = ["GLM_FORCE_AVX2"]
+flags.public.msvc_like = ["/arch:AVX2"]
+flags.public.gcc_like  = ["-mavx2", "-mfma"]
+
+# Debug is optimized too (keeps debug info and asserts), so header-only GLM is fast.
+[profile.debug]
+opt = "speed"
+
+# Release has LTO by default; RelWithDebInfo gets it too, as in CMake.
+[profile.relwithdebinfo]
+lto = true
+
+[lib.engine]
+root                   = "engine"
+sources                = ["srcs/**/*.cpp"]
+include.public         = ["incs"]
+deps.public            = ["glad", "glfw", "glm", "stb"]
+system.public          = ["opengl", "threads"]
+system.windows         = ["winmm"]
+defines.public         = ["GLM_FORCE_INLINE", "GLM_ENABLE_EXPERIMENTAL"]
+defines.public.windows = ["NOMINMAX", "WIN32_LEAN_AND_MEAN"]
+defines.public.macos   = ["GL_SILENCE_DEPRECATION"]
+
+[lib.net]
+root                   = "server"
+sources                = ["srcs/**/*.cpp"]
+include.public         = ["incs"]
+system.public          = ["threads", "sockets"]
+defines.public.windows = ["_WIN32_WINNT=0x0A00", "WIN32_LEAN_AND_MEAN", "NOMINMAX"]
+warnings               = "high"
+
+[bin.ft_vox]
+sources            = ["srcs/**/*.cpp"]
+include            = ["incs"]
+deps               = ["engine", "net", "imgui"]
+warnings           = "high"
+warnings_as_errors = true
+defines.windows    = ["_CRT_SECURE_NO_WARNINGS"]
+system.windows     = ["psapi"]   # GetProcessMemoryInfo (ProcessMemory)
+# Generated terrain must be bit-identical on every build: no FMA contraction
+# (MSVC's default /fp:precise already guarantees it).
+flags.gcc_like     = ["-ffp-contract=off"]
+
+# Connects to a running server: `netclient_test <port>` (see tests/).
+[bin.netclient_test]
+sources            = ["tests/netclient_test.cpp"]
+deps               = ["net"]
+warnings           = "high"
+warnings_as_errors = true
+
+[dependency.glad]
+path           = "engine/vendor/glad"
+kind           = "sources"
+files          = ["src/glad.c"]
+include.public = ["include"]
+system.public  = ["dl"]
+
+# SIMD settings travel with GLM to everything that includes it (spec 10.5).
+[dependency.glm]
+git            = "https://github.com/g-truc/glm"
+rev            = "1.0.2"
+kind           = "header-only"
+include.public = ["."]
+features       = ["simd"]
+
+[dependency.stb]
+git            = "https://github.com/nothings/stb"
+rev            = "master"
+kind           = "header-only"
+include.public = ["."]
+
+[dependency.glfw]
+git           = "https://github.com/glfw/glfw"
+rev           = "3.4"
+kind          = "cmake"
+options       = { GLFW_BUILD_EXAMPLES = false, GLFW_BUILD_TESTS = false,
+                  GLFW_BUILD_DOCS = false, GLFW_INSTALL = false, BUILD_SHARED_LIBS = false }
+options.linux = { GLFW_BUILD_X11 = true, GLFW_BUILD_WAYLAND = false }
+expose        = { target = "glfw" }
+
+[dependency.imgui]
+git              = "https://github.com/ocornut/imgui"
+rev              = "v1.93.0"
+kind             = "sources"
+files            = ["imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp",
+                    "imgui_widgets.cpp", "imgui_demo.cpp",
+                    "backends/imgui_impl_glfw.cpp",
+                    "backends/imgui_impl_opengl3.cpp"]
+include.public   = [".", "backends"]
+deps.public      = ["glfw"]
+system.public    = ["opengl"]
+defines.macos    = ["GL_SILENCE_DEPRECATION"]

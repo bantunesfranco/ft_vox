@@ -1,193 +1,185 @@
 #ifndef WORLD_HPP
 #define WORLD_HPP
 
-#include "defines.hpp"
+#include <atomic>
+#include <condition_variable>
+#include <memory>
+#include <unordered_set>
+
+#include "Chunk.hpp"
+#include "ColumnJobTracker.hpp"
+#include "Frustum.hpp"
+#include "Light.hpp"
+#include "ChunkMesher.hpp"
 #include "ThreadPool.hpp"
-#include "Camera.hpp"
-#include "Terrain.hpp"
-#include "DynamicRenderDistance.hpp"
 
-#include <vector>
-#include <unordered_map>
-#include <functional>
+class RegionStore;
+namespace worldgen { class TerrainGenerator; }
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-using ChunkCoord = glm::ivec2;
-
-inline bool operator<(const ChunkCoord& a, const ChunkCoord& b) noexcept {
-	if (a.x != b.x) return a.x < b.x;
-	return a.y < b.y;
-}
-
-template <>
-struct std::hash<ChunkCoord>{
-	std::size_t operator()(const ChunkCoord& coord) const noexcept
-	{
-		return hash<int>()(coord.x) ^ (hash<int>()(coord.y) << 1);
-	}
-};
-
-typedef enum class Direction {
-    Front, Back, Left, Right, Top, Bottom
-} Direction;
-
-inline int floorDiv(const int x, const int d) {
-	int q = x / d;
-	if (const int r = x % d; r && ((r < 0) != (d < 0)))
-		--q;
-	return q;
-}
-
-class Frustum {
-	public:
-	    std::array<glm::vec4, 6> planes;
-
-	    void updateFrustum(const glm::mat4& proj, const glm::mat4& view) {
-	        glm::mat4 clip = proj * view;
-
-	        // Extract planes from the combined view-projection matrix
-	        planes[0] = glm::vec4(clip[0][3] - clip[0][0], clip[1][3] - clip[1][0], clip[2][3] - clip[2][0], clip[3][3] - clip[3][0]); // Right
-	        planes[1] = glm::vec4(clip[0][3] + clip[0][0], clip[1][3] + clip[1][0], clip[2][3] + clip[2][0], clip[3][3] + clip[3][0]); // Left
-	        planes[2] = glm::vec4(clip[0][3] + clip[0][1], clip[1][3] + clip[1][1], clip[2][3] + clip[2][1], clip[3][3] + clip[3][1]); // Bottom
-	        planes[3] = glm::vec4(clip[0][3] - clip[0][1], clip[1][3] - clip[1][1], clip[2][3] - clip[2][1], clip[3][3] - clip[3][1]); // Top
-	        planes[4] = glm::vec4(clip[0][3] - clip[0][2], clip[1][3] - clip[1][2], clip[2][3] - clip[2][2], clip[3][3] - clip[3][2]); // Far
-	        planes[5] = glm::vec4(clip[0][3] + clip[0][2], clip[1][3] + clip[1][2], clip[2][3] + clip[2][2], clip[3][3] + clip[3][2]); // Near
-
-	        // Normalize the planes
-    		for (auto& plane : planes) {
-    			plane /= glm::length(glm::vec3(plane));
-    		}
-	    }
-
-	    [[nodiscard]] bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const {
-    		for (const auto& plane : planes) {
-    			auto normal = glm::vec3(plane);
-    			const float distance = plane.w;
-
-    			// Compute the positive vertex (vertex most likely outside the plane)
-    			glm::vec3 positiveVertex = min;
-    			if (normal.x >= 0) positiveVertex.x = max.x;
-    			if (normal.y >= 0) positiveVertex.y = max.y;
-    			if (normal.z >= 0) positiveVertex.z = max.z;
-
-    			// If the positive vertex is outside, the box is fully outside
-    			if (glm::dot(normal, positiveVertex) + distance < 0)
-    				return false;
-    		}
-    		return true; // Inside or intersecting
-	    }
-};
-
-constexpr int MAX_FACES = Chunk::WIDTH * Chunk::HEIGHT * Chunk::DEPTH * 6;
-
-enum class ChunkState : uint8_t {
-	Unloaded,
-	Loading,
-	Loaded,
-	Meshing,
-	Unloading
-};
-
-enum class RenderType : uint8_t {
-	Air,
-	Opaque,
-	Transparent
-};
-
-struct WorldUBO {
-	glm::mat4 MVP;
-	glm::vec4 light;       // xyz = pos, w = radius
-	glm::vec4 cameraPos;   // xyz = pos, w = ambient
-};
-
-struct MaskEntry
-{
-	bool visible;
-	uint8_t blockType;
-};
-
-struct MeshTarget
-{
-	std::vector<Vertex>& vertices;
-	std::vector<uint32_t>& indices;
-};
-
-// Define the world as a collection of chunks
 class World {
-	public:
-		constexpr static int CHUNK_RADIUS_MIN = 14;
-		constexpr static int CHUNK_RADIUS_MAX = 16;
+public:
+	static constexpr int CHUNK_RADIUS = 16;
+	static constexpr int CHUNK_DIAMETER = CHUNK_RADIUS * 2 + 1;
+	static constexpr int CHUNK_LOAD_RADIUS = CHUNK_RADIUS + 1;
+	static constexpr int CHUNK_LOAD_DIAMETER = CHUNK_LOAD_RADIUS * 2 + 1;
+	// Columns get meshes this far out: a mesh needs the light of its 3x3,
+	// and each light needs its own 3x3 of loaded columns.
+	static constexpr int CHUNK_MESH_RADIUS = CHUNK_LOAD_RADIUS - 2;
 
-		Frustum frustum{};
-		WorldUBO worldUBO{};
-		GLuint ubo;
+	World();   // generates with seed 0 until open() is called
 
-		std::mutex chunk_mutex;
-		std::mutex state_mutex;
+	void updateChunks(
+		const glm::vec3& playerPos,
+		ThreadPool& threadPool
+	);
 
-		DynamicRenderDistance renderDistanceManager;
+	// Meshing runs on `threadPool`: this applies finished meshes (a bounded
+	// number per frame) and starts jobs for columns that need one, nearest /
+	// in view first. Main thread only.
+	void buildRenderStates(const glm::vec3& playerPosition, const glm::vec3& playerForward,
+	                       ThreadPool& threadPool);
+	std::vector<GpuMesh> pruneRenderStates();
+	[[nodiscard]] bool getBlockAt(const glm::ivec3& worldPos, BlockId& block) const;
+	bool setBlockAt(const glm::ivec3& worldPos, BlockId block);
+	[[nodiscard]] bool getSurfaceHeight(int worldX, int worldZ, int& height) const;
 
-		World(std::array<uint32_t, 256>& indices);
-		~World() = default;
-		World(const World&) = delete;
-		World& operator=(const World&) = delete;
+	const BlockRegistry& getBlockRegistry() const noexcept;
 
-		void updateChunks(const glm::vec3& playerPos, ThreadPool& threadPool);
-		void updateRenderDistance(float currentFPS);
-		int	 getChunkRadius() const { return renderDistanceManager.getRadius(); }
-		void generateChunkGreedyMesh(Chunk& chunk, const ChunkCoord& coord);
-		bool isBlockActiveWorld(int wx, int wy, int wz) const;
-		bool isBoxInFrustum(const glm::vec3& min, const glm::vec3& max) const;
-		void updateFrustum(const glm::mat4& proj_mat, const glm::mat4& view_mat);
-		std::unordered_map<ChunkCoord, Chunk>& getChunks() { return chunks; }
-		const std::unordered_map<ChunkCoord, Chunk>& getChunks() const { return chunks; }
-		std::unordered_map<ChunkCoord, std::atomic<ChunkState>>& getChunkStates() { return chunkStates; }
-		const std::unordered_map<ChunkCoord, std::atomic<ChunkState>>& getChunkStates() const { return chunkStates; }
+	// --- light ---------------------------------------------------------------
+	// A column's light, computed in the background once its 3x3 columns are
+	// loaded, recomputed after edits nearby (null until the first one lands).
+	[[nodiscard]] std::shared_ptr<const ColumnLight> lightOf(const ChunkCoord& coord) const;
+	// No light job running or waiting: every column with a full 3x3 has
+	// light matching its current blocks (tests).
+	[[nodiscard]] bool lightIdle() const;
+	// Light and mesh jobs running now (tests).
+	struct JobCounts {
+		std::size_t lightInFlight = 0;
+		std::size_t meshInFlight  = 0;
+	};
+	[[nodiscard]] JobCounts jobCounts() const;
 
-		void runGreedyPass(
-			RenderType targetType,
-			RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-			uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-			MeshTarget target
-		) const;
+	[[nodiscard]]
+	const std::vector<ChunkRenderState>& getRenderStates() const noexcept;
 
-		static void buildMask(
-			RenderType targetType,
-			int axis,
-			RenderType renderType[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-			uint8_t blockTypes[Chunk::WIDTH + 2][Chunk::HEIGHT + 2][Chunk::DEPTH + 2],
-			const int dims[3],
-			int x[3], const int q[3],
-			std::vector<MaskEntry>& mask
-		);
+	[[nodiscard]]
+	std::vector<ChunkRenderState>& getRenderStates() noexcept;
 
-		static void generateTerrain(Chunk& chunk, const ChunkCoord& coord);
+	// --- persistence ---------------------------------------------------------
+	// Starts a world: forgets every column (like clear()), then generates with
+	// `seed` and loads / saves whole columns through `store`. A null store
+	// never saves (multiplayer client, benchmark). Call flush() first when the
+	// previous world had a store. Main thread.
+	void open(std::uint64_t seed, std::shared_ptr<RegionStore> store);
+	// Saves every dirty column and waits until all saves (including those
+	// started by unloading) are on disk.
+	void flush(ThreadPool& threadPool);
+	[[nodiscard]] std::uint64_t seed() const noexcept { return worldSeed; }
+	// Where players start: a land position (x, z) from the generator.
+	[[nodiscard]] glm::ivec2 spawnPoint() const;
+	// Generated ground height at (x, z), loaded or not (before caves / structures).
+	[[nodiscard]] int generatedSurfaceHeight(int x, int z) const;
+	~World();
 
-	private:
-		ChunkCoord playerChunk = {std::numeric_limits<int>::max(),std::numeric_limits<int>::max()};
-		std::array<uint32_t, 256>& textureIndices;
-		std::unordered_map<ChunkCoord, Chunk> chunks;
-		std::unordered_map<ChunkCoord, std::atomic<ChunkState>> chunkStates;
+	// --- multiplayer hooks (main thread) ------------------------------------
+	// Forgets every column. GPU meshes retire through pruneRenderStates(), and
+	// generation jobs still running finish into the void.
+	void clear();
+	// Inserts (or replaces) a column built elsewhere (received from a server).
+	void adoptColumn(std::unique_ptr<ChunkColumn> column);
+	// Removes a column; its meshes retire through pruneRenderStates().
+	void dropColumn(const ChunkCoord& coord);
 
+	// What the world holds in memory, for the benchmark report.
+	struct MemoryStats {
+		std::size_t columns       = 0;
+		std::size_t blockBytes    = 0;   // block storage of every column
+		std::size_t lightBytes    = 0;   // heap of every stored light
+		std::size_t meshCpuBytes  = 0;   // vertex capacity of every render state's meshes (no indices since the shared buffer)
+	};
+	[[nodiscard]] MemoryStats memoryStats() const;
+
+	Frustum frustum{};
+
+private:
+	glm::ivec2 playerChunk{
+		std::numeric_limits<int>::max(),
+		std::numeric_limits<int>::max()
+	};
+
+	// Columns are shared with mesh jobs, which hold their 3x3 neighbourhood
+	// while they run. Writers copy a column that a job still holds before
+	// changing it (see setBlockAt), so jobs read without any lock.
+	using ColumnPtr = std::shared_ptr<ChunkColumn>;
+	std::unordered_map<ChunkCoord, ColumnPtr> chunks;
+	std::unordered_set<ChunkCoord> generatingChunks;
+
+	// Mesh jobs: `current()` means the render states match the column's
+	// blocks and light. Main thread only.
+	ColumnJobTracker meshJobs;
+
+	// Worker -> main thread.
+	struct MeshResult {
+		ChunkCoord    coord;
+		std::uint64_t version = 0;
+		std::uint64_t epoch   = 0;
+		std::vector<ChunkRenderState> states;
+	};
+	mutable std::mutex      resultMutex;
+	std::vector<MeshResult> meshResults;
+	std::vector<MeshResult> readyResults;        // drained, waiting for their frame budget
+
+	// Light: one ColumnLight per column, computed by a job from the column's
+	// 3x3 window (so it depends on nearby blocks only, never on load order).
+	// Under chunk_mutex.
+	// `current()` means the stored light was computed for the column's present 3x3 blocks.
+	ColumnJobTracker lightJobs;
+	std::unordered_map<ChunkCoord, std::shared_ptr<const ColumnLight>> lights;
+	struct LightResult {
+		ChunkCoord    coord;
+		std::uint64_t version = 0;
+		std::uint64_t epoch   = 0;
+		std::shared_ptr<const ColumnLight> light;     // null: failed, scheduled again
+	};
+	std::vector<LightResult> lightResults;          // worker -> main thread, under resultMutex
+
+	void applyLightResults();
+	void scheduleLightJobs(const glm::vec3& playerPosition, ThreadPool& threadPool);
+	// The blocks of `coord` changed: the light of every column whose window
+	// holds it (the 3x3 around it) is out of date. chunk_mutex held.
+	void invalidateLightLocked(const ChunkCoord& coord);
+	// The 3x3 around `coord` is loaded: its light can be computed. chunk_mutex held.
+	[[nodiscard]] bool windowLoadedLocked(const ChunkCoord& coord) const;
+
+	void applyMeshResults();
+	void scheduleMeshJobs(const glm::vec3& playerPosition, const glm::vec3& playerForward,
+	                      ThreadPool& threadPool);
+	void replaceRenderStates(const ChunkCoord& coord, std::vector<ChunkRenderState> states);
+	std::vector<ChunkRenderState> renderStates;
+	std::vector<GpuMesh> pendingRetiredMeshes;
+
+	mutable std::mutex chunk_mutex;
+	// Bumped by clear(): a generation job started under another epoch drops its result.
+	std::atomic<std::uint64_t> epoch{0};
+
+	// Persistence. `dirty`: columns generated (not loaded) or edited since
+	// their last save, under chunk_mutex.
+	std::uint64_t worldSeed = 0;
+	std::shared_ptr<const worldgen::TerrainGenerator> generator;
+	std::shared_ptr<RegionStore> store;
+	std::unordered_set<ChunkCoord> dirty;
+	std::mutex saveMutex;
+	std::condition_variable saveDone;
+	std::size_t savesInFlight = 0;
+	// Stages `column` in the store (loads see it from now on) and, unless a
+	// save of it is already queued, queues one. chunk_mutex held.
+	void enqueueSave(ThreadPool& threadPool, ColumnPtr column);
+
+	// Marks `coord` for remeshing; its current mesh stays visible until the
+	// new one replaces it. chunk_mutex held.
+	void invalidateMeshLocked(const ChunkCoord& coord);
+
+	BlockRegistry blockRegistry{};
 };
-
-template<typename F>
-void forEachChunkSpiral(const ChunkCoord& center, const int radius, F&& fn)
-{
-	for (int r = 0; r <= radius; ++r) {
-		for (int dx = -r; dx <= r; ++dx) {
-			for (int dz = -r; dz <= r; ++dz) {
-				if (std::abs(dx) != r && std::abs(dz) != r)
-					continue;
-				if (glm::length(glm::vec2(dx, dz)) > radius + 1)
-					continue;
-				fn(center + ChunkCoord(dx, dz));
-			}
-		}
-	}
-}
-
 
 #endif

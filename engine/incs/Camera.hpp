@@ -15,26 +15,19 @@ class Camera
 		glm::vec3	pos;
 		glm::vec3	dir;
 		glm::vec3	up;
-		float		pitch;
-		float		yaw;
-		double		mousePos[2]{};
-		float		fov;
+		float		pitch{};
+		float		yaw{};
+		float		fov;          // vertical, degrees (70 = Minecraft's default; 90 looked fish-eyed)
 		glm::mat4	view{};
 		glm::mat4	proj{};
 
 		float baseMoveSpeed;
 		float baseRotSpeed;
-		float moveSpeed;
-		float rotSpeed;
-
-		glm::vec3 lastPosition{};
-		glm::vec3 lastDirection{};
-		float rotationThreshold;
-		float movementThreshold;
-
-		void setCameraPosition(const glm::vec3& newPos);
-		void setCameraDirection(const glm::vec3& newDir);
-		[[nodiscard]] bool hasMovedOrRotated() const;
+		float moveSpeed{};
+		float rotSpeed{};
 };
+
+// Camera::dir for a yaw and pitch in degrees.
+[[nodiscard]] glm::vec3 lookDirection(float yawDegrees, float pitchDegrees);
 
 #endif

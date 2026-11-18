@@ -1,171 +1,140 @@
 #include "BlockSystem.hpp"
-#include <cmath>
+
+#include "PlayerCollision.hpp"
+
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
-#define GLM_ENABLE_EXPERIMENTAL
-#include <iostream>
+BlockSystem::BlockSystem(const float reachDistance) noexcept : reach(reachDistance) {}
 
-#include "glm/gtx/norm.hpp"
+BlockRaycastHit BlockSystem::raycast(
+	const glm::vec3& origin,
+	const glm::vec3& direction,
+	const World& world
+) const {
+	BlockRaycastHit hit{};
+	if (glm::dot(direction, direction) < 1e-8f || reach <= 0.0f)
+		return hit;
 
-BlockSystem::BlockSystem(const float maxReachDistance)
-    : maxReachDistance(maxReachDistance),
-    lastHit{glm::ivec3(0), glm::ivec3(0), BlockFace::TOP, 0.0f, false}
-{
+	const glm::vec3 ray = glm::normalize(direction);
+	glm::ivec3 cell{
+		static_cast<int>(std::floor(origin.x)),
+		static_cast<int>(std::floor(origin.y)),
+		static_cast<int>(std::floor(origin.z))
+	};
+	glm::ivec3 previous = cell;
+
+	const glm::ivec3 step{
+		ray.x > 0.0f ? 1 : (ray.x < 0.0f ? -1 : 0),
+		ray.y > 0.0f ? 1 : (ray.y < 0.0f ? -1 : 0),
+		ray.z > 0.0f ? 1 : (ray.z < 0.0f ? -1 : 0)
+	};
+	const auto deltaFor = [](const float component) {
+		return component == 0.0f
+			? std::numeric_limits<float>::infinity()
+			: std::abs(1.0f / component);
+	};
+	const glm::vec3 delta{deltaFor(ray.x), deltaFor(ray.y), deltaFor(ray.z)};
+	const auto firstBoundary = [](const float position, const int block, const float component) {
+		if (component == 0.0f)
+			return std::numeric_limits<float>::infinity();
+		const float boundary = static_cast<float>(block + (component > 0.0f ? 1 : 0));
+		return (boundary - position) / component;
+	};
+	glm::vec3 next{
+		firstBoundary(origin.x, cell.x, ray.x),
+		firstBoundary(origin.y, cell.y, ray.y),
+		firstBoundary(origin.z, cell.z, ray.z)
+	};
+
+	float distance = 0.0f;
+	while (distance <= reach) {
+		BlockId block = AIR_BLOCK;
+		if (!world.getBlockAt(cell, block))
+			return hit;
+		if (block != AIR_BLOCK && block != WATER_BLOCK && block != LAVA_BLOCK) {   // fluids are looked through
+			hit.blockPos = cell;
+			hit.adjacentPos = previous;
+			hit.distance = distance;
+			hit.valid = true;
+			return hit;
+		}
+
+		previous = cell;
+		if (next.x <= next.y && next.x <= next.z) {
+			distance = next.x;
+			next.x += delta.x;
+			cell.x += step.x;
+		} else if (next.y <= next.z) {
+			distance = next.y;
+			next.y += delta.y;
+			cell.y += step.y;
+		} else {
+			distance = next.z;
+			next.z += delta.z;
+			cell.z += step.z;
+		}
+	}
+
+	return hit;
 }
 
-glm::ivec3 BlockSystem::getChunkCoords(const glm::ivec3& worldPos)
-{
-    return {
-        floorDiv(worldPos.x, Chunk::WIDTH),
-        floorDiv(worldPos.y, Chunk::HEIGHT),
-        floorDiv(worldPos.z, Chunk::DEPTH)
-    };
+bool BlockSystem::removeBlock(
+	const glm::vec3& origin,
+	const glm::vec3& direction,
+	World& world,
+	BlockId* removedBlock
+) const {
+	const BlockRaycastHit hit = raycast(origin, direction, world);
+	return hit.valid && removeBlock(hit.blockPos, world, removedBlock);
 }
 
-glm::ivec3 BlockSystem::getLocalCoords(const glm::ivec3& worldPos)
-{
-    return {
-        ((worldPos.x % Chunk::WIDTH) + Chunk::WIDTH) % Chunk::WIDTH,
-        ((worldPos.y % Chunk::HEIGHT) + Chunk::HEIGHT) % Chunk::HEIGHT,
-        ((worldPos.z % Chunk::DEPTH) + Chunk::DEPTH) % Chunk::DEPTH
-    };
+bool BlockSystem::removeBlock(
+	const glm::ivec3& blockPosition,
+	World& world,
+	BlockId* removedBlock
+) const {
+	BlockId block = AIR_BLOCK;
+	if (!world.getBlockAt(blockPosition, block) || !breakAllowed(world.getBlockRegistry(), block))
+		return false;                                   // unbreakable, as on the server
+	if (!world.setBlockAt(blockPosition, AIR_BLOCK))
+		return false;
+	if (removedBlock)
+		*removedBlock = block;
+	return true;
 }
 
-Voxel BlockSystem::getVoxelFromWorld(const glm::ivec3& worldPos, World& world)
-{
-    const int chunkX = floorDiv(worldPos.x, Chunk::WIDTH);
-    const int chunkZ = floorDiv(worldPos.z, Chunk::DEPTH);
-    const glm::ivec2 key(chunkX, chunkZ);
+bool BlockSystem::placeBlock(
+	const glm::vec3& origin,
+	const glm::vec3& direction,
+	const BlockId block,
+	World& world
+) const {
+	if (block == AIR_BLOCK || block >= BLOCK_TYPE_COUNT)
+		return false;
 
-    std::lock_guard lock(world.chunk_mutex);
+	const BlockRaycastHit hit = raycast(origin, direction, world);
+	if (!hit.valid)
+		return false;
+	const glm::ivec3 cameraCell{
+		static_cast<int>(std::floor(origin.x)),
+		static_cast<int>(std::floor(origin.y)),
+		static_cast<int>(std::floor(origin.z))
+	};
+	if (hit.adjacentPos == cameraCell)
+		return false;
 
-    const auto& chunks = world.getChunks();
-    const auto it = chunks.find(key);
-    if (it == chunks.end())
-        return 0;
+	BlockId existing = AIR_BLOCK;
+	if (!world.getBlockAt(hit.adjacentPos, existing) || !world.getBlockRegistry().get(existing).replaceable)
+		return false;
+	if (PlayerCollision::overlapsBlock(origin, hit.adjacentPos))
+		return false;
+	BlockId below = AIR_BLOCK;
+	if (!world.getBlockAt(hit.adjacentPos - glm::ivec3(0, 1, 0), below))
+		below = AIR_BLOCK;                              // not loaded: no support
+	if (!placementAllowed(world.getBlockRegistry(), block, below))
+		return false;                                   // a torch needs solid ground
 
-    const int localX = ((worldPos.x % Chunk::WIDTH) + Chunk::WIDTH) % Chunk::WIDTH;
-    const int localZ = ((worldPos.z % Chunk::DEPTH) + Chunk::DEPTH) % Chunk::DEPTH;
-
-    return it->second.getVoxel(localX, worldPos.y, localZ);
-}
-
-void BlockSystem::setVoxelInWorld(const glm::ivec3& worldPos, const Voxel voxel, World& world)
-{
-    const int chunkX = floorDiv(worldPos.x, Chunk::WIDTH);
-    const int chunkZ = floorDiv(worldPos.z, Chunk::DEPTH);
-    const ChunkCoord key(chunkX, chunkZ);
-
-    const int localX = ((worldPos.x % Chunk::WIDTH) + Chunk::WIDTH) % Chunk::WIDTH;
-    const int localZ = ((worldPos.z % Chunk::DEPTH) + Chunk::DEPTH) % Chunk::DEPTH;
-
-    std::lock_guard lock(world.chunk_mutex);
-
-    auto& chunks = world.getChunks();
-    const auto it = chunks.find(key);
-    if (it == chunks.end())
-        return;
-
-    it->second.setVoxel(localX, ((worldPos.y % Chunk::HEIGHT) + Chunk::HEIGHT) % Chunk::HEIGHT, localZ, voxel);
-    it->second.aoCalculated = false;
-
-    // Mark adjacent chunks dirty if boundary block
-    auto markDirty = [&chunks](const ChunkCoord& coord) {
-        if (const auto iter = chunks.find(coord); iter != chunks.end()) {
-            iter->second.markMeshDirty();
-            iter->second.aoCalculated = false;
-        }
-    };
-
-    if (localX == 0) markDirty(ChunkCoord(chunkX - 1, chunkZ));
-    if (localX == Chunk::WIDTH - 1) markDirty(ChunkCoord(chunkX + 1, chunkZ));
-    if (localZ == 0) markDirty(ChunkCoord(chunkX, chunkZ - 1));
-    if (localZ == Chunk::DEPTH - 1) markDirty(ChunkCoord(chunkX, chunkZ + 1));
-}
-
-inline glm::ivec3 BlockSystem::getAdjacentBlockPos(const glm::ivec3& hitPos, const BlockFace face)
-{
-    static constexpr glm::ivec3 offsets[] = {
-        {0, 1, 0},   // TOP
-        {0, -1, 0},  // BOTTOM
-        {0, 0, 1},   // FRONT
-        {0, 0, -1},  // BACK
-        {1, 0, 0},   // RIGHT
-        {-1, 0, 0}   // LEFT
-    };
-    return hitPos + offsets[static_cast<int>(face)];
-}
-
-inline BlockFace BlockSystem::detectFace(const glm::ivec3& blockPos, const glm::vec3& hitPoint)
-{
-    const glm::vec3 offset = hitPoint - (glm::vec3(blockPos) + 0.5f);
-    const float absX = std::abs(offset.x);
-    const float absY = std::abs(offset.y);
-    const float absZ = std::abs(offset.z);
-
-    if (absX > absY && absX > absZ)
-        return (offset.x > 0) ? BlockFace::LEFT : BlockFace::RIGHT;
-    if (absY > absZ)
-        return (offset.y > 0) ? BlockFace::TOP : BlockFace::BOTTOM;
-    return (offset.z > 0) ? BlockFace::FRONT : BlockFace::BACK;
-}
-
-RaycastHit BlockSystem::raycastBlocks(const glm::vec3& rayOrigin, const glm::vec3& rayDirection, World& world)
-{
-    RaycastHit hit{glm::ivec3(0), glm::ivec3(0), BlockFace::TOP, maxReachDistance + 1.0f, false};
-
-    const glm::vec3 rayDir = glm::normalize(rayDirection);
-    constexpr float stepSize = 0.05f;
-
-    for (float distance = 0.0f; distance <= maxReachDistance; distance += stepSize) {
-        const glm::vec3 rayPos = rayOrigin + rayDir * distance;
-        const auto blockPos = glm::ivec3(glm::floor(rayPos));
-
-        if (getVoxelFromWorld(blockPos, world) != 0) {
-            hit.blockPos = blockPos;
-            hit.distance = distance;
-            hit.face = detectFace(blockPos, rayPos);
-            hit.adjacentPos = getAdjacentBlockPos(blockPos, hit.face);
-            hit.isValid = true;
-            lastHit = hit;
-            return hit;
-        }
-    }
-
-    lastHit = hit;
-    return hit;
-}
-
-bool BlockSystem::placeBlock(const glm::vec3& rayOrigin, const glm::vec3& rayDirection, World& world, const Voxel blockType)
-{
-    const RaycastHit hit = raycastBlocks(rayOrigin, rayDirection, world);
-    if (!hit.isValid)
-        return false;
-
-    const glm::ivec3 placePos = hit.adjacentPos;
-
-    // Early exits for invalid positions
-    if (placePos.y < 0 || placePos.y >= Chunk::HEIGHT)
-        return false;
-
-    if (getVoxelFromWorld(placePos, world) != 0)
-        return false;
-
-    // Check collision with player (use squared distance to avoid sqrt)
-    if (glm::distance2(glm::vec3(placePos), rayOrigin) < 1.5f)
-        return false;
-
-    setVoxelInWorld(placePos, blockType, world);
-    return true;
-}
-
-bool BlockSystem::destroyBlock(const glm::vec3& rayOrigin, const glm::vec3& rayDirection, World& world)
-{
-    const RaycastHit hit = raycastBlocks(rayOrigin, rayDirection, world);
-
-    if (!hit.isValid)
-        return false;
-
-    setVoxelInWorld(hit.blockPos, 0, world);
-    return true;
+	return world.setBlockAt(hit.adjacentPos, block);
 }

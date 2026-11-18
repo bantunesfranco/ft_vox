@@ -1,19 +1,6 @@
 #ifndef DEFINES_HPP
 #define DEFINES_HPP
 
-#include <glm/glm.hpp>
-
-typedef int				GLint;
-typedef unsigned int	GLuint;
-
-typedef struct Vertex {
-    glm::vec3 position;    // 12
-    glm::vec2 uv;		   // 8
-    uint16_t texIndex;     // 2
-    uint8_t normal;        // 1
-    uint8_t ao;            // 1
-} Vertex;
-
 typedef enum settings
 {
 	VOX_STRETCH_IMAGE = 0,	// Image resize on window resize. Default: false
