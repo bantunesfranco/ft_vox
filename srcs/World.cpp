@@ -108,11 +108,16 @@ void World::applyLightResults() {
         // Dropped when the column was unloaded or its blocks changed meanwhile (a new job follows).
         if (!lightJobs.finish(result.coord, result.version, result.light && chunks.contains(result.coord)))
             continue;
-        lights[result.coord] = std::move(result.light);
-        // Its faces and its neighbours' border faces show this light.
+        // Its faces and its neighbours' border faces show this light: remesh
+        // those that show a cell whose light changed (an edit changes the
+        // light within 15 blocks, so the outer columns often stay as they are).
+        auto& stored = lights[result.coord];
+        const std::uint16_t changed = lightChangeMask(stored.get(), *result.light);
+        stored = std::move(result.light);
         for (int dz = -1; dz <= 1; ++dz)
             for (int dx = -1; dx <= 1; ++dx)
-                invalidateMeshLocked({result.coord.x + dx, result.coord.z + dz});
+                if (changed & (1u << ((dz + 1) * 3 + (dx + 1))))
+                    invalidateMeshLocked({result.coord.x + dx, result.coord.z + dz});
     }
 }
 

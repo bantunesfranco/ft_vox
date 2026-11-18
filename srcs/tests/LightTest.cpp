@@ -173,3 +173,40 @@ SELFTEST(Light, speed) {
 	CHECK(total / RUNS <= 0.5);
 #endif
 }
+
+namespace {
+constexpr std::uint16_t maskOf(const int dx, const int dz) { return static_cast<std::uint16_t>(1u << ((dz + 1) * 3 + (dx + 1))); }
+}
+
+SELFTEST(Light, change_mask_none_or_first) {
+	LitWorld w;
+	const auto a = w.light(), b = w.light();
+	CHECK_EQ(lightChangeMask(nullptr, *a), 0x1FF);       // first light: every mesh around shows it
+	CHECK_EQ(lightChangeMask(a.get(), *b), 0);           // same blocks, same light: nothing to remesh
+}
+
+SELFTEST(Light, change_mask_inside) {
+	LitWorld w;
+	w.hollowBox(6, FLOOR - 6, 6, 9, FLOOR - 4, 9);       // sealed, far from the borders
+	const auto before = w.light();
+	w.set(7, FLOOR - 5, 7, GLOWSTONE);
+	const auto after = w.light();
+	CHECK_EQ(lightChangeMask(before.get(), *after), maskOf(0, 0));
+}
+
+SELFTEST(Light, change_mask_border_and_corner) {
+	LitWorld w;
+	w.hollowBox(12, FLOOR - 6, 6, 15, FLOOR - 4, 9);     // reaches the east border (x = 15)
+	const auto before = w.light();
+	w.set(14, FLOOR - 5, 7, GLOWSTONE);
+	const auto east = w.light();
+	CHECK_EQ(lightChangeMask(before.get(), *east), maskOf(0, 0) | maskOf(1, 0));
+
+	LitWorld c;
+	c.hollowBox(0, FLOOR - 6, 0, 3, FLOOR - 4, 3);       // the north-west corner (x = 0, z = 0)
+	const auto dark = c.light();
+	c.set(1, FLOOR - 5, 1, GLOWSTONE);
+	const auto lit = c.light();
+	CHECK_EQ(lightChangeMask(dark.get(), *lit),
+	         maskOf(0, 0) | maskOf(-1, 0) | maskOf(0, -1) | maskOf(-1, -1));
+}

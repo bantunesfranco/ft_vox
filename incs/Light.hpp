@@ -41,6 +41,7 @@ public:
 
 private:
 	friend std::shared_ptr<const ColumnLight> computeLight(const std::array<const ChunkColumn*, 9>&, const BlockRegistry&);
+	friend std::uint16_t lightChangeMask(const ColumnLight*, const ColumnLight&) noexcept;
 
 	struct Section {
 		std::uint8_t uniform = FULL_SKY;                                        // when `values` is null
@@ -54,5 +55,13 @@ private:
 using ColumnWindow = std::array<const ChunkColumn*, 9>;
 
 [[nodiscard]] std::shared_ptr<const ColumnLight> computeLight(const ColumnWindow& window, const BlockRegistry& registry);
+
+// Which meshes show a cell whose light differs between `before` and `after`
+// (a column's light, recomputed): bit (dz + 1) * 3 + (dx + 1) for the column
+// at (dx, dz) from it. A mesh reads its own column's light and the one-cell
+// border of its neighbours', so a change at local x = 0 also concerns the
+// west neighbour, one on the vertical edge x = 0, z = 0 the north-west one.
+// Null `before` (no light yet): all nine.
+[[nodiscard]] std::uint16_t lightChangeMask(const ColumnLight* before, const ColumnLight& after) noexcept;
 
 #endif /* LIGHT_HPP */

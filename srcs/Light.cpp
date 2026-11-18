@@ -320,3 +320,33 @@ std::shared_ptr<const ColumnLight> computeLight(const ColumnWindow& window, cons
 	}
 	return light;
 }
+
+std::uint16_t lightChangeMask(const ColumnLight* before, const ColumnLight& after) noexcept {
+	constexpr std::uint16_t ALL = 0x1FF;
+	if (!before)
+		return ALL;
+	const auto bit = [](const int dx, const int dz) { return static_cast<std::uint16_t>(1u << ((dz + 1) * 3 + (dx + 1))); };
+	std::uint16_t mask = 0;
+	for (std::size_t s = 0; s < before->_sections.size() && mask != ALL; ++s) {
+		const ColumnLight::Section& a = before->_sections[s];
+		const ColumnLight::Section& b = after._sections[s];
+		if (!a.values && !b.values) {
+			if (a.uniform != b.uniform)
+				return ALL;                                   // every cell, so every border
+			continue;
+		}
+		if (a.values && b.values && std::memcmp(a.values->data(), b.values->data(), a.values->size()) == 0)
+			continue;
+		for (std::size_t i = 0; i < ChunkSection::BLOCK_COUNT; ++i) {   // i = x + (z << 4) + (y << 8)
+			const std::uint8_t va = a.values ? (*a.values)[i] : a.uniform;
+			const std::uint8_t vb = b.values ? (*b.values)[i] : b.uniform;
+			if (va == vb)
+				continue;
+			const int x = static_cast<int>(i & 15), z = static_cast<int>((i >> 4) & 15);
+			const int dx = x == 0 ? -1 : (x == ChunkSection::SIZE - 1 ? 1 : 0);
+			const int dz = z == 0 ? -1 : (z == ChunkSection::SIZE - 1 ? 1 : 0);
+			mask |= bit(0, 0) | bit(dx, 0) | bit(0, dz) | bit(dx, dz);
+		}
+	}
+	return mask;
+}
