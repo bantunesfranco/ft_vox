@@ -94,11 +94,15 @@ void GameServer::run() {
 		return;
 	_transport->run();
 	saveAllAndWait();
+	saveTimeOfDay();
+	log("saved, stopped");
+}
+
+void GameServer::saveTimeOfDay() {
 	_world.timeOfDay = _timeOfDay;
 	std::string error;
 	if (!markPlayed(_world, error))
 		log("could not save the time of day: %s", error.c_str());
-	log("saved, stopped");
 }
 
 void GameServer::saveColumn(ColumnPtr column) {
@@ -380,10 +384,12 @@ void GameServer::onTick(const std::uint64_t tick) {
 				sendTimeTo(id);
 	if (tick % kEvictEveryTicks == 0)
 		evictColumns();
-	if (tick % kSavePlayersTicks == 0)
+	if (tick % kSavePlayersTicks == 0) {
 		for (const auto& p : _players | std::views::values)
 			if (p.spawned)
 				savePlayer(p);
+		saveTimeOfDay();                   // a crash loses at most this much of the clock
+	}
 }
 
 void GameServer::spawnWaitingPlayers() {

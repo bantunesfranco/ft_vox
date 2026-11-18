@@ -104,8 +104,11 @@ class App : public Engine
 		std::array<float, 4> clearColor{0.075f, 0.33f, 0.61f, 1.0f};
 		glm::vec4 fluidFog{0.0f};
 		// Time of day (TimeOfDay ticks, fractional): loaded with a world,
-		// advanced while it is played, saved in its level.bin when left.
+		// advanced while it is played, saved in its level.bin when left and
+		// every LocalSession::SAVE_INTERVAL of play (with the player).
 		double timeTicks = TimeOfDay::NEW_WORLD;
+		float  sinceTimeSaved = 0.0f;
+		void   saveTimeOfDay();                     // into playingWorld's level.bin
 		std::optional<WorldInfo> playingWorld;      // the singleplayer world being played          // fog of the block the eye is in (rgb, w = distance; 0 = none)
 		bool hasHighlightedBlock = false;
 		glm::ivec3 highlightedBlockPos{};

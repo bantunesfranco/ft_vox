@@ -139,6 +139,7 @@ private:
 	void onColumnGenerated(const ChunkCoord& coord, ColumnPtr column, bool generated);
 	void saveColumn(ColumnPtr column);             // on the pool; counted in _savesInFlight
 	void saveAllAndWait();
+	void saveTimeOfDay();          // level.bin: on stop and every kSavePlayersTicks
 	void savePlayer(const Player& p);              // a copy, on the pool; counted in _savesInFlight
 	void waitForPlayerSave(const std::string& name);   // until no save of that file is in flight
 	ChunkColumn* columnAt(const glm::ivec3& pos, glm::ivec3& local);

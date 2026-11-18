@@ -119,6 +119,7 @@ bool App::startSingleplayer(const WorldInfo& info) {
 	resetPlayerState();
 	playingWorld = played;
 	timeTicks = played.timeOfDay;
+	sinceTimeSaved = 0.0f;
 	lastSessionError.clear();
 	worldLock = std::move(lock);
 	regionStore = std::make_shared<RegionStore>(info.folder / "region");
@@ -208,13 +209,20 @@ void App::resetPlayerState() {
 	fluidFog = glm::vec4(0.0f);
 }
 
+void App::saveTimeOfDay() {
+	if (!playingWorld)
+		return;
+	sinceTimeSaved = 0.0f;
+	playingWorld->timeOfDay = static_cast<std::uint32_t>(timeTicks) % TimeOfDay::TICKS_PER_DAY;
+	std::string error;
+	if (!markPlayed(*playingWorld, error))
+		std::cerr << "Could not save the time of " << playingWorld->name << ": " << error << '\n';
+}
+
 void App::endSession() {
 	session.reset();              // disconnects first...
 	if (playingWorld) {
-		playingWorld->timeOfDay = static_cast<std::uint32_t>(timeTicks) % TimeOfDay::TICKS_PER_DAY;
-		std::string error;
-		if (!markPlayed(*playingWorld, error))
-			std::cerr << "Could not save the time of " << playingWorld->name << ": " << error << '\n';
+		saveTimeOfDay();
 		playingWorld.reset();
 	}
 	if (regionStore) {
@@ -379,6 +387,10 @@ void App::simulate() {
 			updatePlayerMovement(inGame && !ui->wantsKeyboardCapture());
 			timeTicks = std::fmod(timeTicks + FPSCounter::getDeltaTime() * TimeOfDay::TICKS_PER_SECOND,
 			                      static_cast<double>(TimeOfDay::TICKS_PER_DAY));
+			// A crash loses at most this much of the clock (as of the player).
+			sinceTimeSaved += static_cast<float>(FPSCounter::getDeltaTime());
+			if (playingWorld && sinceTimeSaved >= LocalSession::SAVE_INTERVAL)
+				saveTimeOfDay();
 		}
 		session->onLocalPlayerMoved(camera->pos, camera->yaw, camera->pitch);
 	}
