@@ -33,7 +33,10 @@ class App : public Engine
 
 		void	run() override;
 		// ft_vox --bench: scripted singleplayer flight with a timing report.
-		void	enableBenchmark(double seconds, glm::vec2 startXZ = {8.0f, 8.0f}, std::uint32_t ticks = 6000);
+		// `edits` (--bench-edits): hovers at spawn instead, placing and breaking
+		// torches nearby, so the report shows what edits cost.
+		void	enableBenchmark(double seconds, glm::vec2 startXZ = {8.0f, 8.0f}, std::uint32_t ticks = 6000,
+		                        bool edits = false);
 
 		void	terminate() override;
 		void	destroyBlock();
@@ -123,6 +126,7 @@ class App : public Engine
 		static constexpr double BENCH_WARMUP = 8.0;     // seconds, not recorded
 		static constexpr double BENCH_SPEED  = 20.0;    // blocks per second
 		static constexpr std::uint64_t BENCH_SEED = 20261116;   // fixed: runs stay comparable
+		static constexpr double BENCH_EDIT_INTERVAL = 0.25;     // seconds between two edits (--bench-edits)
 		struct BenchmarkState {
 			bool   active    = false;
 			bool   recording = false;
@@ -132,7 +136,11 @@ class App : public Engine
 			glm::vec2 startXZ{8.0f, 8.0f};
 			float  height    = 110.0f;   // eye height of the flight
 			std::uint32_t ticks = 6000;  // fixed time of day (noon): runs stay comparable
+			bool   edits     = false;    // hover and edit instead of flying
+			int    editsDone = 0;
+			BlockId replaced = AIR_BLOCK;   // what the torch being shown replaced
 		} bench;
+		void	runBenchmarkEdit(double t);
 		FrameProfiler profiler;
 		std::size_t   drawCalls = 0;   // meshes drawn this frame (in 2 multi-draw calls)
 

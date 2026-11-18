@@ -1,6 +1,7 @@
 #include "App.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -521,6 +522,8 @@ void App::run() {
     }
 	if (bench.active) {
 		profiler.report();
+		if (bench.edits)
+			std::printf("edits: %d\n", bench.editsDone);
 		printBenchmarkMemory();
 		if (Trace::instance().write("bench_trace.json"))
 			std::printf("trace written to bench_trace.json (open it in ui.perfetto.dev)\n");
@@ -659,9 +662,13 @@ void App::collectNameTags(UiFrameModel& model) const {
 //  runs are comparable: BENCH_WARMUP seconds hovering and turning at spawn
 //  (terrain streams in, not recorded), then flying +X at BENCH_SPEED while
 //  turning (recorded: streaming, meshing and drawing all at once).
+//  --bench-edits records hovering at the warm-up pose instead, a torch placed
+//  or removed near spawn every BENCH_EDIT_INTERVAL: relighting and remeshing.
 // ============================================================================
 
-void App::enableBenchmark(const double seconds, const glm::vec2 startXZ, const std::uint32_t ticks) {
+void App::enableBenchmark(const double seconds, const glm::vec2 startXZ, const std::uint32_t ticks,
+                          const bool edits) {
+	bench.edits = edits;
 	bench.startXZ = startXZ;
 	bench.ticks = ticks % TimeOfDay::TICKS_PER_DAY;
 	bench.active   = true;
@@ -713,6 +720,10 @@ void App::runBenchmarkScript() {
 	bench.recording = t >= BENCH_WARMUP;
 	Trace::instance().setRecording(bench.recording);
 
+	if (bench.edits && bench.recording) {
+		runBenchmarkEdit(t);
+		return;                                // the camera stays at the warm-up pose
+	}
 	const double flying = std::max(0.0, t - BENCH_WARMUP);
 	camera->pos   = glm::vec3(bench.startXZ.x + static_cast<float>(flying * BENCH_SPEED), bench.height, bench.startXZ.y);
 	// Turning (a full turn every ~14 s), except during the last second of the
@@ -721,6 +732,30 @@ void App::runBenchmarkScript() {
 	camera->yaw   = static_cast<float>(turning * 25.0);
 	camera->pitch = -20.0f;
 	camera->dir   = lookDirection(camera->yaw, camera->pitch);
+}
+
+// Edit n (n = 0, 1, ...) at spot n / 2: even n places a torch on the ground,
+// odd n puts back the block it replaced. The spots cover a column centre, a
+// column corner and both sides of a column border.
+void App::runBenchmarkEdit(const double t) {
+	const int due = static_cast<int>((t - BENCH_WARMUP) / BENCH_EDIT_INTERVAL);
+	if (bench.editsDone > due)
+		return;
+	static constexpr std::array<glm::ivec2, 4> SPOTS{{{8, 8}, {15, 15}, {0, 8}, {24, 20}}};
+	const glm::ivec2 spot = SPOTS[static_cast<std::size_t>(bench.editsDone / 2) % SPOTS.size()]
+		+ glm::ivec2(static_cast<int>(bench.startXZ.x) - 8, static_cast<int>(bench.startXZ.y) - 8);
+	int ground = 0;
+	if (world.getSurfaceHeight(spot.x, spot.y, ground)) {
+		const glm::ivec3 cell{spot.x, ground + 1, spot.y};
+		if (bench.editsDone % 2 == 0) {
+			if (!world.getBlockAt(cell, bench.replaced))
+				bench.replaced = AIR_BLOCK;
+			(void)world.setBlockAt(cell, toBlockId(BlockType::Torch));
+		} else {
+			(void)world.setBlockAt(cell, bench.replaced);
+		}
+	}
+	++bench.editsDone;
 }
 
 void App::saveScreenshot(const char* path) const {
