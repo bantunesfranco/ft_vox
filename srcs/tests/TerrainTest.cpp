@@ -282,6 +282,9 @@ SELFTEST(Terrain, taiga_has_snow) {
 			++columns;
 			for (int lz = 0; lz < 16; ++lz)
 				for (int lx = 0; lx < 16; ++lx) {
+					// Only taiga tops: a neighbouring snowy plains would count too.
+					if (gen.biomeAt((x >> 4) * 16 + lx, (z >> 4) * 16 + lz) != Biome::Taiga)
+						continue;
 					++tops;
 					snowy += topBlock(*column, lx, lz) == snow ? 1 : 0;
 				}
